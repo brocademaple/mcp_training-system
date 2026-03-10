@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:14
+    container_name: postgres-mcp-training
+    environment:
+      POSTGRES_DB: mcp_training
+      POSTGRES_USER: mcp_user
+      POSTGRES_PASSWORD: mcp_password
+    ports:
+      - "5433:5432"   # 宿主机 5433 → 容器 5432，避免与本机 Postgres 冲突
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+
+  redis:
+    image: redis:7.0
+    container_name: redis-mcp-training
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: always
+    command: redis-server --appendonly yes
+
+volumes:
+  postgres_data:
+  redis_data:

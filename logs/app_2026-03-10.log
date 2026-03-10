@@ -1,0 +1,21 @@
+[INFO] 2026/03/10 13:20:32 main.go:28: Starting MCP Training System...
+[INFO] 2026/03/10 13:23:03 main.go:28: Starting MCP Training System...
+[INFO] 2026/03/10 13:34:34 main.go:28: Starting MCP Training System...
+[INFO] 2026/03/10 13:36:24 main.go:28: Starting MCP Training System...
+[INFO] 2026/03/10 13:55:55 main.go:28: Starting MCP Training System...
+[INFO] 2026/03/10 13:55:55 main.go:42: Connected to PostgreSQL
+[INFO] 2026/03/10 13:55:55 main.go:54: Connected to Redis
+[INFO] 2026/03/10 13:55:55 main.go:63: Agents initialized
+[INFO] 2026/03/10 13:55:55 main.go:71: Handlers initialized
+[INFO] 2026/03/10 13:55:55 main.go:109: Routes configured
+[INFO] 2026/03/10 13:55:55 main.go:113: Server starting on 0.0.0.0:8080
+[INFO] 2026/03/10 17:07:49 dataset_handler.go:126: Importing dataset from URL: https://huggingface.co/datasets/lhoestq/demo1/resolve/main/data/train.csv
+[INFO] 2026/03/10 17:35:03 main.go:28: Starting MCP Training System...
+[INFO] 2026/03/10 17:35:03 main.go:42: Connected to PostgreSQL
+[INFO] 2026/03/10 17:35:03 main.go:54: Connected to Redis
+[INFO] 2026/03/10 17:35:03 main.go:63: Agents initialized
+[INFO] 2026/03/10 17:35:03 main.go:71: Handlers initialized
+[INFO] 2026/03/10 17:35:03 main.go:110: Routes configured
+[INFO] 2026/03/10 17:35:03 main.go:114: Server starting on 0.0.0.0:8080
+[INFO] 2026/03/10 17:35:19 dataset_handler.go:56: Uploading dataset: alpaca_data_zh_51k.json, size: 18671162 bytes
+[INFO] 2026/03/10 17:41:16 dataset_handler.go:56: Uploading dataset: alpaca_data_zh_51k.json, size: 18671162 bytes
