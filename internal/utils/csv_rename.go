@@ -3,6 +3,7 @@ package utils
 import (
 	"encoding/csv"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -21,35 +22,72 @@ func RenameCSVColumns(filePath string, columnMap map[string]string) error {
 	defer f.Close()
 
 	r := csv.NewReader(f)
-	rows, err := r.ReadAll()
+	// 容错：部分公开数据集 CSV 可能包含不规范的引号，默认解析会报
+	// parse error on line X: bare " in non-quoted-field
+	// 这里允许 LazyQuotes，以提升在线导入成功率。
+	r.LazyQuotes = true
+	r.FieldsPerRecord = -1
+
+	// Read header only
+	header, err := r.Read()
 	if err != nil {
+		// 空文件 / 无内容
+		if err == io.EOF {
+			return nil
+		}
 		return err
 	}
-	f.Close()
 
-	if len(rows) == 0 {
-		return nil
-	}
-
-	header := rows[0]
 	for i, name := range header {
 		if newName, ok := columnMap[name]; ok {
 			header[i] = newName
 		}
 	}
-	rows[0] = header
 
-	out, err := os.Create(filePath)
+	// Write to temp file then replace (avoid loading entire CSV in memory)
+	dir := filepath.Dir(filePath)
+	tmp, err := os.CreateTemp(dir, "renamed_*.csv")
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	tmpPath := tmp.Name()
+	defer func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+	}()
 
-	w := csv.NewWriter(out)
-	if err := w.WriteAll(rows); err != nil {
+	w := csv.NewWriter(tmp)
+	if err := w.Write(header); err != nil {
 		return err
 	}
-	return w.Error()
+	for {
+		rec, err := r.Read()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return err
+		}
+		if err := w.Write(rec); err != nil {
+			return err
+		}
+	}
+	w.Flush()
+	if err := w.Error(); err != nil {
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+
+	// Replace original file
+	if err := os.Rename(tmpPath, filePath); err != nil {
+		return err
+	}
+	return nil
 }
 
 const DefaultPreviewRows = 100
@@ -67,6 +105,8 @@ func ReadCSVPreview(filePath string, limit int) (columns []string, rows []map[st
 	defer f.Close()
 
 	r := csv.NewReader(f)
+	r.LazyQuotes = true
+	r.FieldsPerRecord = -1
 	all, err := r.ReadAll()
 	if err != nil {
 		return nil, nil, err

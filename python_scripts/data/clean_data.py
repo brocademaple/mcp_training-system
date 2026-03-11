@@ -9,6 +9,19 @@ import json
 import pandas as pd
 
 
+def _read_csv_with_encoding(file_path):
+    """Try multiple encodings for CSV (handles Chinese and BOM)."""
+    for encoding in ('utf-8', 'utf-8-sig', 'gbk', 'gb18030', 'latin1'):
+        try:
+            return pd.read_csv(file_path, encoding=encoding)
+        except (UnicodeDecodeError, UnicodeError):
+            continue
+    raise ValueError(
+        "Could not decode CSV with utf-8, utf-8-sig, gbk, gb18030, or latin1. "
+        "Please ensure the file is a valid CSV with one of these encodings."
+    )
+
+
 def clean_data(file_path):
     """Clean data by removing duplicates and missing values"""
     try:
@@ -17,7 +30,7 @@ def clean_data(file_path):
             df = pd.read_json(file_path)
             output_path = file_path.replace('.json', '_cleaned.csv')
         else:
-            df = pd.read_csv(file_path)
+            df = _read_csv_with_encoding(file_path)
             output_path = file_path.replace('.csv', '_cleaned.csv')
 
         original_rows = len(df)
@@ -28,8 +41,8 @@ def clean_data(file_path):
         # Remove missing values
         df = df.dropna()
 
-        # Save as CSV
-        df.to_csv(output_path, index=False)
+        # Save as CSV (UTF-8 for consistency)
+        df.to_csv(output_path, index=False, encoding='utf-8')
 
         # Return success result
         result = {

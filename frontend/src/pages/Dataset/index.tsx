@@ -1,32 +1,50 @@
 import React, { useEffect, useState } from 'react';
-import { Card, Table, Button, Upload, Modal, Form, Input, Select, message, Tag, List, Typography } from 'antd';
-import { UploadOutlined, ReloadOutlined, LinkOutlined, CloudDownloadOutlined, TableOutlined } from '@ant-design/icons';
+import { Card, Table, Button, Upload, Modal, Form, Input, Select, message, Tag, List, Typography, Popconfirm, Tooltip } from 'antd';
+import { UploadOutlined, ReloadOutlined, LinkOutlined, CloudDownloadOutlined, TableOutlined, DeleteOutlined, SyncOutlined } from '@ant-design/icons';
 import type { UploadFile } from 'antd/es/upload/interface';
 import { datasetService } from '@/services/dataset';
 import type { Dataset } from '@/types';
 
-// 在线数据集预设（Hugging Face / GitHub 等），导入后可直接用于文本分类训练（需含 text、label 列）
+// 在线数据集预设：国内加速优先（ghproxy / 直连），可直接用于文本分类（需含 text、label 列或通过 column_map 映射）
 const ONLINE_DATASETS = [
+  // ---------- 国内可访问（GitHub 加速或直连） ----------
+  {
+    id: 'chn-senticorp-ghproxy',
+    name: 'ChnSentiCorp 酒店评论情感（国内加速）',
+    description: '中文酒店评论二分类情感数据，经 ghproxy 加速拉取 GitHub 源，含 label、review；导入时自动将 review 映射为 text。',
+    url: 'https://ghproxy.com/https://raw.githubusercontent.com/SophonPlus/ChineseNlpCorpus/master/datasets/ChnSentiCorp_htl_all/ChnSentiCorp_htl_all.csv',
+    source: 'GitHub 国内加速',
+    column_map: { review: 'text' } as Record<string, string>,
+  },
+  {
+    id: 'chn-senticorp-github',
+    name: 'ChnSentiCorp 酒店评论情感（GitHub 直连）',
+    description: '同上数据集，GitHub raw 直连。若上一项失败可试此条（需网络可访问 GitHub）。',
+    url: 'https://raw.githubusercontent.com/SophonPlus/ChineseNlpCorpus/master/datasets/ChnSentiCorp_htl_all/ChnSentiCorp_htl_all.csv',
+    source: 'GitHub',
+    column_map: { review: 'text' } as Record<string, string>,
+  },
+  {
+    id: 'hf-mirror-demo',
+    name: 'HF 示例 CSV（国内镜像 hf-mirror）',
+    description: 'Hugging Face 示例数据集通过国内镜像 hf-mirror.com 拉取，适合测试导入。若 404 可改用下方「从 URL 导入」手动粘贴直链。',
+    url: 'https://hf-mirror.com/datasets/lhoestq/demo1/resolve/main/data/train.csv',
+    source: 'hf-mirror 国内镜像',
+    column_map: undefined,
+  },
+  // ---------- 国外源（可能需代理） ----------
   {
     id: 'twitter-sentiment',
-    name: 'Twitter 情感分析',
-    description: 'Twitter 推文二分类情感数据，含 id、label、tweet；导入时自动将 tweet 映射为 text，适用于 BERT 文本分类。',
+    name: 'Twitter 情感分析（GitHub）',
+    description: 'Twitter 推文二分类情感数据，含 id、label、tweet；导入时自动将 tweet 映射为 text。',
     url: 'https://raw.githubusercontent.com/dD2405/Twitter_Sentiment_Analysis/master/train.csv',
     source: 'GitHub',
     column_map: { tweet: 'text' } as Record<string, string>,
   },
   {
-    id: 'gntd-sentiment',
-    name: 'GNTD 多领域情感',
-    description: '多领域情感数据（金融、能源、贸易等），CSV 格式。若列名非 text/label，导入后可在本地调整列名再用于训练。',
-    url: 'https://raw.githubusercontent.com/kruthof/kruthof.github.io/master/assets/data/gntd/GNTD_Sentiment.csv',
-    source: 'GitHub',
-    column_map: undefined,
-  },
-  {
     id: 'huggingface-demo',
     name: 'Hugging Face 示例 CSV',
-    description: 'Hugging Face 官方示例数据集（lhoestq/demo1）的 train.csv，可用于测试导入。训练需 CSV 含 text、label 列。',
+    description: 'Hugging Face 官方示例 train.csv。国外源，网络不佳时可试上方 hf-mirror 或 ghproxy。',
     url: 'https://huggingface.co/datasets/lhoestq/demo1/resolve/main/data/train.csv',
     source: 'Hugging Face',
     column_map: undefined,
@@ -44,6 +62,8 @@ const DatasetManagement: React.FC = () => {
   const [previewData, setPreviewData] = useState<{ columns: string[]; rows: Record<string, string>[]; name: string } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [fileList, setFileList] = useState<UploadFile[]>([]);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [form] = Form.useForm();
   const [urlForm] = Form.useForm();
 
@@ -51,12 +71,15 @@ const DatasetManagement: React.FC = () => {
     fetchDatasets();
   }, []);
 
-  const fetchDatasets = async () => {
+  const fetchDatasets = async (showSuccess = false) => {
     setLoading(true);
     try {
       const response = await datasetService.getDatasets();
       if (response.code === 200 && response.data) {
         setDatasets(response.data.datasets || []);
+        if (showSuccess) {
+          message.success('已刷新，已获取当前列表所有数据集的最新状态');
+        }
       }
     } catch (error: any) {
       message.error(error.message || '获取数据集列表失败');
@@ -143,12 +166,50 @@ const DatasetManagement: React.FC = () => {
     }
   };
 
+  const handleDelete = async (record: Dataset) => {
+    try {
+      await datasetService.deleteDataset(record.id);
+      message.success('已删除');
+      fetchDatasets();
+    } catch (e: any) {
+      message.error(e.message || '删除失败');
+    }
+  };
+
+  const handleRetryClean = async (record: Dataset) => {
+    try {
+      await datasetService.retryClean(record.id);
+      message.success('已提交重试清洗，请稍后刷新查看状态');
+      setTimeout(fetchDatasets, 2000);
+    } catch (e: any) {
+      message.error(e.message || '重试失败');
+    }
+  };
+
+  // 从 API 返回的 file_size 可能是 number 或 Go NullInt64 序列化的 { Int64, Valid }
+  const getFileSizeNum = (raw: unknown): number | null => {
+    if (raw == null) return null;
+    if (typeof raw === 'number' && !Number.isNaN(raw)) return raw;
+    if (typeof raw === 'object' && raw !== null && 'Int64' in (raw as object))
+      return (raw as { Int64: number }).Int64;
+    return null;
+  };
+
+  // 从 API 返回的 error_message 可能是 string 或 Go NullString 序列化的 { String, Valid }
+  const getErrorMessage = (raw: unknown): string | null => {
+    if (raw == null) return null;
+    if (typeof raw === 'string') return raw;
+    if (typeof raw === 'object' && raw !== null && 'String' in (raw as object))
+      return (raw as { String: string }).String || null;
+    return null;
+  };
+
   const columns = [
     {
-      title: 'ID',
-      dataIndex: 'id',
-      key: 'id',
-      width: 80,
+      title: '序号',
+      key: 'order',
+      width: 72,
+      render: (_: unknown, __: Dataset, index: number) => (page - 1) * pageSize + index + 1,
     },
     {
       title: '数据集名称',
@@ -159,74 +220,126 @@ const DatasetManagement: React.FC = () => {
       title: '类型',
       dataIndex: 'type',
       key: 'type',
-      width: 80,
+      width: 88,
     },
     {
-      title: '来源',
-      dataIndex: 'source',
-      key: 'source',
-      width: 120,
-      render: (source: string) =>
-        !source || source === 'local' ? '本地上传' : (source.length > 24 ? source.slice(0, 24) + '…' : source),
-    },
-    {
-      title: '状态',
+      title: '处理状态',
       dataIndex: 'status',
       key: 'status',
-      width: 120,
-      render: (status: string) => {
-        const colorMap: Record<string, string> = {
-          ready: 'success',
-          processing: 'processing',
-          uploading: 'default',
-          error: 'error',
+      width: 140,
+      render: (status: string, record: Dataset) => {
+        const statusConfig: Record<
+          string,
+          { label: string; color: string; tip: string }
+        > = {
+          uploading: {
+            label: '已上传，待清洗',
+            color: 'default',
+            tip: '文件已保存，CSV 将自动进入清洗，JSON 会直接可用。',
+          },
+          processing: {
+            label: '清洗中',
+            color: 'processing',
+            tip: '正在去重、去空等处理，完成后即可用于训练。',
+          },
+          ready: {
+            label: '清洗完成',
+            color: 'success',
+            tip: '数据已就绪，可在「训练任务」中选择该数据集创建训练。',
+          },
+          error: {
+            label: '清洗失败',
+            color: 'error',
+            tip: '处理出错，可查看原因后重试清洗或重新上传。',
+          },
         };
-        return <Tag color={colorMap[status]}>{status}</Tag>;
+        const config = statusConfig[status] || {
+          label: status,
+          color: 'default',
+          tip: '',
+        };
+        const tag = (
+          <Tag color={config.color}>{config.label}</Tag>
+        );
+        const errMsg = getErrorMessage(record.error_message);
+        const canTrain = status === 'ready';
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {status === 'error' && errMsg ? (
+              <Tooltip title={errMsg} placement="topLeft">
+                <span>{tag}</span>
+              </Tooltip>
+            ) : (
+              <Tooltip title={config.tip} placement="topLeft">
+                <span>{tag}</span>
+              </Tooltip>
+            )}
+            <span
+              style={{
+                fontSize: 12,
+                color: canTrain ? '#52c41a' : '#999',
+              }}
+            >
+              {canTrain ? '✓ 可训练' : '不可训练'}
+            </span>
+          </div>
+        );
       },
-    },
-    {
-      title: '行数',
-      dataIndex: 'row_count',
-      key: 'row_count',
-      width: 100,
-    },
-    {
-      title: '列数',
-      dataIndex: 'column_count',
-      key: 'column_count',
-      width: 100,
     },
     {
       title: '文件大小',
       dataIndex: 'file_size',
       key: 'file_size',
-      width: 120,
-      render: (size: number) => {
-        if (!size) return '-';
-        return `${(size / 1024 / 1024).toFixed(2)} MB`;
+      width: 100,
+      render: (size: unknown) => {
+        const num = getFileSizeNum(size);
+        if (num == null || num === 0) return '-';
+        if (num < 1024) return `${num} B`;
+        if (num < 1024 * 1024) return `${(num / 1024).toFixed(2)} KB`;
+        return `${(num / 1024 / 1024).toFixed(2)} MB`;
       },
     },
     {
       title: '创建时间',
       dataIndex: 'created_at',
       key: 'created_at',
-      width: 180,
-      render: (text: string) => new Date(text).toLocaleString('zh-CN'),
+      width: 172,
+      render: (text: string) => (text ? new Date(text).toLocaleString('zh-CN') : '-'),
     },
     {
       title: '操作',
       key: 'action',
-      width: 120,
+      width: 200,
       fixed: 'right' as const,
       render: (_: unknown, record: Dataset) => (
-        <Button
-          type="link"
-          size="small"
-          icon={<TableOutlined />}
-          onClick={() => handleViewData(record)}
-        >
-          查看数据
-        </Button>
+        <>
+          <Button
+            type="link"
+            size="small"
+            icon={<TableOutlined />}
+            onClick={() => handleViewData(record)}
+          >
+            预览数据集
+          </Button>
+          {record.status === 'error' && (
+            <Button
+              type="link"
+              size="small"
+              icon={<SyncOutlined />}
+              onClick={() => handleRetryClean(record)}
+            >
+              重试清洗
+            </Button>
+          )}
+          <Popconfirm
+            title="确定删除该数据集？"
+            onConfirm={() => handleDelete(record)}
+          >
+            <Button type="link" size="small" danger icon={<DeleteOutlined />}>
+              删除数据集
+            </Button>
+          </Popconfirm>
+        </>
       ),
     },
   ];
@@ -239,7 +352,7 @@ const DatasetManagement: React.FC = () => {
           <div>
             <Button
               icon={<ReloadOutlined />}
-              onClick={fetchDatasets}
+              onClick={() => fetchDatasets(true)}
               style={{ marginRight: 8 }}
             >
               刷新
@@ -268,12 +381,26 @@ const DatasetManagement: React.FC = () => {
           </div>
         }
       >
+        <div style={{ marginBottom: 12, color: '#666', fontSize: 13 }}>
+          <Typography.Text type="secondary">
+            说明：仅「<strong>清洗完成</strong>」的数据集可用于创建训练任务；上传后 CSV 会先自动清洗，JSON 会直接标记为可训练。
+          </Typography.Text>
+        </div>
         <Table
           columns={columns}
           dataSource={datasets}
           rowKey="id"
           loading={loading}
-          pagination={{ pageSize: 10 }}
+          pagination={{
+            current: page,
+            pageSize,
+            showSizeChanger: true,
+            showTotal: (t) => `共 ${t} 条`,
+            onChange: (p, size) => {
+              setPage(p);
+              setPageSize(size || 10);
+            },
+          }}
         />
       </Card>
 
@@ -290,6 +417,25 @@ const DatasetManagement: React.FC = () => {
         cancelText="取消"
       >
         <Form form={form} layout="vertical" onFinish={handleUpload}>
+          <Form.Item label="选择文件" required>
+            <Upload
+              beforeUpload={() => false}
+              fileList={fileList}
+              onChange={({ fileList: newList }) => {
+                setFileList(newList);
+                const file = newList[0]?.originFileObj as File | undefined;
+                if (file && !form.getFieldValue('name')) {
+                  const base = file.name.replace(/\.[^/.]+$/, '');
+                  form.setFieldsValue({ name: base });
+                }
+              }}
+              maxCount={1}
+              accept=".csv,.json"
+            >
+              <Button icon={<UploadOutlined />}>选择文件（CSV / JSON）</Button>
+            </Upload>
+          </Form.Item>
+
           <Form.Item
             name="name"
             label="数据集名称"
@@ -308,25 +454,6 @@ const DatasetManagement: React.FC = () => {
               <Select.Option value="instruction">指令/对话（JSON）</Select.Option>
               <Select.Option value="image">图像</Select.Option>
             </Select>
-          </Form.Item>
-
-          <Form.Item label="选择文件">
-            <Upload
-              beforeUpload={() => false}
-              fileList={fileList}
-              onChange={({ fileList: newList }) => {
-                setFileList(newList);
-                const file = newList[0]?.originFileObj as File | undefined;
-                if (file && !form.getFieldValue('name')) {
-                  const base = file.name.replace(/\.[^/.]+$/, '');
-                  form.setFieldsValue({ name: base });
-                }
-              }}
-              maxCount={1}
-              accept=".csv,.json"
-            >
-              <Button icon={<UploadOutlined />}>选择文件（CSV / JSON）</Button>
-            </Upload>
           </Form.Item>
         </Form>
       </Modal>
@@ -377,24 +504,42 @@ const DatasetManagement: React.FC = () => {
         onCancel={() => { setPreviewModalVisible(false); setPreviewData(null); }}
         footer={null}
         width="90%"
-        style={{ top: 24 }}
+        style={{ top: 24, maxWidth: '95vw' }}
         destroyOnClose
       >
         {previewLoading && <div style={{ padding: 24, textAlign: 'center' }}>加载中...</div>}
         {!previewLoading && previewData && (
-          <Table
-            size="small"
-            scroll={{ x: 'max-content' }}
-            columns={previewData.columns.map((col) => ({
-              title: col,
-              dataIndex: col,
-              key: col,
-              ellipsis: true,
-              width: col === 'text' || col === 'tweet' ? 280 : undefined,
-            }))}
-            dataSource={previewData.rows.map((row, idx) => ({ ...row, key: idx }))}
-            pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
-          />
+          <div style={{ overflow: 'auto', maxWidth: '100%' }}>
+            <Table
+              size="small"
+              scroll={{ y: 420 }}
+              columns={previewData.columns.map((col) => {
+                const isLabel = col.toLowerCase() === 'label';
+                return {
+                  title: isLabel ? '情感' : col,
+                  dataIndex: col,
+                  key: col,
+                  ellipsis: false,
+                  width: isLabel ? 80 : undefined,
+                  render: (val: unknown) => {
+                    if (isLabel && val != null) {
+                      const s = String(val).trim();
+                      if (s === '0') return <span style={{ color: '#cf1322' }}>负面</span>;
+                      if (s === '1') return <span style={{ color: '#389e0d' }}>正面</span>;
+                      if (s === '2') return <span style={{ color: '#d46b08' }}>中性</span>;
+                    }
+                    return (
+                      <span style={{ wordBreak: 'break-word', whiteSpace: 'normal', display: 'block', maxWidth: '100%' }}>
+                        {val != null ? String(val) : ''}
+                      </span>
+                    );
+                  },
+                };
+              })}
+              dataSource={previewData.rows.map((row, idx) => ({ ...row, key: idx }))}
+              pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
+            />
+          </div>
         )}
         {!previewLoading && !previewData && previewModalVisible && (
           <div style={{ padding: 24, textAlign: 'center', color: '#999' }}>暂无数据</div>

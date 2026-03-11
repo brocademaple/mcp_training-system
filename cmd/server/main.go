@@ -84,12 +84,17 @@ func main() {
 		api.GET("/datasets", datasetHandler.GetDatasets)
 		api.GET("/datasets/:id", datasetHandler.GetDatasetDetail)
 		api.GET("/datasets/:id/preview", datasetHandler.GetDatasetPreview)
+		api.POST("/datasets/:id/retry-clean", datasetHandler.RetryCleanDataset)
+		api.DELETE("/datasets/:id", datasetHandler.DeleteDataset)
 
 		// Training routes
 		api.POST("/training/jobs", trainingHandler.CreateJob)
 		api.GET("/training/jobs", trainingHandler.GetJobs)
 		api.GET("/training/jobs/:id/logs", trainingHandler.GetJobLogs)
 		api.GET("/training/jobs/:id", trainingHandler.GetJobStatus)
+		api.POST("/training/jobs/:id/restart", trainingHandler.RestartJob)
+		api.POST("/training/jobs/:id/cancel", trainingHandler.CancelJob)
+		api.DELETE("/training/jobs/:id", trainingHandler.DeleteJob)
 
 		// Evaluation routes
 		api.POST("/evaluations", evalHandler.CreateEvaluation)

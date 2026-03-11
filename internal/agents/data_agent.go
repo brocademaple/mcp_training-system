@@ -24,17 +24,21 @@ func NewDataAgent(db *sql.DB, executor *utils.PythonExecutor) *DataAgent {
 func (a *DataAgent) CleanData(datasetID int) error {
 	utils.Info("DataAgent: Starting data cleaning for dataset %d", datasetID)
 
-	// 1. Query database to get file path
-	var filePath string
+	// 1. Query database to get file path (may be NULL)
+	var pathVal sql.NullString
 	err := a.db.QueryRow(
 		"SELECT original_file_path FROM datasets WHERE id = $1",
 		datasetID,
-	).Scan(&filePath)
+	).Scan(&pathVal)
 	if err != nil {
 		utils.Error("DataAgent: Failed to query dataset: %v", err)
 		return fmt.Errorf("failed to query dataset: %v", err)
 	}
-
+	if !pathVal.Valid || pathVal.String == "" {
+		utils.Error("DataAgent: No original_file_path for dataset %d", datasetID)
+		return fmt.Errorf("dataset has no file path")
+	}
+	filePath := pathVal.String
 	utils.Info("DataAgent: Cleaning file: %s", filePath)
 
 	// 2. Call Python script
@@ -93,16 +97,20 @@ func (a *DataAgent) CleanData(datasetID int) error {
 func (a *DataAgent) AnalyzeData(datasetID int) (map[string]interface{}, error) {
 	utils.Info("DataAgent: Starting data analysis for dataset %d", datasetID)
 
-	// Query database to get cleaned file path
-	var filePath string
+	// Query database to get cleaned file path (may be NULL)
+	var pathVal sql.NullString
 	err := a.db.QueryRow(
 		"SELECT cleaned_file_path FROM datasets WHERE id = $1",
 		datasetID,
-	).Scan(&filePath)
+	).Scan(&pathVal)
 	if err != nil {
 		utils.Error("DataAgent: Failed to query dataset: %v", err)
 		return nil, fmt.Errorf("failed to query dataset: %v", err)
 	}
+	if !pathVal.Valid || pathVal.String == "" {
+		return nil, fmt.Errorf("dataset has no cleaned file path (not ready yet)")
+	}
+	filePath := pathVal.String
 
 	// Call Python script
 	result, err := a.executor.Execute("data/analyze_data.py", filePath)

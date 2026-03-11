@@ -11,13 +11,14 @@ type TrainingJob struct {
 	ID           int                    `json:"id"`
 	UserID       int                    `json:"user_id"`
 	DatasetID    int                    `json:"dataset_id"`
+	Name         string                 `json:"name"`
 	ModelType    string                 `json:"model_type"`
 	Hyperparams  map[string]interface{} `json:"hyperparams"`
 	Status       string                 `json:"status"`
 	Progress     int                    `json:"progress"`
 	CurrentEpoch int                    `json:"current_epoch"`
 	TotalEpochs  int                    `json:"total_epochs"`
-	ErrorMessage string                 `json:"error_message"`
+	ErrorMessage *string                `json:"error_message"` // NULL in DB when no error
 	CreatedAt    time.Time              `json:"created_at"`
 	StartedAt    *time.Time             `json:"started_at"`
 	CompletedAt  *time.Time             `json:"completed_at"`
@@ -33,14 +34,15 @@ func (j *TrainingJob) Create(db *sql.DB) error {
 	}
 
 	query := `
-		INSERT INTO training_jobs (user_id, dataset_id, model_type, hyperparams, status, total_epochs)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO training_jobs (user_id, dataset_id, name, model_type, hyperparams, status, total_epochs)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING id, created_at, updated_at
 	`
 	err = db.QueryRow(
 		query,
 		j.UserID,
 		j.DatasetID,
+		j.Name,
 		j.ModelType,
 		hyperparamsJSON,
 		j.Status,
@@ -54,9 +56,10 @@ func (j *TrainingJob) Create(db *sql.DB) error {
 func GetTrainingJobByID(db *sql.DB, id int) (*TrainingJob, error) {
 	job := &TrainingJob{}
 	var hyperparamsJSON []byte
+	var errMsg sql.NullString
 
 	query := `
-		SELECT id, user_id, dataset_id, model_type, hyperparams, status, progress,
+		SELECT id, user_id, dataset_id, name, model_type, hyperparams, status, progress,
 		       current_epoch, total_epochs, error_message, created_at, started_at,
 		       completed_at, updated_at
 		FROM training_jobs WHERE id = $1
@@ -65,13 +68,14 @@ func GetTrainingJobByID(db *sql.DB, id int) (*TrainingJob, error) {
 		&job.ID,
 		&job.UserID,
 		&job.DatasetID,
+		&job.Name,
 		&job.ModelType,
 		&hyperparamsJSON,
 		&job.Status,
 		&job.Progress,
 		&job.CurrentEpoch,
 		&job.TotalEpochs,
-		&job.ErrorMessage,
+		&errMsg,
 		&job.CreatedAt,
 		&job.StartedAt,
 		&job.CompletedAt,
@@ -79,6 +83,9 @@ func GetTrainingJobByID(db *sql.DB, id int) (*TrainingJob, error) {
 	)
 	if err != nil {
 		return nil, err
+	}
+	if errMsg.Valid {
+		job.ErrorMessage = &errMsg.String
 	}
 
 	// Parse hyperparams JSON
@@ -133,10 +140,28 @@ func SetTrainingJobCompleted(db *sql.DB, id int) error {
 	return err
 }
 
+// ResetJobForRestart 将已结束的任务重置为可重新训练：状态改为 queued，清空错误与进度，用于「重启训练」
+func ResetJobForRestart(db *sql.DB, id int) error {
+	query := `
+		UPDATE training_jobs
+		SET status = 'queued', error_message = NULL, progress = 0, current_epoch = 0,
+		    started_at = NULL, completed_at = NULL, updated_at = NOW()
+		WHERE id = $1
+	`
+	_, err := db.Exec(query, id)
+	return err
+}
+
+// DeleteTrainingJob 删除训练任务（关联的 training_logs、models 由外键 ON DELETE CASCADE 自动清理）
+func DeleteTrainingJob(db *sql.DB, id int) error {
+	_, err := db.Exec("DELETE FROM training_jobs WHERE id = $1", id)
+	return err
+}
+
 // GetTrainingJobsByUserID returns all training jobs for a user, newest first
 func GetTrainingJobsByUserID(db *sql.DB, userID int) ([]*TrainingJob, error) {
 	query := `
-		SELECT id, user_id, dataset_id, model_type, hyperparams, status, progress,
+		SELECT id, user_id, dataset_id, name, model_type, hyperparams, status, progress,
 		       current_epoch, total_epochs, error_message, created_at, started_at,
 		       completed_at, updated_at
 		FROM training_jobs
@@ -153,17 +178,19 @@ func GetTrainingJobsByUserID(db *sql.DB, userID int) ([]*TrainingJob, error) {
 	for rows.Next() {
 		job := &TrainingJob{}
 		var hyperparamsJSON []byte
+		var errMsg sql.NullString
 		err := rows.Scan(
 			&job.ID,
 			&job.UserID,
 			&job.DatasetID,
+			&job.Name,
 			&job.ModelType,
 			&hyperparamsJSON,
 			&job.Status,
 			&job.Progress,
 			&job.CurrentEpoch,
 			&job.TotalEpochs,
-			&job.ErrorMessage,
+			&errMsg,
 			&job.CreatedAt,
 			&job.StartedAt,
 			&job.CompletedAt,
@@ -171,6 +198,9 @@ func GetTrainingJobsByUserID(db *sql.DB, userID int) ([]*TrainingJob, error) {
 		)
 		if err != nil {
 			return nil, err
+		}
+		if errMsg.Valid {
+			job.ErrorMessage = &errMsg.String
 		}
 		if err := json.Unmarshal(hyperparamsJSON, &job.Hyperparams); err != nil {
 			return nil, err

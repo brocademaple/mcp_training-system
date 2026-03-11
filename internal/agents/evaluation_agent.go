@@ -36,26 +36,28 @@ func (a *EvaluationAgent) Evaluate(modelID int, testDatasetID int) error {
 		return fmt.Errorf("failed to get model: %v", err)
 	}
 
-	// 2. Get test dataset path
-	var testDataPath string
+	// 2. Get test dataset path (may be NULL)
+	var pathVal sql.NullString
 	if testDatasetID > 0 {
 		err = a.db.QueryRow(
 			"SELECT cleaned_file_path FROM datasets WHERE id = $1",
 			testDatasetID,
-		).Scan(&testDataPath)
+		).Scan(&pathVal)
 	} else {
-		// Use training dataset if no test dataset provided
 		err = a.db.QueryRow(`
 			SELECT d.cleaned_file_path FROM datasets d
 			JOIN training_jobs j ON j.dataset_id = d.id
 			WHERE j.id = $1
-		`, model.JobID).Scan(&testDataPath)
+		`, model.JobID).Scan(&pathVal)
 	}
-
 	if err != nil {
 		utils.Error("EvaluationAgent: Failed to get test data: %v", err)
 		return fmt.Errorf("failed to get test data: %v", err)
 	}
+	if !pathVal.Valid || pathVal.String == "" {
+		return fmt.Errorf("test dataset has no cleaned file path (not ready)")
+	}
+	testDataPath := pathVal.String
 
 	utils.Info("EvaluationAgent: Evaluating model at %s with data %s", model.ModelPath, testDataPath)
 

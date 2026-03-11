@@ -35,6 +35,16 @@ export const datasetService = {
     return api.get(`/datasets/${id}/preview`, { params });
   },
 
+  // Retry clean for dataset in error state
+  retryClean: async (id: number): Promise<ApiResponse<{ status: string }>> => {
+    return api.post(`/datasets/${id}/retry-clean`);
+  },
+
+  // Delete dataset by id
+  deleteDataset: async (id: number): Promise<ApiResponse> => {
+    return api.delete(`/datasets/${id}`);
+  },
+
   // Import dataset from URL (crawl/fetch CSV from link)
   importFromUrl: async (params: {
     name: string;

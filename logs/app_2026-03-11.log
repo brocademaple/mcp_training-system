@@ -1,0 +1,130 @@
+[INFO] 2026/03/11 13:27:40 main.go:28: Starting MCP Training System...
+[INFO] 2026/03/11 13:27:40 main.go:42: Connected to PostgreSQL
+[INFO] 2026/03/11 13:27:40 main.go:54: Connected to Redis
+[INFO] 2026/03/11 13:27:40 main.go:63: Agents initialized
+[INFO] 2026/03/11 13:27:40 main.go:71: Handlers initialized
+[INFO] 2026/03/11 13:27:40 main.go:112: Routes configured
+[INFO] 2026/03/11 13:27:40 main.go:116: Server starting on 0.0.0.0:8080
+[INFO] 2026/03/11 13:58:25 main.go:28: Starting MCP Training System...
+[INFO] 2026/03/11 13:58:25 main.go:42: Connected to PostgreSQL
+[INFO] 2026/03/11 13:58:25 main.go:54: Connected to Redis
+[INFO] 2026/03/11 13:58:25 main.go:63: Agents initialized
+[INFO] 2026/03/11 13:58:25 main.go:71: Handlers initialized
+[INFO] 2026/03/11 13:58:25 main.go:112: Routes configured
+[INFO] 2026/03/11 13:58:25 main.go:116: Server starting on 0.0.0.0:8080
+[INFO] 2026/03/11 14:05:05 dataset_handler.go:65: Uploading dataset: alpaca_data_zh_51k.json, size: 18671162 bytes
+[INFO] 2026/03/11 14:06:11 dataset_handler.go:65: Uploading dataset: alpaca_data_zh_51k.json, size: 18671162 bytes
+[INFO] 2026/03/11 14:06:24 dataset_handler.go:65: Uploading dataset: alpaca_data_zh_51k.json, size: 18671162 bytes
+[INFO] 2026/03/11 14:06:40 dataset_handler.go:65: Uploading dataset: alpaca_data_zh_51k.json, size: 18671162 bytes
+[INFO] 2026/03/11 14:06:45 main.go:28: Starting MCP Training System...
+[INFO] 2026/03/11 14:06:45 main.go:42: Connected to PostgreSQL
+[INFO] 2026/03/11 14:06:45 main.go:54: Connected to Redis
+[INFO] 2026/03/11 14:06:45 main.go:63: Agents initialized
+[INFO] 2026/03/11 14:06:45 main.go:71: Handlers initialized
+[INFO] 2026/03/11 14:06:45 main.go:112: Routes configured
+[INFO] 2026/03/11 14:06:45 main.go:116: Server starting on 0.0.0.0:8080
+[INFO] 2026/03/11 14:06:54 dataset_handler.go:65: Uploading dataset: alpaca_data_zh_51k.json, size: 18671162 bytes
+[INFO] 2026/03/11 14:06:59 dataset_handler.go:65: Uploading dataset: alpaca_data_zh_51k.json, size: 18671162 bytes
+[INFO] 2026/03/11 14:08:11 dataset_handler.go:65: Uploading dataset: alpaca_data_zh_51k.json, size: 18671162 bytes
+[INFO] 2026/03/11 14:08:19 dataset_handler.go:65: Uploading dataset: alpaca_data_zh_51k.json, size: 18671162 bytes
+[INFO] 2026/03/11 14:11:10 dataset_handler.go:65: Uploading dataset: alpaca_data_zh_51k.json, size: 18671162 bytes
+[INFO] 2026/03/11 14:11:19 dataset_handler.go:65: Uploading dataset: alpaca_data_zh_51k.json, size: 18671162 bytes
+[INFO] 2026/03/11 14:11:25 main.go:28: Starting MCP Training System...
+[INFO] 2026/03/11 14:11:25 main.go:42: Connected to PostgreSQL
+[INFO] 2026/03/11 14:11:25 main.go:54: Connected to Redis
+[INFO] 2026/03/11 14:11:25 main.go:63: Agents initialized
+[INFO] 2026/03/11 14:11:25 main.go:71: Handlers initialized
+[INFO] 2026/03/11 14:11:25 main.go:112: Routes configured
+[INFO] 2026/03/11 14:11:25 main.go:116: Server starting on 0.0.0.0:8080
+[INFO] 2026/03/11 14:11:50 dataset_handler.go:65: Uploading dataset: alpaca_data_zh_51k.json, size: 18671162 bytes
+[INFO] 2026/03/11 14:11:55 dataset_handler.go:65: Uploading dataset: alpaca_data_zh_51k.json, size: 18671162 bytes
+[INFO] 2026/03/11 14:15:14 dataset_handler.go:65: Uploading dataset: alpaca_data_zh_51k.json, size: 18671162 bytes
+[INFO] 2026/03/11 14:17:28 main.go:28: Starting MCP Training System...
+[INFO] 2026/03/11 14:17:28 main.go:42: Connected to PostgreSQL
+[INFO] 2026/03/11 14:17:28 main.go:54: Connected to Redis
+[INFO] 2026/03/11 14:17:28 main.go:63: Agents initialized
+[INFO] 2026/03/11 14:17:28 main.go:71: Handlers initialized
+[INFO] 2026/03/11 14:17:28 main.go:112: Routes configured
+[INFO] 2026/03/11 14:17:28 main.go:116: Server starting on 0.0.0.0:8080
+[INFO] 2026/03/11 14:18:04 dataset_handler.go:65: Uploading dataset: alpaca_data_zh_51k.json, size: 18671162 bytes
+[INFO] 2026/03/11 14:19:20 training_agent.go:38: TrainingAgent: Starting training for job 1
+[INFO] 2026/03/11 14:28:38 main.go:28: Starting MCP Training System...
+[INFO] 2026/03/11 14:28:38 main.go:42: Connected to PostgreSQL
+[INFO] 2026/03/11 14:28:38 main.go:54: Connected to Redis
+[INFO] 2026/03/11 14:28:38 main.go:63: Agents initialized
+[INFO] 2026/03/11 14:28:38 main.go:71: Handlers initialized
+[INFO] 2026/03/11 14:28:38 main.go:112: Routes configured
+[INFO] 2026/03/11 14:28:38 main.go:116: Server starting on 0.0.0.0:8080
+[INFO] 2026/03/11 14:29:31 training_agent.go:38: TrainingAgent: Starting training for job 2
+[INFO] 2026/03/11 14:56:53 dataset_handler.go:143: Importing dataset from URL: https://ghproxy.com/https://raw.githubusercontent.com/SophonPlus/ChineseNlpCorpus/master/datasets/ChnSentiCorp_htl_all/ChnSentiCorp_htl_all.csv
+[INFO] 2026/03/11 14:56:57 dataset_handler.go:143: Importing dataset from URL: https://raw.githubusercontent.com/SophonPlus/ChineseNlpCorpus/master/datasets/ChnSentiCorp_htl_all/ChnSentiCorp_htl_all.csv
+[INFO] 2026/03/11 14:56:58 data_agent.go:25: DataAgent: Starting data cleaning for dataset 15
+[INFO] 2026/03/11 14:56:58 data_agent.go:42: DataAgent: Cleaning file: data\uploads\dataset_1773212217.csv
+[INFO] 2026/03/11 14:57:04 data_agent.go:92: DataAgent: Data cleaning completed for dataset 15
+[INFO] 2026/03/11 14:57:11 dataset_handler.go:143: Importing dataset from URL: https://ghproxy.com/https://raw.githubusercontent.com/SophonPlus/ChineseNlpCorpus/master/datasets/ChnSentiCorp_htl_all/ChnSentiCorp_htl_all.csv
+[INFO] 2026/03/11 15:02:26 main.go:28: Starting MCP Training System...
+[INFO] 2026/03/11 15:02:26 main.go:42: Connected to PostgreSQL
+[INFO] 2026/03/11 15:02:26 main.go:54: Connected to Redis
+[INFO] 2026/03/11 15:02:26 main.go:63: Agents initialized
+[INFO] 2026/03/11 15:02:26 main.go:71: Handlers initialized
+[INFO] 2026/03/11 15:02:26 main.go:114: Routes configured
+[INFO] 2026/03/11 15:02:26 main.go:118: Server starting on 0.0.0.0:8080
+[INFO] 2026/03/11 15:02:51 training_agent.go:38: TrainingAgent: Starting training for job 2
+[INFO] 2026/03/11 15:02:51 training_agent.go:82: TrainingAgent: Job 2 status updated to running
+[INFO] 2026/03/11 15:02:51 training_agent.go:104: TrainingAgent: Training process started for job 2
+[ERROR] 2026/03/11 15:02:51 training_agent.go:164: TrainingAgent: Training failed: exit status 9009; stderr: Python was not found; run without arguments to install from the Microsoft Store, or disable this shortcut from Settings > Apps > Advanced app settings > App execution aliases.
+[INFO] 2026/03/11 15:12:11 main.go:28: Starting MCP Training System...
+[INFO] 2026/03/11 15:12:11 main.go:42: Connected to PostgreSQL
+[INFO] 2026/03/11 15:12:11 main.go:54: Connected to Redis
+[INFO] 2026/03/11 15:12:11 main.go:63: Agents initialized
+[INFO] 2026/03/11 15:12:11 main.go:71: Handlers initialized
+[INFO] 2026/03/11 15:12:11 main.go:114: Routes configured
+[INFO] 2026/03/11 15:12:11 main.go:118: Server starting on 0.0.0.0:8080
+[INFO] 2026/03/11 15:12:16 training_agent.go:38: TrainingAgent: Starting training for job 2
+[INFO] 2026/03/11 15:12:16 training_agent.go:82: TrainingAgent: Job 2 status updated to running
+[INFO] 2026/03/11 15:12:16 training_agent.go:104: TrainingAgent: Training process started for job 2
+[ERROR] 2026/03/11 15:12:50 training_agent.go:164: TrainingAgent: Training failed: exit status 1; stderr: Generating train split: 0 examples [00:00, ? examples/s]Failed to read file 'C:\Users\marine\Desktop\±œ…Ë\mcp-training-system\data\uploads\dataset_1773209884.json' with error <class 'pandas.errors.ParserError'>: Error tokenizing data. C error: Expected 1 fields in line 3, saw 2
+
+Generating train split: 0 examples [00:00, ? examples/s]
+[INFO] 2026/03/11 15:28:45 training_agent.go:38: TrainingAgent: Starting training for job 3
+[INFO] 2026/03/11 15:28:45 training_agent.go:82: TrainingAgent: Job 3 status updated to running
+[INFO] 2026/03/11 15:28:45 training_agent.go:104: TrainingAgent: Training process started for job 3
+[ERROR] 2026/03/11 15:28:55 training_agent.go:164: TrainingAgent: Training failed: exit status 1; stderr: Generating train split: 0 examples [00:00, ? examples/s]Generating train split: 7765 examples [00:00, 76856.28 examples/s]
+Map:   0%|          | 0/7765 [00:00<?, ? examples/s]Map:  13%|®Ä®Ü        | 1000/7765 [00:00<00:01, 6735.02 examples/s]Map:  26%|®Ä®Ä®Ñ       | 2000/7765 [00:00<00:00, 7915.36 examples/s]Map:  39%|®Ä®Ä®Ä®Ç      | 3000/7765 [00:00<00:00, 8601.26 examples/s]Map:  52%|®Ä®Ä®Ä®Ä®Ä®á    | 4000/7765 [00:00<00:00, 8640.36 examples/s]Map:  64%|®Ä®Ä®Ä®Ä®Ä®Ä®Ö   | 5000/7765 [00:00<00:00, 8980.88 examples/s]Map:  77%|®Ä®Ä®Ä®Ä®Ä®Ä®Ä®É  | 6000/7765 [00:00<00:00, 8904.81 examples/s]Map:  90%|®Ä®Ä®Ä®Ä®Ä®Ä®Ä®Ä®Ä | 7000/7765 [00:00<00:00, 6547.59 examples/s]Map: 100%|®Ä®Ä®Ä®Ä®Ä®Ä®Ä®Ä®Ä®Ä| 7765/7765 [00:01<00:00, 6279.22 examples/s]Map: 100%|®Ä®Ä®Ä®Ä®Ä®Ä®Ä®Ä®Ä®Ä| 7765/7765 [00:01<00:00, 6877.24 examples/s]
+Some weights of BertForSequenceClassification were not initialized from the model checkpoint at bert-base-uncased and are newly initialized: ['classifier.bias', 'classifier.weight']
+You should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.
+[INFO] 2026/03/11 16:11:25 main.go:28: Starting MCP Training System...
+[INFO] 2026/03/11 16:11:25 main.go:42: Connected to PostgreSQL
+[INFO] 2026/03/11 16:11:25 main.go:54: Connected to Redis
+[INFO] 2026/03/11 16:11:25 main.go:63: Agents initialized
+[INFO] 2026/03/11 16:11:25 main.go:71: Handlers initialized
+[INFO] 2026/03/11 16:11:25 main.go:115: Routes configured
+[INFO] 2026/03/11 16:11:25 main.go:119: Server starting on 0.0.0.0:8080
+[INFO] 2026/03/11 16:14:04 training_agent.go:42: TrainingAgent: Starting training for job 4
+[INFO] 2026/03/11 16:14:04 training_agent.go:86: TrainingAgent: Job 4 status updated to running
+[INFO] 2026/03/11 16:14:04 training_agent.go:110: TrainingAgent: Training process started for job 4
+[ERROR] 2026/03/11 16:14:18 training_agent.go:206: TrainingAgent: Training failed: Using the `Trainer` with `PyTorch` requires `accelerate>=0.26.0`: Please run `pip install transformers[torch]` or `pip install 'accelerate>={ACCELERATE_MIN_VERSION}'`; stderr: Some weights of BertForSequenceClassification were not initialized from the model checkpoint at bert-base-uncased and are newly initialized: ['classifier.bias', 'classifier.weight']
+You should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.
+[INFO] 2026/03/11 16:21:38 main.go:28: Starting MCP Training System...
+[INFO] 2026/03/11 16:21:38 main.go:42: Connected to PostgreSQL
+[INFO] 2026/03/11 16:21:38 main.go:54: Connected to Redis
+[INFO] 2026/03/11 16:21:38 main.go:63: Agents initialized
+[INFO] 2026/03/11 16:21:38 main.go:71: Handlers initialized
+[INFO] 2026/03/11 16:21:38 main.go:115: Routes configured
+[INFO] 2026/03/11 16:21:38 main.go:119: Server starting on 0.0.0.0:8080
+[INFO] 2026/03/11 16:22:21 training_agent.go:43: TrainingAgent: Starting training for job 5
+[INFO] 2026/03/11 16:22:21 training_agent.go:87: TrainingAgent: Job 5 status updated to running
+[INFO] 2026/03/11 16:22:21 training_agent.go:113: TrainingAgent: Training process started for job 5
+[ERROR] 2026/03/11 16:22:35 training_agent.go:209: TrainingAgent: Training failed: Using the `Trainer` with `PyTorch` requires `accelerate>=0.26.0`: Please run `pip install transformers[torch]` or `pip install 'accelerate>={ACCELERATE_MIN_VERSION}'`; stderr: Some weights of BertForSequenceClassification were not initialized from the model checkpoint at bert-base-uncased and are newly initialized: ['classifier.bias', 'classifier.weight']
+You should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.
+[INFO] 2026/03/11 16:28:23 training_agent.go:43: TrainingAgent: Starting training for job 6
+[INFO] 2026/03/11 16:28:23 training_agent.go:87: TrainingAgent: Job 6 status updated to running
+[INFO] 2026/03/11 16:28:23 training_agent.go:113: TrainingAgent: Training process started for job 6
+[INFO] 2026/03/11 17:52:06 training_agent.go:246: TrainingAgent: Training completed for job 6, model ID: 1
+[INFO] 2026/03/11 18:08:00 main.go:28: Starting MCP Training System...
+[INFO] 2026/03/11 18:08:00 main.go:42: Connected to PostgreSQL
+[INFO] 2026/03/11 18:08:00 main.go:54: Connected to Redis
+[INFO] 2026/03/11 18:08:00 main.go:63: Agents initialized
+[INFO] 2026/03/11 18:08:00 main.go:71: Handlers initialized
+[INFO] 2026/03/11 18:08:00 main.go:115: Routes configured
+[INFO] 2026/03/11 18:08:00 main.go:119: Server starting on 0.0.0.0:8080

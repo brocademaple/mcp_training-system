@@ -1,0 +1,34 @@
+# Git and IDE
+.git
+.gitignore
+.idea
+.vscode
+*.swp
+*.swo
+
+# Frontend (not needed in backend image)
+frontend/node_modules
+frontend/dist
+frontend/.env
+frontend/.env.local
+
+# Local data and secrets (use volumes in production)
+data/uploads/*
+data/cleaned/*
+data/models/*
+!data/uploads/.keep
+!data/cleaned/.keep
+!data/models/.keep
+.env
+.env.local
+logs/*
+
+# Docs and dev
+*.md
+!README.md
+docs/
+agent-transcripts
+
+# Test and misc
+*.log
+.DS_Store

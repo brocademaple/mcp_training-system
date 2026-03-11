@@ -19,3 +19,72 @@
 [INFO] 2026/03/10 17:35:03 main.go:114: Server starting on 0.0.0.0:8080
 [INFO] 2026/03/10 17:35:19 dataset_handler.go:56: Uploading dataset: alpaca_data_zh_51k.json, size: 18671162 bytes
 [INFO] 2026/03/10 17:41:16 dataset_handler.go:56: Uploading dataset: alpaca_data_zh_51k.json, size: 18671162 bytes
+[INFO] 2026/03/10 19:00:50 dataset_handler.go:56: Uploading dataset: alpaca_data_zh_51k.json, size: 18671162 bytes
+[INFO] 2026/03/10 19:09:55 main.go:28: Starting MCP Training System...
+[INFO] 2026/03/10 19:09:55 main.go:42: Connected to PostgreSQL
+[INFO] 2026/03/10 19:09:55 main.go:54: Connected to Redis
+[INFO] 2026/03/10 19:09:55 main.go:63: Agents initialized
+[INFO] 2026/03/10 19:09:55 main.go:71: Handlers initialized
+[INFO] 2026/03/10 19:09:55 main.go:110: Routes configured
+[INFO] 2026/03/10 19:09:55 main.go:114: Server starting on 0.0.0.0:8080
+[INFO] 2026/03/10 21:02:05 dataset_handler.go:143: Importing dataset from URL: https://gitee.com/zenglanllan/ChineseNLPCorpus/raw/master/datasets/ChnSentiCorp_htl_all/ChnSentiCorp_htl_all.csv
+[INFO] 2026/03/10 21:11:52 dataset_handler.go:143: Importing dataset from URL: https://hf-mirror.com/datasets/dirtycomputer/ChnSentiCorp_htl_all/resolve/main/ChnSentiCorp_htl_all.csv
+[INFO] 2026/03/10 21:11:54 data_agent.go:25: DataAgent: Starting data cleaning for dataset 5
+[INFO] 2026/03/10 21:11:54 data_agent.go:42: DataAgent: Cleaning file: data\uploads\dataset_1773148312.csv
+[ERROR] 2026/03/10 21:11:54 data_agent.go:47: DataAgent: Python script failed: python execution failed: exit status 9009, output: Python was not found; run without arguments to install from the Microsoft Store, or disable this shortcut from Settings > Apps > Advanced app settings > App execution aliases.
+[ERROR] 2026/03/10 21:11:54 dataset_handler.go:177: Failed to clean dataset 5 (from URL): python execution failed: exit status 9009, output: Python was not found; run without arguments to install from the Microsoft Store, or disable this shortcut from Settings > Apps > Advanced app settings > App execution aliases.
+[INFO] 2026/03/10 21:15:28 dataset_handler.go:143: Importing dataset from URL: https://modelscope.cn/datasets/damo/nlp_weibo_sentiment_classification/resolve/master/weibo_senti_100k.csv
+[INFO] 2026/03/10 21:24:11 dataset_handler.go:143: Importing dataset from URL: https://raw.githubusercontent.com/SophonPlus/ChineseNlpCorpus/master/datasets/ChnSentiCorp_htl_all/ChnSentiCorp_htl_all.csv
+[INFO] 2026/03/10 21:24:12 data_agent.go:25: DataAgent: Starting data cleaning for dataset 6
+[INFO] 2026/03/10 21:24:12 data_agent.go:42: DataAgent: Cleaning file: data\uploads\dataset_1773149051.csv
+[ERROR] 2026/03/10 21:24:12 data_agent.go:47: DataAgent: Python script failed: python execution failed: exit status 9009, output: Python was not found; run without arguments to install from the Microsoft Store, or disable this shortcut from Settings > Apps > Advanced app settings > App execution aliases.
+[ERROR] 2026/03/10 21:24:12 dataset_handler.go:177: Failed to clean dataset 6 (from URL): python execution failed: exit status 9009, output: Python was not found; run without arguments to install from the Microsoft Store, or disable this shortcut from Settings > Apps > Advanced app settings > App execution aliases.
+[INFO] 2026/03/10 22:06:28 main.go:28: Starting MCP Training System...
+[INFO] 2026/03/10 22:06:28 main.go:42: Connected to PostgreSQL
+[INFO] 2026/03/10 22:06:28 main.go:54: Connected to Redis
+[INFO] 2026/03/10 22:06:28 main.go:63: Agents initialized
+[INFO] 2026/03/10 22:06:28 main.go:71: Handlers initialized
+[INFO] 2026/03/10 22:06:28 main.go:111: Routes configured
+[INFO] 2026/03/10 22:06:28 main.go:115: Server starting on 0.0.0.0:8080
+[INFO] 2026/03/10 22:17:30 dataset_handler.go:143: Importing dataset from URL: https://hf-mirror.com/datasets/lhoestq/demo1/resolve/main/data/train.csv
+[INFO] 2026/03/10 22:17:31 data_agent.go:25: DataAgent: Starting data cleaning for dataset 7
+[INFO] 2026/03/10 22:17:31 data_agent.go:42: DataAgent: Cleaning file: data\uploads\dataset_1773152250.csv
+[ERROR] 2026/03/10 22:17:32 data_agent.go:47: DataAgent: Python script failed: python execution failed: exit status 1, output: Traceback (most recent call last):
+  File "python_scripts\data\clean_data.py", line 9, in <module>
+    import pandas as pd
+ModuleNotFoundError: No module named 'pandas'
+[ERROR] 2026/03/10 22:17:32 dataset_handler.go:177: Failed to clean dataset 7 (from URL): python execution failed: exit status 1, output: Traceback (most recent call last):
+  File "python_scripts\data\clean_data.py", line 9, in <module>
+    import pandas as pd
+ModuleNotFoundError: No module named 'pandas'
+[INFO] 2026/03/10 22:25:47 main.go:28: Starting MCP Training System...
+[INFO] 2026/03/10 22:25:47 main.go:42: Connected to PostgreSQL
+[INFO] 2026/03/10 22:25:47 main.go:54: Connected to Redis
+[INFO] 2026/03/10 22:25:47 main.go:63: Agents initialized
+[INFO] 2026/03/10 22:25:47 main.go:71: Handlers initialized
+[INFO] 2026/03/10 22:25:47 main.go:112: Routes configured
+[INFO] 2026/03/10 22:25:47 main.go:116: Server starting on 0.0.0.0:8080
+[INFO] 2026/03/10 22:25:56 data_agent.go:25: DataAgent: Starting data cleaning for dataset 7
+[INFO] 2026/03/10 22:25:56 data_agent.go:42: DataAgent: Cleaning file: data\uploads\dataset_1773152250.csv
+[INFO] 2026/03/10 22:26:00 data_agent.go:25: DataAgent: Starting data cleaning for dataset 6
+[INFO] 2026/03/10 22:26:00 data_agent.go:42: DataAgent: Cleaning file: data\uploads\dataset_1773149051.csv
+[INFO] 2026/03/10 22:26:01 data_agent.go:92: DataAgent: Data cleaning completed for dataset 7
+[INFO] 2026/03/10 22:26:01 data_agent.go:92: DataAgent: Data cleaning completed for dataset 6
+[INFO] 2026/03/10 22:26:02 data_agent.go:25: DataAgent: Starting data cleaning for dataset 5
+[INFO] 2026/03/10 22:26:02 data_agent.go:42: DataAgent: Cleaning file: data\uploads\dataset_1773148312.csv
+[INFO] 2026/03/10 22:26:03 data_agent.go:92: DataAgent: Data cleaning completed for dataset 5
+[INFO] 2026/03/10 22:36:55 training_agent.go:38: TrainingAgent: Starting training for job 1
+[INFO] 2026/03/10 22:36:55 training_agent.go:77: TrainingAgent: Job 1 status updated to running
+[INFO] 2026/03/10 22:36:55 training_agent.go:99: TrainingAgent: Training process started for job 1
+[ERROR] 2026/03/10 22:36:55 training_agent.go:155: TrainingAgent: Training failed: exit status 9009
+[INFO] 2026/03/10 22:50:57 main.go:28: Starting MCP Training System...
+[INFO] 2026/03/10 22:50:57 main.go:42: Connected to PostgreSQL
+[INFO] 2026/03/10 22:50:57 main.go:54: Connected to Redis
+[INFO] 2026/03/10 22:50:57 main.go:63: Agents initialized
+[INFO] 2026/03/10 22:50:57 main.go:71: Handlers initialized
+[INFO] 2026/03/10 22:50:57 main.go:112: Routes configured
+[INFO] 2026/03/10 22:50:57 main.go:116: Server starting on 0.0.0.0:8080
+[INFO] 2026/03/10 23:01:48 training_agent.go:37: TrainingAgent: Starting training for job 2
+[INFO] 2026/03/10 23:01:48 training_agent.go:76: TrainingAgent: Job 2 status updated to running
+[INFO] 2026/03/10 23:01:48 training_agent.go:98: TrainingAgent: Training process started for job 2
+[ERROR] 2026/03/10 23:02:47 training_agent.go:154: TrainingAgent: Training failed: exit status 1

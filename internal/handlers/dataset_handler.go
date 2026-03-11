@@ -12,6 +12,15 @@ import (
 	"mcp-training-system/internal/utils"
 )
 
+// nullString returns sql.NullString for a non-empty s; empty s becomes Valid=false.
+func nullString(s string) sql.NullString {
+	return sql.NullString{String: s, Valid: s != ""}
+}
+
+func nullInt64(n int64) sql.NullInt64 {
+	return sql.NullInt64{Int64: n, Valid: true}
+}
+
 // DatasetHandler handles dataset-related requests
 type DatasetHandler struct {
 	db        *sql.DB
@@ -71,14 +80,14 @@ func (h *DatasetHandler) UploadDataset(c *gin.Context) {
 		return
 	}
 
-	// Create dataset record
+	// Create dataset record (nullable fields use NullString/NullInt64 for DB)
 	dataset := &models.Dataset{
-		UserID:           1, // Default user
+		UserID:           1,
 		Name:             name,
 		Type:             dataType,
-		Source:           "local",
-		OriginalFilePath: filePath,
-		FileSize:         file.Size,
+		Source:           nullString("local"),
+		OriginalFilePath: sql.NullString{String: filePath, Valid: true},
+		FileSize:         nullInt64(file.Size),
 		Status:           "uploading",
 	}
 
@@ -87,7 +96,7 @@ func (h *DatasetHandler) UploadDataset(c *gin.Context) {
 		return
 	}
 
-	// Start cleaning in background for CSV files; JSON 则直接标记为 ready（暂不清洗）
+	// Start cleaning in background for CSV files; JSON 等非 CSV 直接以原文件作为可训练路径并标记为 ready
 	if ext == ".csv" {
 		go func(id int) {
 			if err := h.dataAgent.CleanData(id); err != nil {
@@ -95,8 +104,8 @@ func (h *DatasetHandler) UploadDataset(c *gin.Context) {
 			}
 		}(dataset.ID)
 	} else {
-		if err := models.UpdateDatasetStatus(h.db, dataset.ID, "ready", ""); err != nil {
-			utils.Error("Failed to update dataset %d status to ready: %v", dataset.ID, err)
+		if err := models.SetDatasetReadyWithPath(h.db, dataset.ID, filePath); err != nil {
+			utils.Error("Failed to set dataset %d ready with path: %v", dataset.ID, err)
 		}
 	}
 
@@ -153,9 +162,9 @@ func (h *DatasetHandler) ImportFromURL(c *gin.Context) {
 		UserID:           1,
 		Name:             req.Name,
 		Type:             req.Type,
-		Source:           req.URL,
-		OriginalFilePath: savePath,
-		FileSize:         written,
+		Source:           sql.NullString{String: req.URL, Valid: true},
+		OriginalFilePath: sql.NullString{String: savePath, Valid: true},
+		FileSize:         nullInt64(written),
 		Status:           "uploading",
 	}
 	if err := dataset.Create(h.db); err != nil {
@@ -248,7 +257,9 @@ func (h *DatasetHandler) GetDatasetPreview(c *gin.Context) {
 		}
 		return false
 	}
-	if tryPath(dataset.CleanedFilePath) || tryPath(dataset.OriginalFilePath) {
+	cleanedOK := dataset.CleanedFilePath.Valid && tryPath(dataset.CleanedFilePath.String)
+	origOK := dataset.OriginalFilePath.Valid && tryPath(dataset.OriginalFilePath.String)
+	if cleanedOK || origOK {
 		// filePath set
 	} else {
 		c.JSON(404, gin.H{"code": 404, "message": "Dataset file not found on disk"})
@@ -279,4 +290,62 @@ func (h *DatasetHandler) GetDatasetPreview(c *gin.Context) {
 			"total":   len(rows),
 		},
 	})
+}
+
+// RetryCleanDataset re-runs data cleaning for a dataset that is in "error" state.
+// POST /datasets/:id/retry-clean
+func (h *DatasetHandler) RetryCleanDataset(c *gin.Context) {
+	id := c.Param("id")
+	var datasetID int
+	if _, err := fmt.Sscanf(id, "%d", &datasetID); err != nil {
+		c.JSON(400, gin.H{"code": 400, "message": "Invalid dataset id"})
+		return
+	}
+	dataset, err := models.GetDatasetByID(h.db, datasetID)
+	if err != nil || dataset == nil {
+		c.JSON(404, gin.H{"code": 404, "message": "Dataset not found"})
+		return
+	}
+	if dataset.Status != "error" {
+		c.JSON(400, gin.H{"code": 400, "message": "Only datasets in error state can retry clean"})
+		return
+	}
+	if !dataset.OriginalFilePath.Valid || dataset.OriginalFilePath.String == "" {
+		c.JSON(400, gin.H{"code": 400, "message": "Dataset has no original file to clean"})
+		return
+	}
+	// Mark as processing, then run clean in background
+	if _, err := h.db.Exec("UPDATE datasets SET status = 'processing', error_message = NULL, updated_at = NOW() WHERE id = $1", datasetID); err != nil {
+		c.JSON(500, gin.H{"code": 500, "message": fmt.Sprintf("Failed to update status: %v", err)})
+		return
+	}
+	go func() {
+		if err := h.dataAgent.CleanData(datasetID); err != nil {
+			utils.Error("Retry clean failed for dataset %d: %v", datasetID, err)
+		}
+	}()
+	c.JSON(200, gin.H{"code": 200, "message": "success", "data": gin.H{"status": "processing"}})
+}
+
+// DeleteDataset deletes a dataset by ID (record only; files may remain on disk).
+// DELETE /datasets/:id
+func (h *DatasetHandler) DeleteDataset(c *gin.Context) {
+	id := c.Param("id")
+	var datasetID int
+	if _, err := fmt.Sscanf(id, "%d", &datasetID); err != nil {
+		c.JSON(400, gin.H{"code": 400, "message": "Invalid dataset id"})
+		return
+	}
+	res, err := h.db.Exec("DELETE FROM datasets WHERE id = $1", datasetID)
+	if err != nil {
+		c.JSON(500, gin.H{"code": 500, "message": fmt.Sprintf("Failed to delete: %v", err)})
+		return
+	}
+	rows, _ := res.RowsAffected()
+	// 幂等：记录不存在时也返回 200，避免前端因缓存或已删除而报 404
+	if rows == 0 {
+		c.JSON(200, gin.H{"code": 200, "message": "success"})
+		return
+	}
+	c.JSON(200, gin.H{"code": 200, "message": "success"})
 }

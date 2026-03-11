@@ -2,14 +2,17 @@ package agents
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"math"
+	"os"
 	"os/exec"
-	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/redis/go-redis/v9"
 	"mcp-training-system/internal/models"
@@ -21,6 +24,8 @@ type TrainingAgent struct {
 	db       *sql.DB
 	redis    *redis.Client
 	executor *utils.PythonExecutor
+	// running 用于取消：jobID -> *exec.Cmd，Train 结束时删除
+	running sync.Map
 }
 
 // NewTrainingAgent creates a new training agent
@@ -57,40 +62,53 @@ func (a *TrainingAgent) Train(jobID int) error {
 	}
 	hyperparams["job_id"] = jobID
 
-	// 2. Get dataset file path
-	var datasetPath string
+	// 2. Get dataset file path: 优先用清洗后路径，若未走清洗（如 JSON 直接 ready）则用原始路径
+	var cleanedPath, originalPath sql.NullString
 	err = a.db.QueryRow(
-		"SELECT cleaned_file_path FROM datasets WHERE id = $1",
+		"SELECT cleaned_file_path, original_file_path FROM datasets WHERE id = $1",
 		datasetID,
-	).Scan(&datasetPath)
+	).Scan(&cleanedPath, &originalPath)
 	if err != nil {
 		utils.Error("TrainingAgent: Failed to query dataset: %v", err)
 		return fmt.Errorf("failed to query dataset: %v", err)
+	}
+	datasetPath := ""
+	if cleanedPath.Valid && cleanedPath.String != "" {
+		datasetPath = cleanedPath.String
+	} else if originalPath.Valid && originalPath.String != "" {
+		datasetPath = originalPath.String
+	}
+	if datasetPath == "" {
+		return fmt.Errorf("dataset has no cleaned file path (status not ready)")
 	}
 
 	// 3. Update job status to running
 	models.SetTrainingJobStarted(a.db, jobID)
 	utils.Info("TrainingAgent: Job %d status updated to running", jobID)
 
-	// 4. Prepare Python command
+	// 4. Prepare Python command（Windows 下优先使用 .env 中的 PYTHON_PATH，避免找不到 py 导致 9009）
 	hyperparamsJSON, _ = json.Marshal(hyperparams)
-	scriptPath := filepath.Join(a.executor.ScriptsDir, "training/train_text_clf.py")
-	cmd := exec.Command(a.executor.PythonPath, scriptPath, datasetPath, string(hyperparamsJSON))
+	pyName, pyArgs := a.executor.CommandArgs("training/train_text_clf.py", datasetPath, string(hyperparamsJSON))
+	cmd := exec.Command(pyName, pyArgs...)
+	// 强制 Python 子进程 stdout/stderr 使用 UTF-8，避免 Windows 下中文过程日志乱码
+	cmd.Env = append(os.Environ(), "PYTHONIOENCODING=utf-8")
 
-	// Get stdout pipe for real-time progress
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		utils.Error("TrainingAgent: Failed to get stdout pipe: %v", err)
 		models.UpdateTrainingJobStatus(a.db, jobID, "failed", err.Error())
 		return err
 	}
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = &stderrBuf
 
-	// Start command
 	if err := cmd.Start(); err != nil {
 		utils.Error("TrainingAgent: Failed to start training: %v", err)
 		models.UpdateTrainingJobStatus(a.db, jobID, "failed", err.Error())
 		return err
 	}
+	a.running.Store(jobID, cmd)
+	defer a.running.Delete(jobID)
 
 	utils.Info("TrainingAgent: Training process started for job %d", jobID)
 
@@ -102,14 +120,40 @@ func (a *TrainingAgent) Train(jobID int) error {
 	for scanner.Scan() {
 		line := scanner.Text()
 
+		// 过程日志：写入 Redis 列表供弹窗拉取，并推送 WebSocket 实时更新
+		if strings.HasPrefix(line, "LOG:") {
+			msg := strings.TrimSpace(strings.TrimPrefix(line, "LOG:"))
+			logKey := fmt.Sprintf("training:log:%d", jobID)
+			a.redis.RPush(ctx, logKey, msg)
+			a.redis.LTrim(ctx, logKey, -200, -1) // 只保留最近 200 条
+			logPayload, _ := json.Marshal(map[string]string{"type": "log", "line": msg})
+			a.redis.Publish(ctx, fmt.Sprintf("training:progress:%d", jobID), string(logPayload))
+			continue
+		}
+
 		// Parse PROGRESS lines
 		if strings.HasPrefix(line, "PROGRESS:") {
 			jsonStr := strings.TrimPrefix(line, "PROGRESS:")
 			var progress map[string]interface{}
 			if err := json.Unmarshal([]byte(jsonStr), &progress); err == nil {
-				// Update Redis hash (for polling/initial state)
+				// Update Redis hash (for polling/GetJobStatus/弹窗刷新)；HSet 需要 field-value 对，且 Redis 值为字符串
 				progressKey := fmt.Sprintf("training:progress:%d", jobID)
-				a.redis.HSet(ctx, progressKey, progress)
+				for k, v := range progress {
+					var s string
+					switch x := v.(type) {
+					case float64:
+						s = strconv.FormatFloat(x, 'f', -1, 64)
+					case string:
+						s = x
+					case int:
+						s = strconv.Itoa(x)
+					case nil:
+						continue
+					default:
+						s = fmt.Sprintf("%v", v)
+					}
+					a.redis.HSet(ctx, progressKey, k, s)
+				}
 
 				// Publish to channel for WebSocket subscribers
 				channel := fmt.Sprintf("training:progress:%d", jobID)
@@ -148,11 +192,25 @@ func (a *TrainingAgent) Train(jobID int) error {
 
 	// 6. Wait for command to finish
 	if err := cmd.Wait(); err != nil {
-		utils.Error("TrainingAgent: Training failed: %v", err)
-		models.UpdateTrainingJobStatus(a.db, jobID, "failed", err.Error())
-		failMsg, _ := json.Marshal(map[string]interface{}{"status": "failed", "error_message": err.Error()})
+		// 若已被用户取消，不再覆盖为 failed
+		if cur, _ := models.GetTrainingJobByID(a.db, jobID); cur != nil && cur.Status == "cancelled" {
+			return nil
+		}
+		errMsg := err.Error()
+		// Python 异常时会先向 stdout 打印 {"status":"error","error_message":"..."}，优先用该内容作为失败原因
+		if finalResult != nil {
+			if em, ok := finalResult["error_message"].(string); ok && em != "" {
+				errMsg = em
+			}
+		}
+		if stderr := strings.TrimSpace(stderrBuf.String()); stderr != "" && !strings.Contains(errMsg, stderr) {
+			errMsg = errMsg + "; stderr: " + stderr
+		}
+		utils.Error("TrainingAgent: Training failed: %s", errMsg)
+		models.UpdateTrainingJobStatus(a.db, jobID, "failed", errMsg)
+		failMsg, _ := json.Marshal(map[string]interface{}{"status": "failed", "error_message": errMsg})
 		a.redis.Publish(ctx, fmt.Sprintf("training:progress:%d", jobID), string(failMsg))
-		return err
+		return fmt.Errorf("%s", errMsg)
 	}
 
 	// 7. Check final result
@@ -166,12 +224,17 @@ func (a *TrainingAgent) Train(jobID int) error {
 		return fmt.Errorf(errMsg)
 	}
 
-	// 8. Save model to database
+	// 8. Save model to database（计算模型目录大小供前端「大小」列展示）
 	modelPath := finalResult["model_path"].(string)
+	modelSize := int64(0)
+	if size, err := utils.GetDirSize(modelPath); err == nil {
+		modelSize = size
+	}
 	model := &models.Model{
 		JobID:     jobID,
 		Name:      fmt.Sprintf("Model for job %d", jobID),
 		ModelPath: modelPath,
+		ModelSize: modelSize,
 		ModelType: modelType,
 		Framework: "pytorch",
 	}
@@ -207,6 +270,38 @@ func (a *TrainingAgent) GetProgress(jobID int) (map[string]interface{}, error) {
 	}
 
 	return progress, nil
+}
+
+// GetRecentLogs 返回该任务最近的过程日志（训练脚本输出的 LOG: 行），供前端详情面板展示
+func (a *TrainingAgent) GetRecentLogs(jobID int) ([]string, error) {
+	ctx := context.Background()
+	key := fmt.Sprintf("training:log:%d", jobID)
+	result, err := a.redis.LRange(ctx, key, 0, -1).Result()
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// CancelJob 终止正在运行的训练进程，并将任务标为已取消（仅对 status=running 有效）
+func (a *TrainingAgent) CancelJob(jobID int) error {
+	ctx := context.Background()
+	v, ok := a.running.Load(jobID)
+	if !ok {
+		return fmt.Errorf("任务未在运行，无法取消")
+	}
+	cmd, ok := v.(*exec.Cmd)
+	if !ok || cmd.Process == nil {
+		return fmt.Errorf("任务未在运行，无法取消")
+	}
+	if err := cmd.Process.Kill(); err != nil {
+		return fmt.Errorf("终止进程失败: %v", err)
+	}
+	_ = models.UpdateTrainingJobStatus(a.db, jobID, "cancelled", "用户取消")
+	cancelMsg, _ := json.Marshal(map[string]interface{}{"status": "cancelled", "error_message": "用户取消"})
+	a.redis.Publish(ctx, fmt.Sprintf("training:progress:%d", jobID), string(cancelMsg))
+	utils.Info("TrainingAgent: Job %d cancelled by user", jobID)
+	return nil
 }
 
 // toFloat64 converts progress map value to float64 (JSON numbers are float64; Redis values may be string)

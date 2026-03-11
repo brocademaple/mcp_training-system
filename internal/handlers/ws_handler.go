@@ -75,7 +75,7 @@ func (h *TrainingWSHandler) Serve(c *gin.Context) {
 				return
 			}
 			// If this is a terminal status, stop after sending
-			if strings.Contains(msg.Payload, `"status":"completed"`) || strings.Contains(msg.Payload, `"status":"failed"`) {
+			if strings.Contains(msg.Payload, `"status":"completed"`) || strings.Contains(msg.Payload, `"status":"failed"`) || strings.Contains(msg.Payload, `"status":"cancelled"`) {
 				return
 			}
 		}

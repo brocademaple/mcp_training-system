@@ -53,6 +53,28 @@ func GetFileSize(path string) (int64, error) {
 	return fileInfo.Size(), nil
 }
 
+// GetDirSize returns the total size of a directory (recursive) in bytes. If path is a file, returns its size.
+func GetDirSize(path string) (int64, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0, err
+	}
+	if !info.IsDir() {
+		return info.Size(), nil
+	}
+	var total int64
+	err = filepath.Walk(path, func(_ string, fi os.FileInfo, errWalk error) error {
+		if errWalk != nil {
+			return errWalk
+		}
+		if fi != nil && !fi.IsDir() {
+			total += fi.Size()
+		}
+		return nil
+	})
+	return total, err
+}
+
 // ValidateCSVFile validates if a file is a valid CSV file
 func ValidateCSVFile(path string) error {
 	// Check file extension

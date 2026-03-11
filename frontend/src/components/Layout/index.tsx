@@ -11,21 +11,63 @@ import {
   MenuUnfoldOutlined,
   MoonOutlined,
   SunOutlined,
+  DoubleLeftOutlined,
+  RightOutlined,
 } from '@ant-design/icons';
 import './index.css';
 
 const { Sider, Content } = AntLayout;
 
 const STORAGE_THEME_KEY = 'app-theme';
+const STORAGE_SIDER_WIDTH_KEY = 'app-sider-width';
+const MIN_SIDER_WIDTH = 160;
+const MAX_SIDER_WIDTH = 420;
+const DEFAULT_SIDER_WIDTH = 220;
+
 type ThemeMode = 'light' | 'dark';
 
 const Layout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
+  const [siderHidden, setSiderHidden] = useState(false); // 完全收起侧栏（与 collapsed 仅收起到图标不同）
+  const [siderWidth, setSiderWidth] = useState(() => {
+    const w = localStorage.getItem(STORAGE_SIDER_WIDTH_KEY);
+    if (w) {
+      const n = parseInt(w, 10);
+      if (!Number.isNaN(n) && n >= MIN_SIDER_WIDTH && n <= MAX_SIDER_WIDTH) return n;
+    }
+    return DEFAULT_SIDER_WIDTH;
+  });
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
     return (localStorage.getItem(STORAGE_THEME_KEY) as ThemeMode) || 'light';
   });
+
+  useEffect(() => {
+    if (siderWidth >= MIN_SIDER_WIDTH && siderWidth <= MAX_SIDER_WIDTH) {
+      localStorage.setItem(STORAGE_SIDER_WIDTH_KEY, String(siderWidth));
+    }
+  }, [siderWidth]);
+
+  const handleResizerMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = siderWidth;
+    const onMove = (e2: MouseEvent) => {
+      const dx = e2.clientX - startX;
+      setSiderWidth((w) => Math.min(MAX_SIDER_WIDTH, Math.max(MIN_SIDER_WIDTH, startW + dx)));
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
 
   useEffect(() => {
     localStorage.setItem(STORAGE_THEME_KEY, themeMode);
@@ -49,7 +91,7 @@ const Layout: React.FC = () => {
     {
       key: '/training',
       icon: <ExperimentOutlined />,
-      label: '训练任务',
+      label: '模型训练',
     },
     {
       key: '/models',
@@ -66,19 +108,55 @@ const Layout: React.FC = () => {
   return (
     <ConfigProvider theme={themeConfig}>
       <AntLayout className="app-layout" data-theme={themeMode} style={{ minHeight: '100vh' }}>
-        <Sider
-          width={220}
-          collapsedWidth={64}
-          collapsible
-          collapsed={collapsed}
-          onCollapse={setCollapsed}
-          trigger={null}
-          theme={themeMode}
-          className="layout-sider"
-        >
-          <div className="sider-inner">
+        {siderHidden ? (
+          <div
+            className="sider-hidden-bar"
+            data-theme={themeMode}
+            onClick={() => setSiderHidden(false)}
+            title="展开侧边栏"
+            aria-label="展开侧边栏"
+          >
+            <RightOutlined className="sider-hidden-arrow" />
+          </div>
+        ) : (
+          <Sider
+            width={siderWidth}
+            collapsedWidth={64}
+            collapsible
+            collapsed={collapsed}
+            onCollapse={setCollapsed}
+            trigger={null}
+            theme={themeMode}
+            className="layout-sider"
+          >
+            <div className="sider-inner">
+              {!collapsed && (
+                <div
+                  className="sider-resizer"
+                  onMouseDown={handleResizerMouseDown}
+                  title="拖动调整宽度"
+                  aria-label="调整侧边栏宽度"
+                >
+                  <span
+                    className="sider-resizer-arrow"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      setSiderHidden(true);
+                    }}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    title="收起侧边栏"
+                    aria-label="收起侧边栏"
+                  >
+                    <DoubleLeftOutlined className="sider-resizer-arrow-icon" />
+                  </span>
+                </div>
+              )}
             <div className="sider-head">
-              <div className="sider-logo">{collapsed ? 'MCP' : 'MCP Training System'}</div>
+              <div className="sider-logo-wrap">
+                <div className="sider-logo">{collapsed ? 'MCP' : 'MCP Training System'}</div>
+                {!collapsed && <div className="sider-logo-cn">MCP 训练系统</div>}
+              </div>
               <span className="sider-trigger" onClick={() => setCollapsed(!collapsed)}>
                 {collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
               </span>
@@ -103,6 +181,7 @@ const Layout: React.FC = () => {
             </div>
           </div>
         </Sider>
+        )}
         <Content className="layout-content">
           <Outlet />
         </Content>

@@ -1,6 +1,18 @@
+/* 根节点与布局整体撑满视口，右侧与左侧栏无缝衔接 */
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+#root {
+  width: 100%;
+}
+
 /* 整体：左右结构，左侧功能栏 + 右侧内容 */
 .app-layout {
   flex-direction: row;
+  height: 100%;
+  width: 100%;
+  min-height: 100vh;
 }
 
 .layout-sider {
@@ -21,20 +33,149 @@
   flex-direction: column;
   height: 100%;
   min-height: 100vh;
+  position: relative;
+}
+
+/* 右侧可拖动调整宽度的把手：仅展开时显示，线条更清晰，中间带收起箭头 */
+.sider-resizer {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  cursor: col-resize;
+  z-index: 10;
+  background: rgba(0, 0, 0, 0.06);
+  border-left: 1px solid rgba(0, 0, 0, 0.12);
+  transition: background 0.15s, border-color 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.layout-sider.ant-layout-sider-dark .sider-resizer {
+  background: rgba(255, 255, 255, 0.06);
+  border-left-color: rgba(255, 255, 255, 0.15);
+}
+.sider-resizer:hover,
+.sider-resizer:active {
+  background: rgba(24, 144, 255, 0.12);
+  border-left-color: rgba(24, 144, 255, 0.4);
+}
+.layout-sider.ant-layout-sider-dark .sider-resizer:hover,
+.layout-sider.ant-layout-sider-dark .sider-resizer:active {
+  background: rgba(24, 144, 255, 0.2);
+  border-left-color: rgba(24, 144, 255, 0.5);
+}
+
+/* 把手中间的箭头：扁平化，与整体风格一致，点击后完全收起侧边栏 */
+.sider-resizer-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 32px;
+  border-radius: 2px;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+  flex-shrink: 0;
+  background: rgba(0, 0, 0, 0.04);
+  color: rgba(0, 0, 0, 0.35);
+}
+.sider-resizer-arrow:hover {
+  background: rgba(0, 0, 0, 0.08);
+  color: rgba(0, 0, 0, 0.55);
+}
+.sider-resizer-arrow:active {
+  background: rgba(0, 0, 0, 0.1);
+}
+.sider-resizer-arrow-icon {
+  font-size: 10px;
+  opacity: 0.9;
+}
+.layout-sider.ant-layout-sider-dark .sider-resizer-arrow {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.4);
+}
+.layout-sider.ant-layout-sider-dark .sider-resizer-arrow:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.7);
+}
+.layout-sider.ant-layout-sider-dark .sider-resizer-arrow:active {
+  background: rgba(255, 255, 255, 0.15);
+}
+.layout-sider.ant-layout-sider-dark .sider-resizer-arrow-icon {
+  font-size: 10px;
+}
+
+/* 完全收起后左侧的细条：点击展开 */
+.sider-hidden-bar {
+  width: 20px;
+  min-width: 20px;
+  min-height: 100vh;
+  background: #001529;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.2s;
+  box-shadow: 1px 0 4px rgba(0, 0, 0, 0.08);
+}
+.sider-hidden-bar:hover {
+  background: #002140;
+}
+.sider-hidden-bar[data-theme='light'] {
+  background: #f0f0f0;
+  box-shadow: 1px 0 4px rgba(0, 0, 0, 0.06);
+}
+.sider-hidden-bar[data-theme='light']:hover {
+  background: #e8e8e8;
+}
+.sider-hidden-arrow {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.65);
+}
+.sider-hidden-bar[data-theme='light'] .sider-hidden-arrow {
+  color: rgba(0, 0, 0, 0.45);
+}
+.sider-hidden-bar:hover .sider-hidden-arrow {
+  color: #1890ff;
 }
 
 .sider-head {
-  height: 56px;
+  min-height: 56px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px;
+  padding: 12px 16px;
   border-bottom: 1px solid #f0f0f0;
   flex-shrink: 0;
 }
 
+.sider-logo-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.sider-logo-cn {
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(0, 21, 41, 0.65);
+  line-height: 1.2;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .app-layout[data-theme='dark'] .sider-head {
   border-bottom-color: rgba(255, 255, 255, 0.1);
+}
+
+.app-layout[data-theme='dark'] .sider-logo-cn {
+  color: rgba(255, 255, 255, 0.55);
 }
 
 .sider-logo {
@@ -113,18 +254,22 @@
   background: rgba(24, 144, 255, 0.15);
 }
 
+/* 右侧内容区撑满剩余宽高，与左侧栏无缝衔接 */
 .layout-content {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
+  min-height: 0;
   padding: 24px;
   background: #f5f5f5;
   overflow: auto;
+  align-self: stretch;
 }
 .layout-content > * {
   background: #fff;
   padding: 24px;
   min-height: calc(100vh - 48px);
   border-radius: 8px;
+  box-sizing: border-box;
 }
 
 .app-layout[data-theme='dark'] .layout-content {

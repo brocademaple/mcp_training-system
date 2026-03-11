@@ -5,22 +5,23 @@ import (
 	"time"
 )
 
-// Dataset represents a dataset in the system
+// Dataset represents a dataset in the system.
+// Fields that may be NULL in DB use sql.Null* to avoid "converting NULL to ... unsupported".
 type Dataset struct {
-	ID               int       `json:"id"`
-	UserID           int       `json:"user_id"`
-	Name             string    `json:"name"`
-	Type             string    `json:"type"`
-	Source           string    `json:"source"`
-	OriginalFilePath string    `json:"original_file_path"`
-	CleanedFilePath  string    `json:"cleaned_file_path"`
-	RowCount         int       `json:"row_count"`
-	ColumnCount      int       `json:"column_count"`
-	FileSize         int64     `json:"file_size"`
-	Status           string    `json:"status"`
-	ErrorMessage     string    `json:"error_message"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	ID               int            `json:"id"`
+	UserID           int            `json:"user_id"`
+	Name             string         `json:"name"`
+	Type             string         `json:"type"`
+	Source           sql.NullString `json:"source"`
+	OriginalFilePath sql.NullString `json:"original_file_path"`
+	CleanedFilePath  sql.NullString `json:"cleaned_file_path"`
+	RowCount         sql.NullInt64  `json:"row_count"`
+	ColumnCount      sql.NullInt64  `json:"column_count"`
+	FileSize         sql.NullInt64  `json:"file_size"`
+	Status           string         `json:"status"`
+	ErrorMessage     sql.NullString `json:"error_message"`
+	CreatedAt        time.Time      `json:"created_at"`
+	UpdatedAt        time.Time      `json:"updated_at"`
 }
 
 // Create creates a new dataset in the database
@@ -142,5 +143,16 @@ func UpdateDatasetStatus(db *sql.DB, id int, status string, errorMsg string) err
 		WHERE id = $3
 	`
 	_, err := db.Exec(query, status, errorMsg, id)
+	return err
+}
+
+// SetDatasetReadyWithPath 将数据集标记为 ready 并设置清洗后路径（用于未走清洗流程的 JSON 等，直接以原文件作为可训练路径）
+func SetDatasetReadyWithPath(db *sql.DB, id int, cleanedPath string) error {
+	query := `
+		UPDATE datasets
+		SET status = 'ready', cleaned_file_path = $1, error_message = NULL, updated_at = NOW()
+		WHERE id = $2
+	`
+	_, err := db.Exec(query, cleanedPath, id)
 	return err
 }

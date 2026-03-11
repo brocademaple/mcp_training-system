@@ -10,21 +10,91 @@
 - **AI框架**: Python 3.8+, PyTorch, Transformers
 - **模型**: BERT (文本分类)
 
-## 快速开始
+## 快速开始（推荐：本机运行，训练使用本机 GPU）
 
-### 启动项目（按顺序执行）
+本机运行后端与 Python 脚本，**训练可使用本机显卡（如 RTX 3060/4060）**；Docker 只用来跑 PostgreSQL 和 Redis。  
+完整步骤与命令也可直接看 **[docs/QUICKSTART.md](docs/QUICKSTART.md)**。
 
-在项目根目录打开终端，依次执行：
+### 操作步骤与命令行（按顺序执行）
 
-| 步骤 | 命令 | 说明 |
-|------|------|------|
-| 1 | `docker-compose up -d` | 启动 PostgreSQL 和 Redis（需先安装并运行 Docker Desktop） |
-| 2 | 初始化数据库 | 见下方「3. 初始化数据库」（首次必须执行） |
-| 3 | `cp .env.example .env` | 复制环境变量（首次或未配置时执行） |
-| 4 | `go run cmd/server/main.go` | 启动后端，默认 http://localhost:8080 |
-| 5 | `cd frontend && npm i && npm run dev` | 安装前端依赖并启动，默认 http://localhost:3000 |
+以下均在 **项目根目录** 执行（除步骤 6 在 `frontend` 目录）。
 
-浏览器访问 **http://localhost:3000** 即可使用。若 Docker 未安装，可改用本机安装的 PostgreSQL/Redis，并修改 `.env` 中的连接信息。
+**步骤 1：启动数据库（Docker 只起 postgres + redis）**
+
+```bash
+docker-compose up -d postgres redis
+```
+
+**步骤 2：首次运行必须初始化数据库**
+
+（本系统为个人工具，无用户管理，仅需建表。若已初始化过可跳过。PowerShell 若 `<` 报错见下方备选。）
+
+```bash
+docker exec -i postgres-mcp-training psql -U mcp_user -d mcp_training < internal/database/migrations/001_init.sql
+docker exec -i postgres-mcp-training psql -U mcp_user -d mcp_training < internal/database/migrations/003_add_job_name.sql
+```
+
+<details>
+<summary>Windows PowerShell 备选（若上面命令报错）</summary>
+
+```powershell
+Get-Content internal/database/migrations/001_init.sql | docker exec -i postgres-mcp-training psql -U mcp_user -d mcp_training
+Get-Content internal/database/migrations/003_add_job_name.sql | docker exec -i postgres-mcp-training psql -U mcp_user -d mcp_training
+```
+</details>
+
+若数据库是**旧版**（曾有过 users 表），需先执行一次：  
+`Get-Content internal/database/migrations/005_remove_users.sql | docker exec -i postgres-mcp-training psql -U mcp_user -d mcp_training`
+
+**步骤 3：安装 Python 依赖（本机，用于数据清洗与训练，可使用 GPU）**
+
+```bash
+pip install -r python_scripts/requirements.txt
+```
+
+Windows 上若使用 `py -3`：
+
+```bash
+py -3 -m pip install -r python_scripts/requirements.txt
+```
+
+**步骤 4：配置环境变量**
+
+```bash
+cp .env.example .env
+```
+
+默认已按本机方式配置（如 `DB_PORT=5433` 对应 docker-compose 映射）。无需改即可用。
+
+**步骤 5：启动后端**
+
+```bash
+go run cmd/server/main.go
+```
+
+看到 `Server starting on 0.0.0.0:8080` 即成功。
+
+**步骤 6：启动前端（新开一个终端）**
+
+```bash
+cd frontend
+npm i
+npm run dev
+```
+
+浏览器打开 **http://localhost:3000**，即可使用。训练任务会由本机 Python 执行，若已安装 NVIDIA 驱动且 `nvidia-smi` 可用，将自动使用本机 GPU。
+
+---
+
+### 可选：Docker 一键运行（交付/无 GPU 环境）
+
+后端与 Python 打包进镜像，宿主机无需安装 Go/Python，适合交付或没有显卡的环境（镜像内为 CPU 版 PyTorch）。
+
+```bash
+docker-compose up -d
+# 首次：执行上面「步骤 2」的三条数据库初始化命令
+cd frontend && npm i && npm run dev
+```
 
 ---
 
@@ -44,26 +114,28 @@ npm install
 cd ..
 ```
 
-### 2. 启动数据库
+### 2. 启动数据库（本机运行方式只起 postgres + redis）
 
 ```bash
-docker-compose up -d
+docker-compose up -d postgres redis
 ```
 
-### 3. 初始化数据库
+宿主机端口为 **5433**（容器内 5432），`.env` 中已默认 `DB_PORT=5433`。
 
-**方式一（本机已安装 psql）**：
-```bash
-psql -h localhost -U mcp_user -d mcp_training -f internal/database/migrations/001_init.sql
-psql -h localhost -U mcp_user -d mcp_training -f internal/database/migrations/002_seed_default_user.sql
-```
-（密码见 `.env` 中 `DB_PASSWORD`；`002` 会插入默认用户 id=1，避免上传数据集时报外键错误）
+### 3. 初始化数据库（首次必须执行，无用户管理仅建表）
 
-**方式二（用 Docker 容器执行，适合 Windows 未装 psql）**：
+**推荐（适用 Windows / 未装 psql）**：
 ```bash
 docker exec -i postgres-mcp-training psql -U mcp_user -d mcp_training < internal/database/migrations/001_init.sql
-docker exec -i postgres-mcp-training psql -U mcp_user -d mcp_training < internal/database/migrations/002_seed_default_user.sql
+docker exec -i postgres-mcp-training psql -U mcp_user -d mcp_training < internal/database/migrations/003_add_job_name.sql
 ```
+
+**本机已安装 psql 时**（注意端口 5433）：
+```bash
+psql -h localhost -p 5433 -U mcp_user -d mcp_training -f internal/database/migrations/001_init.sql
+psql -h localhost -p 5433 -U mcp_user -d mcp_training -f internal/database/migrations/003_add_job_name.sql
+```
+（密码见 `.env` 中 `DB_PASSWORD`）。若为旧库曾建过 users 表，需再执行一次 `005_remove_users.sql`。
 
 ### 4. 配置环境变量
 
@@ -90,6 +162,22 @@ npm run dev
 前端服务将在 `http://localhost:3000` 启动
 
 现在可以通过浏览器访问 `http://localhost:3000` 使用Web界面
+
+### 常见问题
+
+- **Windows 报错 `Python was not found` / exit status 9009**  
+  后端需要调用 Python 执行数据清洗等脚本。请从 [python.org](https://www.python.org/downloads/) 安装 Python 3.8+，安装时勾选「Add Python to PATH」。安装后终端执行 `py -3 --version` 能显示版本即可。若本机只有某一目录下的 `python.exe`，可在 `.env` 中设置 `PYTHON_PATH=C:\路径\python.exe`。
+
+- **数据集导入/清洗报错 `ModuleNotFoundError: No module named 'pandas'`**  
+  说明当前运行后端的 Python 环境未安装脚本依赖。在项目根目录执行：
+  ```bash
+  pip install -r python_scripts/requirements.txt
+  ```
+  或 Windows 上：`py -3 -m pip install -r python_scripts/requirements.txt`  
+  安装完成后重启后端（`go run cmd/server/main.go`），再对报错的数据集点击「重试清洗」即可。
+
+- **训练任务无法成功 / 一直失败**  
+  请按 [训练任务成功运行指南](docs/TRAINING_SETUP.md) 操作：确认 Python 与依赖、数据集已清洗、CSV 含有 `text` 与 `label`/`labels` 列等。
 
 ## API 使用示例
 
@@ -235,11 +323,16 @@ mcp-training-system/
    - 在评估列表中点击"查看详情"
    - 查看准确率、精确率、召回率、F1分数等指标
 
+## 交付与开箱即用
+
+交付给他人（无 GPU 或不想装 Python）时，可使用 **Docker 一键运行**：`docker-compose up -d`，再执行上述「步骤 2」的三条数据库初始化命令，最后 `cd frontend && npm i && npm run dev`。后端与 Python 均在容器内，镜像为 CPU 版 PyTorch。
+
 ## 开发者
 
 本项目严格按照PRD文档实现，包含完整的数据库设计、Agent架构、API接口和Web前端界面。
 
 ### 技术文档
+- **快速开始（本机运行）**：`docs/QUICKSTART.md`
 - 详细API文档：`docs/API.md`
 - 部署文档：`docs/DEPLOYMENT.md`
 - 前端文档：`frontend/README.md`

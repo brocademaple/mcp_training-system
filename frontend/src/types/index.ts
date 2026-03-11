@@ -1,17 +1,17 @@
-// Dataset types
+// Dataset types (nullable fields match DB/API: may be null before processing)
 export interface Dataset {
   id: number;
   user_id: number;
   name: string;
   type: string;
-  source: string;
-  original_file_path: string;
-  cleaned_file_path: string;
-  row_count: number;
-  column_count: number;
-  file_size: number;
+  source: string | null;
+  original_file_path: string | null;
+  cleaned_file_path: string | null;
+  row_count: number | null;
+  column_count: number | null;
+  file_size: number | null;
   status: 'uploading' | 'processing' | 'ready' | 'error';
-  error_message?: string;
+  error_message?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -21,17 +21,22 @@ export interface TrainingJob {
   id: number;
   user_id: number;
   dataset_id: number;
+  name?: string;
   model_type: string;
   hyperparams: {
     learning_rate: number;
     batch_size: number;
     epochs: number;
   };
-  status: 'queued' | 'running' | 'completed' | 'failed';
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
   progress: number;
   current_epoch: number;
   total_epochs: number;
   error_message?: string;
+  /** 实时训练指标（来自 Redis/WebSocket）：loss、step、max_steps、learning_rate、accuracy 等 */
+  redis_progress?: Record<string, unknown>;
+  /** 训练过程输出（LOG: 行），来自后端推送或 getJobStatus */
+  log_lines?: string[];
   created_at: string;
   started_at?: string;
   completed_at?: string;
