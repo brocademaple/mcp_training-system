@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Card, Table, Button, Upload, Modal, Form, Input, InputNumber, Select, Slider, Tabs, Checkbox, message, Tag, List, Typography, Popconfirm, Tooltip } from 'antd';
+import { Card, Table, Button, Upload, Modal, Form, Input, InputNumber, Select, Slider, Tabs, message, Tag, List, Typography, Popconfirm, Tooltip } from 'antd';
 import { UploadOutlined, ReloadOutlined, LinkOutlined, CloudDownloadOutlined, TableOutlined, DeleteOutlined, SyncOutlined, PartitionOutlined } from '@ant-design/icons';
 import type { UploadFile } from 'antd/es/upload/interface';
 import { datasetService } from '@/services/dataset';
@@ -20,9 +20,18 @@ type OnlinePreset = {
 const ONLINE_DATASETS: OnlinePreset[] = [
   // ---------- 情感分类 ----------
   {
+    id: 'chn-senticorp-jsdelivr',
+    name: 'ChnSentiCorp 酒店评论情感（jsDelivr CDN）',
+    description: '中文酒店评论二分类情感数据，经 jsDelivr CDN 拉取，含 label、review；导入时自动将 review 映射为 text。国内访问较稳。',
+    url: 'https://cdn.jsdelivr.net/gh/SophonPlus/ChineseNlpCorpus@master/datasets/ChnSentiCorp_htl_all/ChnSentiCorp_htl_all.csv',
+    source: 'jsDelivr CDN',
+    taskCategory: 'sentiment',
+    column_map: { review: 'text' },
+  },
+  {
     id: 'chn-senticorp-ghproxy',
-    name: 'ChnSentiCorp 酒店评论情感（国内加速）',
-    description: '中文酒店评论二分类情感数据，经 ghproxy 加速拉取 GitHub 源，含 label、review；导入时自动将 review 映射为 text。',
+    name: 'ChnSentiCorp 酒店评论情感（ghproxy 加速）',
+    description: '同上数据集，ghproxy 加速 GitHub。若 jsDelivr 失败可试此条。',
     url: 'https://ghproxy.com/https://raw.githubusercontent.com/SophonPlus/ChineseNlpCorpus/master/datasets/ChnSentiCorp_htl_all/ChnSentiCorp_htl_all.csv',
     source: 'GitHub 国内加速',
     taskCategory: 'sentiment',
@@ -31,16 +40,25 @@ const ONLINE_DATASETS: OnlinePreset[] = [
   {
     id: 'chn-senticorp-github',
     name: 'ChnSentiCorp 酒店评论情感（GitHub 直连）',
-    description: '同上数据集，GitHub raw 直连。若上一项失败可试此条（需网络可访问 GitHub）。',
+    description: '同上数据集，GitHub raw 直连。需网络可访问 GitHub。',
     url: 'https://raw.githubusercontent.com/SophonPlus/ChineseNlpCorpus/master/datasets/ChnSentiCorp_htl_all/ChnSentiCorp_htl_all.csv',
     source: 'GitHub',
     taskCategory: 'sentiment',
     column_map: { review: 'text' },
   },
   {
+    id: 'weibo-senti-100k-github',
+    name: '微博情感 100k（GitHub）',
+    description: '中文微博情感二分类，约 10 万条，GitHub 直链。国内可配合 ghproxy 或先试 jsDelivr。',
+    url: 'https://cdn.jsdelivr.net/gh/forever1986/bert_task@master/data/weibo_senti_100k.csv',
+    source: 'jsDelivr CDN',
+    taskCategory: 'sentiment',
+    column_map: undefined,
+  },
+  {
     id: 'weibo-senti-100k',
     name: '微博情感 100k（ModelScope）',
-    description: '中文微博情感二分类，约 10 万条，国内 ModelScope 直连。适合较大规模情感分类。',
+    description: '中文微博情感二分类，约 10 万条，国内 ModelScope 直连。若失败可试上方 GitHub/jsDelivr。',
     url: 'https://modelscope.cn/datasets/damo/nlp_weibo_sentiment_classification/resolve/master/weibo_senti_100k.csv',
     source: 'ModelScope 国内',
     taskCategory: 'sentiment',
@@ -136,7 +154,8 @@ const ONLINE_TEST_DATASETS: OnlinePreset[] = [
 ];
 
 const DatasetManagement: React.FC = () => {
-  const [datasets, setDatasets] = useState<Dataset[]>([]);
+  const [trainingDatasets, setTrainingDatasets] = useState<Dataset[]>([]);
+  const [testDatasets, setTestDatasets] = useState<Dataset[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploadModalVisible, setUploadModalVisible] = useState(false);
   const [urlModalVisible, setUrlModalVisible] = useState(false);
@@ -162,13 +181,13 @@ const DatasetManagement: React.FC = () => {
   const fetchDatasets = async (showSuccess = false) => {
     setLoading(true);
     try {
-      const response = await datasetService.getDatasets();
-      if (response.code === 200 && response.data) {
-        setDatasets(response.data.datasets || []);
-        if (showSuccess) {
-          message.success('已刷新，已获取当前列表所有数据集的最新状态');
-        }
-      }
+      const [resTrain, resTest] = await Promise.all([
+        datasetService.getDatasets('training'),
+        datasetService.getDatasets('test'),
+      ]);
+      if (resTrain.code === 200 && resTrain.data) setTrainingDatasets(resTrain.data.datasets || []);
+      if (resTest.code === 200 && resTest.data) setTestDatasets(resTest.data.datasets || []);
+      if (showSuccess) message.success('已刷新，训练集与测试集列表已分别更新');
     } catch (error: any) {
       message.error(error.message || '获取数据集列表失败');
     } finally {
@@ -184,8 +203,9 @@ const DatasetManagement: React.FC = () => {
 
     try {
       const file = fileList[0].originFileObj as File;
-      await datasetService.uploadDataset(file, values.name, values.type);
-      message.success('数据集上传成功，正在处理中...');
+      const usage = datasetTab === 'test' ? 'test' : 'training';
+      await datasetService.uploadDataset(file, values.name, values.type, usage);
+      message.success(datasetTab === 'test' ? '测试集上传成功，正在处理中...' : '训练集上传成功，正在处理中...');
       setUploadModalVisible(false);
       form.resetFields();
       setFileList([]);
@@ -197,10 +217,12 @@ const DatasetManagement: React.FC = () => {
 
   const handleImportFromUrl = async (values: any) => {
     try {
+      const usage = datasetTab === 'test' ? 'test' : 'training';
       await datasetService.importFromUrl({
         name: values.name,
         url: values.url,
         type: values.type || 'text',
+        usage,
       });
       message.success('已提交从 URL 导入，正在拉取并处理...');
       setUrlModalVisible(false);
@@ -242,10 +264,12 @@ const DatasetManagement: React.FC = () => {
     }
     setImportingId(preset.id);
     try {
+      const usage = datasetTab === 'test' ? 'test' : 'training';
       await datasetService.importFromUrl({
         name: preset.name,
         url: preset.url,
         type: 'text',
+        usage,
         column_map: preset.column_map,
       });
       message.success(`「${preset.name}」已提交导入，正在拉取并处理...`);
@@ -278,27 +302,16 @@ const DatasetManagement: React.FC = () => {
     }
   };
 
-  const handleSplitDataset = async (values: {
-    dataset_id: number;
-    test_ratio: number;
-    only_test?: boolean;
-  }) => {
+  const handleSplitDataset = async (values: { dataset_id: number; test_ratio: number }) => {
     setSplitLoading(true);
     const trainRatio = 1 - (values.test_ratio ?? 0.2);
-    const onlyTest = values.only_test !== false;
     try {
-      const res = await datasetService.splitDataset(values.dataset_id, trainRatio, onlyTest);
+      const res = await datasetService.splitDataset(values.dataset_id, trainRatio);
       if (res.code === 200 && res.data) {
-        if (onlyTest) {
-          message.success(`已生成测试集 ${res.data.test_count} 条，正在清洗…`);
-        } else {
-          message.success(
-            `已划分：训练集 ${res.data.train_count} 条、测试集 ${res.data.test_count} 条，正在清洗…`
-          );
-        }
+        message.success(`测试集已生成，共 ${res.data.test_count} 条，可直接用于评估`);
         setSplitModalVisible(false);
         splitForm.resetFields();
-        setTimeout(fetchDatasets, 1500);
+        fetchDatasets();
       } else {
         message.error(res.message || '划分失败');
       }
@@ -508,7 +521,7 @@ const DatasetManagement: React.FC = () => {
             从 URL 导入
           </Button>
           <Button type="primary" icon={<UploadOutlined />} onClick={() => setUploadModalVisible(true)}>
-            上传数据集
+            {datasetTab === 'test' ? '上传测试集' : '上传训练集'}
           </Button>
           {datasetTab === 'test' && (
             <Button
@@ -523,17 +536,17 @@ const DatasetManagement: React.FC = () => {
         <div style={{ marginBottom: 12, color: '#666', fontSize: 13 }}>
           {datasetTab === 'training' ? (
             <Typography.Text type="secondary">
-              说明：仅「<strong>清洗完成</strong>」的数据集可用于创建训练任务；上传后 CSV 会先自动清洗，JSON 会直接标记为可训练。
+              说明：仅「<strong>清洗完成</strong>」的数据集可用于创建训练任务；上传后 CSV 会先自动清洗，JSON 会直接标记为可训练。本列表与「测试数据集」<strong>相互独立</strong>，删除仅影响本列表。
             </Typography.Text>
           ) : (
             <Typography.Text type="secondary">
-              说明：以下数据集可在<strong>创建评估任务</strong>时选作<strong>测试集</strong>；请确保状态为「清洗完成」。同一数据集既可作训练用，也可作测试用。
+              说明：以下数据集可在<strong>创建评估任务</strong>时选作<strong>测试集</strong>；请确保状态为「清洗完成」。本列表与「训练数据集」<strong>相互独立</strong>，删除仅影响本列表。
             </Typography.Text>
           )}
         </div>
         <Table
           columns={columns}
-          dataSource={datasets}
+          dataSource={datasetTab === 'training' ? trainingDatasets : testDatasets}
           rowKey="id"
           loading={loading}
           pagination={{
@@ -550,7 +563,7 @@ const DatasetManagement: React.FC = () => {
       </Card>
 
       <Modal
-        title="上传数据集"
+        title={datasetTab === 'test' ? '上传测试集' : '上传训练集'}
         open={uploadModalVisible}
         onCancel={() => {
           setUploadModalVisible(false);
@@ -644,7 +657,7 @@ const DatasetManagement: React.FC = () => {
       </Modal>
 
       <Modal
-        title="从已有数据集生成测试集"
+        title="从训练集划分测试集"
         open={splitModalVisible}
         onCancel={() => { setSplitModalVisible(false); splitForm.resetFields(); }}
         onOk={() => splitForm.submit()}
@@ -654,22 +667,22 @@ const DatasetManagement: React.FC = () => {
         destroyOnClose
       >
         <Typography.Paragraph type="secondary" style={{ marginBottom: 16 }}>
-          从「清洗完成」的数据集中按比例随机抽出一部分，生成一条新的<strong>测试集</strong>记录（用于评估）。原有数据集仍可继续用于训练，这样训练与测试数据分离，评估更可靠。默认只生成测试集，不新建训练集。
+          选择<strong>已清洗完成</strong>的训练集和测试集比例，将按比例随机划分出一份测试集并<strong>直接可用</strong>（无需再清洗），可在「创建评估任务」中选作测试数据。原训练集不变，仍用于训练。
         </Typography.Paragraph>
         <Form
           form={splitForm}
           layout="vertical"
-          initialValues={{ test_ratio: 0.2, only_test: true }}
+          initialValues={{ test_ratio: 0.2 }}
           onFinish={handleSplitDataset}
         >
           <Form.Item
             name="dataset_id"
-            label="选择数据集"
-            rules={[{ required: true, message: '请选择数据集' }]}
+            label="来源训练集"
+            rules={[{ required: true, message: '请选择训练集' }]}
           >
             <Select
               placeholder="仅显示已清洗完成的数据集"
-              options={datasets
+              options={trainingDatasets
                 .filter((d) => d.status === 'ready')
                 .map((d) => ({ value: d.id, label: `${d.name} (ID: ${d.id}, ${getRowCountNum(d.row_count) ?? 0} 条)` }))}
             />
@@ -695,13 +708,10 @@ const DatasetManagement: React.FC = () => {
               const r = getFieldValue('test_ratio') ?? 0.2;
               return (
                 <div style={{ marginBottom: 16, color: '#666', fontSize: 13 }}>
-                  将生成：测试集约 {(r * 100).toFixed(0)}%
+                  将生成约 {(r * 100).toFixed(0)}% 的测试集，生成后可直接用于评估
                 </div>
               );
             }}
-          </Form.Item>
-          <Form.Item name="only_test" valuePropName="checked">
-            <Checkbox>仅生成测试集（不新建训练集，原有数据集继续用于训练）</Checkbox>
           </Form.Item>
         </Form>
       </Modal>
@@ -774,20 +784,29 @@ const DatasetManagement: React.FC = () => {
           renderItem={(item) => {
             const taskTag = { sentiment: '情感', topic: '主题', other: '文本', image: '图像参考' }[item.taskCategory];
             const taskColor = { sentiment: 'green', topic: 'blue', other: 'default', image: 'purple' }[item.taskCategory];
-            const canImport = !!item.url && item.taskCategory !== 'image';
+            const isImageRef = item.taskCategory === 'image' || !item.url;
             return (
               <List.Item
                 key={item.id}
                 actions={[
-                  <Button
-                    type="primary"
-                    icon={<CloudDownloadOutlined />}
-                    onClick={() => handleImportOnlinePreset(item)}
-                    loading={importingId === item.id}
-                    disabled={!canImport}
-                  >
-                    {canImport ? '导入' : '参考'}
-                  </Button>,
+                  isImageRef ? (
+                    <Button
+                      type="link"
+                      size="small"
+                      onClick={() => message.info('图像数据集导入与训练功能开发中，敬请期待。可先通过「从 URL 导入」上传含 图片路径,label 的 CSV 备用。')}
+                    >
+                      仅参考
+                    </Button>
+                  ) : (
+                    <Button
+                      type="primary"
+                      icon={<CloudDownloadOutlined />}
+                      onClick={() => handleImportOnlinePreset(item)}
+                      loading={importingId === item.id}
+                    >
+                      导入
+                    </Button>
+                  ),
                 ]}
               >
                 <List.Item.Meta

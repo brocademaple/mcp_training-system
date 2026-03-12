@@ -1,17 +1,20 @@
 import React, { useEffect, useState } from 'react';
-import { Card, Row, Col, Statistic, Table, Tag } from 'antd';
+import { Card, Row, Col, Statistic, Table, Tag, Button, message } from 'antd';
 import {
   DatabaseOutlined,
   ExperimentOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined,
+  SyncOutlined,
 } from '@ant-design/icons';
 import { datasetService } from '@/services/dataset';
+import { syncService } from '@/services/sync';
 import type { Dataset } from '@/types';
 
 const Dashboard: React.FC = () => {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [loading, setLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     fetchDatasets();
@@ -28,6 +31,24 @@ const Dashboard: React.FC = () => {
       console.error('Failed to fetch datasets:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSyncFromDisk = async () => {
+    setSyncing(true);
+    try {
+      const res = await syncService.syncFromDisk();
+      if (res.code === 200 && res.data) {
+        const { datasets_recovered = 0, models_recovered = 0, message: msg } = res.data;
+        message.success(msg || `已恢复 ${datasets_recovered} 个数据集、${models_recovered} 个模型`);
+        fetchDatasets();
+      } else {
+        message.warning((res as any).message || '同步完成');
+      }
+    } catch (e: any) {
+      message.error(e.message || '一键同步失败');
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -74,7 +95,17 @@ const Dashboard: React.FC = () => {
 
   return (
     <div>
-      <h1>仪表盘</h1>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+        <h1 style={{ margin: 0 }}>仪表盘</h1>
+        <Button
+          type="primary"
+          icon={<SyncOutlined />}
+          loading={syncing}
+          onClick={handleSyncFromDisk}
+        >
+          一键同步数据
+        </Button>
+      </div>
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={6}>
           <Card>

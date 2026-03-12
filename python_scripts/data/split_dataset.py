@@ -54,11 +54,12 @@ def main():
         print(json.dumps(out))
         sys.exit(1)
 
-    # 分层抽样：若有 label/labels 列则按该列 stratify，保证训练/测试中类别比例一致
-    stratify_col = None
-    for col in ("label", "labels"):
+    # 分层抽样：若有 label/labels/output 列则按该列 stratify，保证训练/测试中类别比例一致。
+    # 注意：stratify 不能包含 NaN，且极小类别会导致 sklearn 报错；因此需做清洗并支持自动降级为普通随机划分。
+    stratify_col_name = None
+    for col in ("label", "labels", "output"):
         if col in df.columns:
-            stratify_col = df[col]
+            stratify_col_name = col
             break
 
     try:
@@ -70,12 +71,34 @@ def main():
         train_df = df.iloc[:n_train]
         test_df = df.iloc[n_train:]
     else:
-        if stratify_col is not None and stratify_col.nunique() > 1:
-            train_df, test_df = train_test_split(
-                df, train_size=train_ratio, stratify=stratify_col, random_state=42
-            )
+        def _split_without_stratify(_df: pd.DataFrame):
+            return train_test_split(_df, train_size=train_ratio, random_state=42)
+
+        if stratify_col_name is None:
+            train_df, test_df = _split_without_stratify(df)
         else:
-            train_df, test_df = train_test_split(df, train_size=train_ratio, random_state=42)
+            stratify_series = df[stratify_col_name]
+
+            # 过滤 stratify 列里的 NaN，避免 sklearn 报 ValueError: Input contains NaN
+            mask = stratify_series.notna()
+            df_s = df.loc[mask].copy()
+            stratify_s = stratify_series.loc[mask]
+
+            # 若过滤后数据过少，则直接普通随机划分
+            if len(df_s) < 2:
+                train_df, test_df = _split_without_stratify(df)
+            else:
+                # 仅在类别数 > 1 时尝试分层；失败则降级为普通随机划分
+                try:
+                    if stratify_s.nunique() > 1:
+                        train_df, test_df = train_test_split(
+                            df_s, train_size=train_ratio, stratify=stratify_s, random_state=42
+                        )
+                    else:
+                        train_df, test_df = _split_without_stratify(df_s)
+                except ValueError:
+                    # 常见原因：某类别样本数过少导致无法分层；或 train/test 比例不满足分层要求
+                    train_df, test_df = _split_without_stratify(df_s)
 
     base_name = os.path.splitext(os.path.basename(input_path))[0]
     ts = int(time.time())

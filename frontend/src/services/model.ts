@@ -12,4 +12,10 @@ export const modelService = {
   getDownloadUrl: (modelId: number): string => {
     return `/api/v1/models/${modelId}/download`;
   },
+
+  // 扫描 data/models 下已有目录，将磁盘上存在但数据库无记录的模型补写为训练任务+模型记录
+  recoverFromDisk: async (userId?: number): Promise<ApiResponse<{ recovered: number; message?: string }>> => {
+    const params = userId != null ? { user_id: userId } : undefined;
+    return api.post('/models/recover-from-disk', null, { params });
+  },
 };

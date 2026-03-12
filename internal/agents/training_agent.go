@@ -48,18 +48,22 @@ func (a *TrainingAgent) Train(jobID int) error {
 	ctx := context.Background()
 	utils.Info("TrainingAgent: Starting training for job %d", jobID)
 
-	// 1. Query job and dataset information
-	var datasetID int
+	// 1. Query job and dataset information（dataset_id 可能为 NULL：原数据集已删除，仅保留任务与模型记录）
+	var datasetIDNull sql.NullInt64
 	var modelType string
 	var hyperparamsJSON []byte
 	err := a.db.QueryRow(`
 		SELECT dataset_id, model_type, hyperparams
 		FROM training_jobs WHERE id = $1
-	`, jobID).Scan(&datasetID, &modelType, &hyperparamsJSON)
+	`, jobID).Scan(&datasetIDNull, &modelType, &hyperparamsJSON)
 	if err != nil {
 		utils.Error("TrainingAgent: Failed to query job: %v", err)
 		return fmt.Errorf("failed to query job: %v", err)
 	}
+	if !datasetIDNull.Valid {
+		return fmt.Errorf("原数据集已删除，无法重新训练该任务；模型已保留，可继续用于评估")
+	}
+	datasetID := int(datasetIDNull.Int64)
 
 	// Parse hyperparams
 	var hyperparams map[string]interface{}

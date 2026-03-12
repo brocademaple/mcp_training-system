@@ -32,6 +32,12 @@ Get-Content internal/database/migrations/003_add_job_name.sql | docker exec -i p
 
 评估任务状态与错误信息（评估中/失败原因）需执行：`Get-Content internal/database/migrations/006_add_evaluation_status.sql | docker exec -i postgres-mcp-training psql -U mcp_user -d mcp_training`
 
+评估任务名称（列表任务名列）需执行：`Get-Content internal/database/migrations/007_add_evaluation_name.sql | docker exec -i postgres-mcp-training psql -U mcp_user -d mcp_training`
+
+数据集用途（训练集/测试集分离，避免删除互通）需执行：`Get-Content internal/database/migrations/008_add_dataset_usage.sql | docker exec -i postgres-mcp-training psql -U mcp_user -d mcp_training`
+
+删除数据集时保留训练任务与模型（不再级联删除）需执行：`Get-Content internal/database/migrations/009_dataset_delete_set_null.sql | docker exec -i postgres-mcp-training psql -U mcp_user -d mcp_training`
+
 ---
 
 ## 3. 安装 Python 依赖

@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { Card, Table, Button, message, Tooltip, Typography } from 'antd';
-import { ReloadOutlined, DownloadOutlined } from '@ant-design/icons';
+import { ReloadOutlined, DownloadOutlined, FolderOpenOutlined } from '@ant-design/icons';
 import { modelService } from '@/services/model';
 import type { Model } from '@/types';
 
 const ModelManagement: React.FC = () => {
   const [models, setModels] = useState<Model[]>([]);
   const [loading, setLoading] = useState(false);
+  const [recovering, setRecovering] = useState(false);
 
   const fetchModels = async () => {
     setLoading(true);
@@ -25,6 +26,24 @@ const ModelManagement: React.FC = () => {
   useEffect(() => {
     fetchModels();
   }, []);
+
+  const handleRecoverFromDisk = async () => {
+    setRecovering(true);
+    try {
+      const res = await modelService.recoverFromDisk();
+      if (res.code === 200 && res.data) {
+        const n = res.data.recovered ?? 0;
+        message.success(n > 0 ? `已从 data/models 恢复 ${n} 个模型记录` : (res.data.message || '未发现可恢复的模型目录'));
+        fetchModels();
+      } else {
+        message.warning((res as any).message || '恢复完成');
+      }
+    } catch (e: any) {
+      message.error(e.message || '从磁盘恢复失败');
+    } finally {
+      setRecovering(false);
+    }
+  };
 
   const formatSize = (size: number | null | undefined): string => {
     if (size == null || size === 0) return '—';
@@ -139,9 +158,18 @@ const ModelManagement: React.FC = () => {
       <Card
         title="模型管理"
         extra={
-          <Button icon={<ReloadOutlined />} onClick={fetchModels}>
-            刷新
-          </Button>
+          <span style={{ display: 'flex', gap: 8 }}>
+            <Button
+              icon={<FolderOpenOutlined />}
+              onClick={handleRecoverFromDisk}
+              loading={recovering}
+            >
+              从磁盘恢复
+            </Button>
+            <Button icon={<ReloadOutlined />} onClick={fetchModels}>
+              刷新
+            </Button>
+          </span>
         }
       >
         <Table

@@ -99,7 +99,7 @@ const TrainingManagement: React.FC = () => {
 
   const fetchDatasets = async () => {
     try {
-      const response = await datasetService.getDatasets();
+      const response = await datasetService.getDatasets('training');
       if (response.code === 200 && response.data) {
         const readyDatasets = response.data.datasets.filter(
           (d: Dataset) => d.status === 'ready'
@@ -299,6 +299,9 @@ const TrainingManagement: React.FC = () => {
     if (msg.includes('accelerate')) {
       return '训练依赖 accelerate 库。请在项目 Python 环境中执行: pip install \'accelerate>=0.26.0\'，然后重启训练。';
     }
+    if (msg.includes('原数据集已删除')) {
+      return '该任务对应的数据集已被删除；任务与模型已保留，可继续用于评估或下载，无法重新训练。';
+    }
     return null;
   };
 
@@ -399,6 +402,14 @@ const TrainingManagement: React.FC = () => {
       key: 'model_type',
       width: 110,
       render: (type: string) => modelTypeLabel[type] ?? type,
+    },
+    {
+      title: '数据集',
+      dataIndex: 'dataset_id',
+      key: 'dataset_id',
+      width: 120,
+      render: (id: number | null | undefined) =>
+        id == null ? <span style={{ color: '#999' }}>原数据集已删除</span> : `#${id}`,
     },
     {
       title: '状态',
@@ -519,37 +530,47 @@ const TrainingManagement: React.FC = () => {
               </Popconfirm>
             )}
             {canRestart && (
-              <Popconfirm
-                title="确定要重新训练该任务？"
-                description="将使用相同配置在当前任务上重新开始训练，不会新建任务。"
-                onConfirm={async () => {
-                  try {
-                    await trainingService.restartJob(record.id);
-                    message.success('已提交重启，任务将重新开始训练');
-                    setJobs((prev) =>
-                      prev.map((j) =>
-                        j.id === record.id
-                          ? {
-                              ...j,
-                              status: 'queued',
-                              progress: 0,
-                              current_epoch: 0,
-                              error_message: undefined,
-                            }
-                          : j
-                      )
-                    );
-                  } catch (e: any) {
-                    message.error(e?.message || '重启失败');
-                  }
-                }}
-                okText="确定重启"
-                cancelText="取消"
-              >
-                <Button type="link" size="small" icon={<RedoOutlined />} style={{ padding: 0 }}>
-                  重启训练
-                </Button>
-              </Popconfirm>
+              record.dataset_id == null ? (
+                <Tooltip title="原数据集已删除，无法重新训练；模型已保留可继续评估或下载">
+                  <span>
+                    <Button type="link" size="small" icon={<RedoOutlined />} style={{ padding: 0 }} disabled>
+                      重启训练
+                    </Button>
+                  </span>
+                </Tooltip>
+              ) : (
+                <Popconfirm
+                  title="确定要重新训练该任务？"
+                  description="将使用相同配置在当前任务上重新开始训练，不会新建任务。"
+                  onConfirm={async () => {
+                    try {
+                      await trainingService.restartJob(record.id);
+                      message.success('已提交重启，任务将重新开始训练');
+                      setJobs((prev) =>
+                        prev.map((j) =>
+                          j.id === record.id
+                            ? {
+                                ...j,
+                                status: 'queued',
+                                progress: 0,
+                                current_epoch: 0,
+                                error_message: undefined,
+                              }
+                            : j
+                        )
+                      );
+                    } catch (e: any) {
+                      message.error(e?.message || '重启失败');
+                    }
+                  }}
+                  okText="确定重启"
+                  cancelText="取消"
+                >
+                  <Button type="link" size="small" icon={<RedoOutlined />} style={{ padding: 0 }}>
+                    重启训练
+                  </Button>
+                </Popconfirm>
+              )
             )}
             <Popconfirm
             title="确定删除该训练任务？"

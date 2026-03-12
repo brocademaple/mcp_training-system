@@ -6,11 +6,12 @@ import (
 	"time"
 )
 
-// TrainingJob represents a training job in the system
+// TrainingJob represents a training job in the system.
+// DatasetID 为 nil 表示原数据集已被删除，仅保留训练任务与模型记录。
 type TrainingJob struct {
 	ID           int                    `json:"id"`
 	UserID       int                    `json:"user_id"`
-	DatasetID    int                    `json:"dataset_id"`
+	DatasetID    *int                   `json:"dataset_id"` // 可空：删除数据集后置空，任务与模型保留
 	Name         string                 `json:"name"`
 	ModelType    string                 `json:"model_type"`
 	Hyperparams  map[string]interface{} `json:"hyperparams"`
@@ -41,7 +42,7 @@ func (j *TrainingJob) Create(db *sql.DB) error {
 	err = db.QueryRow(
 		query,
 		j.UserID,
-		j.DatasetID,
+		datasetIDToNullInt64(j.DatasetID),
 		j.Name,
 		j.ModelType,
 		hyperparamsJSON,
@@ -52,11 +53,19 @@ func (j *TrainingJob) Create(db *sql.DB) error {
 	return err
 }
 
+func datasetIDToNullInt64(p *int) sql.NullInt64 {
+	if p == nil {
+		return sql.NullInt64{}
+	}
+	return sql.NullInt64{Int64: int64(*p), Valid: true}
+}
+
 // GetByID retrieves a training job by ID
 func GetTrainingJobByID(db *sql.DB, id int) (*TrainingJob, error) {
 	job := &TrainingJob{}
 	var hyperparamsJSON []byte
 	var errMsg sql.NullString
+	var dID sql.NullInt64
 
 	query := `
 		SELECT id, user_id, dataset_id, name, model_type, hyperparams, status, progress,
@@ -67,7 +76,7 @@ func GetTrainingJobByID(db *sql.DB, id int) (*TrainingJob, error) {
 	err := db.QueryRow(query, id).Scan(
 		&job.ID,
 		&job.UserID,
-		&job.DatasetID,
+		&dID,
 		&job.Name,
 		&job.ModelType,
 		&hyperparamsJSON,
@@ -83,6 +92,10 @@ func GetTrainingJobByID(db *sql.DB, id int) (*TrainingJob, error) {
 	)
 	if err != nil {
 		return nil, err
+	}
+	if dID.Valid {
+		v := int(dID.Int64)
+		job.DatasetID = &v
 	}
 	if errMsg.Valid {
 		job.ErrorMessage = &errMsg.String
@@ -179,10 +192,11 @@ func GetTrainingJobsByUserID(db *sql.DB, userID int) ([]*TrainingJob, error) {
 		job := &TrainingJob{}
 		var hyperparamsJSON []byte
 		var errMsg sql.NullString
+		var dID sql.NullInt64
 		err := rows.Scan(
 			&job.ID,
 			&job.UserID,
-			&job.DatasetID,
+			&dID,
 			&job.Name,
 			&job.ModelType,
 			&hyperparamsJSON,
@@ -198,6 +212,10 @@ func GetTrainingJobsByUserID(db *sql.DB, userID int) ([]*TrainingJob, error) {
 		)
 		if err != nil {
 			return nil, err
+		}
+		if dID.Valid {
+			v := int(dID.Int64)
+			job.DatasetID = &v
 		}
 		if errMsg.Valid {
 			job.ErrorMessage = &errMsg.String

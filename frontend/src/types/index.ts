@@ -4,6 +4,8 @@ export interface Dataset {
   user_id: number;
   name: string;
   type: string;
+  /** 用途：training 训练集 | test 测试集，与列表 Tab 一一对应，删除/操作互不影响 */
+  usage?: 'training' | 'test';
   source: string | null;
   original_file_path: string | null;
   cleaned_file_path: string | null;
@@ -20,7 +22,8 @@ export interface Dataset {
 export interface TrainingJob {
   id: number;
   user_id: number;
-  dataset_id: number;
+  /** 可为 null：原数据集已删除时保留任务与模型记录 */
+  dataset_id?: number | null;
   name?: string;
   model_type: string;
   hyperparams: {
@@ -60,6 +63,8 @@ export interface Model {
 export interface Evaluation {
   id: number;
   model_id: number;
+  /** 任务名，列表展示用 */
+  name?: string;
   accuracy: number;
   precision: number;
   recall: number;
@@ -68,8 +73,8 @@ export interface Evaluation {
   confusion_matrix_path?: string;
   roc_curve_path?: string;
   report_path?: string;
-  /** running | completed | failed，用于列表与进度弹窗 */
-  status?: 'running' | 'completed' | 'failed';
+  /** running | completed | failed | cancelled，用于列表与进度弹窗 */
+  status?: 'running' | 'completed' | 'failed' | 'cancelled';
   error_message?: string | null;
   created_at: string;
 }

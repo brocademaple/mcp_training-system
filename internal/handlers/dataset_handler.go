@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"mcp-training-system/internal/agents"
@@ -80,11 +81,16 @@ func (h *DatasetHandler) UploadDataset(c *gin.Context) {
 		return
 	}
 
+	usage := c.PostForm("usage")
+	if usage != "training" && usage != "test" {
+		usage = "training"
+	}
 	// Create dataset record (nullable fields use NullString/NullInt64 for DB)
 	dataset := &models.Dataset{
 		UserID:           1,
 		Name:             name,
 		Type:             dataType,
+		Usage:            usage,
 		Source:           nullString("local"),
 		OriginalFilePath: sql.NullString{String: filePath, Valid: true},
 		FileSize:         nullInt64(file.Size),
@@ -92,7 +98,11 @@ func (h *DatasetHandler) UploadDataset(c *gin.Context) {
 	}
 
 	if err := dataset.Create(h.db); err != nil {
-		c.JSON(500, gin.H{"code": 500, "message": fmt.Sprintf("Failed to create dataset: %v", err)})
+		msg := fmt.Sprintf("Failed to create dataset: %v", err)
+		if strings.Contains(err.Error(), "usage") && strings.Contains(err.Error(), "does not exist") {
+			msg = "数据库缺少 usage 列，请先执行迁移 008。PowerShell: Get-Content internal/database/migrations/008_add_dataset_usage.sql | docker exec -i postgres-mcp-training psql -U mcp_user -d mcp_training"
+		}
+		c.JSON(500, gin.H{"code": 500, "message": msg})
 		return
 	}
 
@@ -120,12 +130,13 @@ func (h *DatasetHandler) UploadDataset(c *gin.Context) {
 }
 
 // ImportFromURL creates a dataset by fetching CSV from a URL (crawl/import from link)
-// POST /datasets/from-url  Body: JSON { "name": "...", "url": "https://...", "type": "text", "column_map": {"tweet":"text"} }
+// POST /datasets/from-url  Body: JSON { "name": "...", "url": "https://...", "type": "text", "usage": "training"|"test", "column_map": {...} }
 func (h *DatasetHandler) ImportFromURL(c *gin.Context) {
 	var req struct {
 		Name      string            `json:"name"`
 		URL       string            `json:"url"`
 		Type      string            `json:"type"`
+		Usage     string            `json:"usage"`
 		ColumnMap map[string]string `json:"column_map"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -139,21 +150,29 @@ func (h *DatasetHandler) ImportFromURL(c *gin.Context) {
 	if req.Type == "" {
 		req.Type = "text"
 	}
+	if req.Usage != "training" && req.Usage != "test" {
+		req.Usage = "training"
+	}
 
 	utils.Info("Importing dataset from URL: %s", req.URL)
 
-	filename := fmt.Sprintf("dataset_%d.csv", utils.GetTimestamp())
+	// 按 URL 路径保留扩展名（.csv / .tsv），便于清洗与列重命名逻辑区分
+	ext := filepath.Ext(req.URL)
+	if ext != ".csv" && ext != ".tsv" {
+		ext = ".csv"
+	}
+	filename := fmt.Sprintf("dataset_%d%s", utils.GetTimestamp(), ext)
 	savePath := filepath.Join(h.uploadDir, filename)
 	written, err := utils.FetchURLToFile(req.URL, savePath, 100*1024*1024)
 	if err != nil {
-		c.JSON(400, gin.H{"code": 400, "message": fmt.Sprintf("Failed to fetch URL: %v", err)})
+		c.JSON(400, gin.H{"code": 400, "message": fmt.Sprintf("拉取失败: %v", err)})
 		return
 	}
 
-	if len(req.ColumnMap) > 0 {
+	if len(req.ColumnMap) > 0 && ext == ".csv" {
 		if err := utils.RenameCSVColumns(savePath, req.ColumnMap); err != nil {
 			os.Remove(savePath)
-			c.JSON(400, gin.H{"code": 400, "message": fmt.Sprintf("Failed to rename columns: %v", err)})
+			c.JSON(400, gin.H{"code": 400, "message": fmt.Sprintf("列重命名失败: %v", err)})
 			return
 		}
 	}
@@ -162,13 +181,19 @@ func (h *DatasetHandler) ImportFromURL(c *gin.Context) {
 		UserID:           1,
 		Name:             req.Name,
 		Type:             req.Type,
+		Usage:            req.Usage,
 		Source:           sql.NullString{String: req.URL, Valid: true},
 		OriginalFilePath: sql.NullString{String: savePath, Valid: true},
 		FileSize:         nullInt64(written),
 		Status:           "uploading",
 	}
 	if err := dataset.Create(h.db); err != nil {
-		c.JSON(500, gin.H{"code": 500, "message": fmt.Sprintf("Failed to create dataset: %v", err)})
+		utils.Error("Create dataset failed (from URL): %v", err)
+		msg := fmt.Sprintf("创建数据集记录失败: %v", err)
+		if strings.Contains(err.Error(), "usage") && strings.Contains(err.Error(), "does not exist") {
+			msg = "数据库缺少 usage 列，请先执行迁移 008。PowerShell: Get-Content internal/database/migrations/008_add_dataset_usage.sql | docker exec -i postgres-mcp-training psql -U mcp_user -d mcp_training"
+		}
+		c.JSON(500, gin.H{"code": 500, "message": msg})
 		return
 	}
 
@@ -188,9 +213,10 @@ func (h *DatasetHandler) ImportFromURL(c *gin.Context) {
 	})
 }
 
-// GetDatasets returns all datasets
+// GetDatasets returns datasets, optionally filtered by usage (query param usage=training|test)
 func (h *DatasetHandler) GetDatasets(c *gin.Context) {
-	datasets, err := models.GetDatasetsByUserID(h.db, 1) // Default user
+	usage := c.Query("usage")
+	datasets, err := models.GetDatasetsByUserIDAndUsage(h.db, 1, usage)
 	if err != nil {
 		c.JSON(500, gin.H{"code": 500, "message": fmt.Sprintf("Failed to get datasets: %v", err)})
 		return
@@ -327,8 +353,8 @@ func (h *DatasetHandler) RetryCleanDataset(c *gin.Context) {
 	c.JSON(200, gin.H{"code": 200, "message": "success", "data": gin.H{"status": "processing"}})
 }
 
-// SplitDataset 从已有数据集按比例划分出训练集与测试集，创建两条新数据集记录并触发清洗
-// POST /datasets/:id/split  Body: { "train_ratio": 0.8 }  (可选，默认 0.8)
+// SplitDataset 从已有（已清洗）训练集按比例划分出测试集，仅生成一条测试集记录且直接可用
+// POST /datasets/:id/split  Body: { "train_ratio": 0.8 }  (即测试集比例 = 1 - train_ratio)
 func (h *DatasetHandler) SplitDataset(c *gin.Context) {
 	id := c.Param("id")
 	var datasetID int
@@ -341,16 +367,15 @@ func (h *DatasetHandler) SplitDataset(c *gin.Context) {
 		c.JSON(404, gin.H{"code": 404, "message": "Dataset not found"})
 		return
 	}
+	if dataset.Status != "ready" {
+		c.JSON(400, gin.H{"code": 400, "message": "仅支持从「清洗完成」的数据集划分，请先完成该数据集的清洗"})
+		return
+	}
 	trainRatio := "0.8"
-	onlyTest := false
 	if body := struct {
 		TrainRatio float64 `json:"train_ratio"`
-		OnlyTest   bool    `json:"only_test"`
-	}{}; c.ShouldBindJSON(&body) == nil {
-		if body.TrainRatio > 0 && body.TrainRatio < 1 {
-			trainRatio = fmt.Sprintf("%.2f", body.TrainRatio)
-		}
-		onlyTest = body.OnlyTest
+	}{}; c.ShouldBindJSON(&body) == nil && body.TrainRatio > 0 && body.TrainRatio < 1 {
+		trainRatio = fmt.Sprintf("%.2f", body.TrainRatio)
 	}
 
 	var inputPath string
@@ -386,33 +411,17 @@ func (h *DatasetHandler) SplitDataset(c *gin.Context) {
 	if baseName == "" {
 		baseName = fmt.Sprintf("数据集%d", datasetID)
 	}
-	trainName := baseName + "-训练集"
 	testName := baseName + "-测试集"
 	userID := 1
 	if dataset.UserID > 0 {
 		userID = dataset.UserID
 	}
 
-	var trainDS *models.Dataset
-	if !onlyTest {
-		trainDS = &models.Dataset{
-			UserID:            userID,
-			Name:              trainName,
-			Type:              dataset.Type,
-			Source:            dataset.Source,
-			OriginalFilePath:  sql.NullString{String: result.TrainPath, Valid: true},
-			FileSize:          sql.NullInt64{Int64: 0, Valid: false},
-			Status:            "uploading",
-		}
-		if err := trainDS.Create(h.db); err != nil {
-			c.JSON(500, gin.H{"code": 500, "message": fmt.Sprintf("创建训练集记录失败: %v", err)})
-			return
-		}
-	}
 	testDS := &models.Dataset{
 		UserID:            userID,
 		Name:              testName,
 		Type:              dataset.Type,
+		Usage:             "test",
 		Source:            dataset.Source,
 		OriginalFilePath:  sql.NullString{String: result.TestPath, Valid: true},
 		FileSize:          sql.NullInt64{Int64: 0, Valid: false},
@@ -423,27 +432,22 @@ func (h *DatasetHandler) SplitDataset(c *gin.Context) {
 		return
 	}
 
-	if !onlyTest && trainDS != nil {
-		go func() {
-			_ = h.dataAgent.CleanData(trainDS.ID)
-		}()
+	// 划分结果与源数据同格式，直接标记为可用，不跑清洗
+	columnCount := 0
+	if dataset.ColumnCount.Valid {
+		columnCount = int(dataset.ColumnCount.Int64)
 	}
-	go func() {
-		_ = h.dataAgent.CleanData(testDS.ID)
-	}()
+	_, _ = h.db.Exec(`
+		UPDATE datasets SET cleaned_file_path = $1, row_count = $2, column_count = $3, status = 'ready', updated_at = NOW() WHERE id = $4
+	`, result.TestPath, result.TestCount, columnCount, testDS.ID)
 
-	respData := gin.H{
-		"test_dataset_id": testDS.ID,
-		"test_count":      result.TestCount,
-	}
-	if !onlyTest && trainDS != nil {
-		respData["train_dataset_id"] = trainDS.ID
-		respData["train_count"] = result.TrainCount
-	}
 	c.JSON(200, gin.H{
 		"code":    200,
 		"message": "success",
-		"data":    respData,
+		"data": gin.H{
+			"test_dataset_id": testDS.ID,
+			"test_count":      result.TestCount,
+		},
 	})
 }
 

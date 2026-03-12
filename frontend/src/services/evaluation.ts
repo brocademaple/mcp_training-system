@@ -24,4 +24,19 @@ export const evaluationService = {
   getReportDownloadUrl: (evaluationId: number): string => {
     return `/api/v1/reports/download/${evaluationId}`;
   },
+
+  // Get report preview URL (for iframe inline display)
+  getReportPreviewUrl: (evaluationId: number): string => {
+    return `/api/v1/reports/preview/${evaluationId}`;
+  },
+
+  // 中止评估（仅 status=running 可调用）
+  cancelEvaluation: async (id: number): Promise<ApiResponse<{ status: string }>> => {
+    return api.post(`/evaluations/${id}/cancel`);
+  },
+
+  // 删除评估记录
+  deleteEvaluation: async (id: number): Promise<ApiResponse> => {
+    return api.delete(`/evaluations/${id}`);
+  },
 };

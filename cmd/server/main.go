@@ -67,6 +67,7 @@ func main() {
 	trainingHandler := handlers.NewTrainingHandler(db, trainingAgent)
 	evalHandler := handlers.NewEvaluationHandler(db, evalAgent, cfg.Storage.ReportDir)
 	modelHandler := handlers.NewModelHandler(db, ".")
+	syncHandler := handlers.NewSyncHandler(db, ".", cfg.Storage.UploadDir)
 	trainingWSHandler := handlers.NewTrainingWSHandler(redisClient)
 	utils.Info("Handlers initialized")
 
@@ -101,11 +102,18 @@ func main() {
 		api.POST("/evaluations", evalHandler.CreateEvaluation)
 		api.GET("/evaluations", evalHandler.GetEvaluations)
 		api.GET("/evaluations/:id", evalHandler.GetEvaluationResult)
+		api.POST("/evaluations/:id/cancel", evalHandler.CancelEvaluation)
+		api.DELETE("/evaluations/:id", evalHandler.DeleteEvaluation)
 		api.GET("/reports/download/:id", evalHandler.DownloadReport)
+		api.GET("/reports/preview/:id", evalHandler.PreviewReport)
 
 		// Model routes
 		api.GET("/models", modelHandler.GetModels)
+		api.POST("/models/recover-from-disk", modelHandler.RecoverModelsFromDisk)
 		api.GET("/models/:id/download", modelHandler.DownloadModel)
+
+		// 一键同步：从 data/uploads 与 data/models 补全数据集、模型及训练任务记录
+		api.POST("/sync-from-disk", syncHandler.SyncFromDisk)
 	}
 
 	// WebSocket (no /api prefix)

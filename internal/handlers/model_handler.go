@@ -7,7 +7,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"mcp-training-system/internal/models"
@@ -149,4 +151,134 @@ func (h *ModelHandler) DownloadModel(c *gin.Context) {
 		}
 		return
 	}
+}
+
+// jobDirRegex 匹配 data/models 下的 job_<数字> 目录名
+var jobDirRegex = regexp.MustCompile(`^job_(\d+)$`)
+
+// RecoverModelsFromDisk 扫描 data/models 下的 job_* 目录，对磁盘上存在但数据库无记录的模型补写 training_job + model 记录，使界面能再次列出。
+// POST /models/recover-from-disk?user_id=1
+func (h *ModelHandler) RecoverModelsFromDisk(c *gin.Context) {
+	userID := 1
+	if uid := c.Query("user_id"); uid != "" {
+		if parsed, err := strconv.Atoi(uid); err == nil {
+			userID = parsed
+		}
+	}
+
+	modelsDir := filepath.Join(h.baseDir, "data", "models")
+	info, err := os.Stat(modelsDir)
+	if err != nil || !info.IsDir() {
+		c.JSON(200, gin.H{"code": 200, "message": "success", "data": gin.H{"recovered": 0, "message": "data/models 目录不存在或不可读"}})
+		return
+	}
+
+	// 已有模型路径集合（归一化后比较）
+	existing, err := models.GetModelsByUserID(h.db, userID)
+	if err != nil {
+		c.JSON(500, gin.H{"code": 500, "message": fmt.Sprintf("获取已有模型列表失败: %v", err)})
+		return
+	}
+	pathSet := make(map[string]struct{})
+	for _, m := range existing {
+		p := normModelPath(h.baseDir, m.ModelPath)
+		if p != "" {
+			pathSet[p] = struct{}{}
+		}
+	}
+
+	// 需要有一个有效的 dataset_id（training_jobs 外键）
+	var firstDatasetID int
+	err = h.db.QueryRow("SELECT id FROM datasets ORDER BY id ASC LIMIT 1").Scan(&firstDatasetID)
+	if err != nil {
+		c.JSON(400, gin.H{"code": 400, "message": "无法恢复：请先至少创建一个数据集，再使用「从磁盘恢复」"})
+		return
+	}
+
+	entries, err := os.ReadDir(modelsDir)
+	if err != nil {
+		c.JSON(500, gin.H{"code": 500, "message": fmt.Sprintf("读取 data/models 目录失败: %v", err)})
+		return
+	}
+
+	recovered := 0
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		sub := jobDirRegex.FindStringSubmatch(name)
+		if len(sub) != 2 {
+			continue
+		}
+		relPath := filepath.Join("data", "models", name)
+		absPath := filepath.Join(modelsDir, name)
+		if _, err := os.Stat(filepath.Join(absPath, "config.json")); err != nil {
+			if _, err2 := os.Stat(filepath.Join(absPath, "model.safetensors")); err2 != nil {
+				continue
+			}
+		}
+		norm := normModelPath(h.baseDir, relPath)
+		if norm == "" {
+			continue
+		}
+		if _, ok := pathSet[norm]; ok {
+			continue
+		}
+
+		dsID := firstDatasetID
+		job := &models.TrainingJob{
+			UserID:       userID,
+			DatasetID:    &dsID,
+			Name:         "恢复的任务 (" + name + ")",
+			ModelType:    "text_classification",
+			Hyperparams:  map[string]interface{}{},
+			Status:       "completed",
+			TotalEpochs:  0,
+		}
+		if err := job.Create(h.db); err != nil {
+			utils.Error("RecoverModelsFromDisk: create job for %s: %v", name, err)
+			continue
+		}
+		modelSize := int64(0)
+		if size, err := utils.GetDirSize(absPath); err == nil {
+			modelSize = size
+		}
+		model := &models.Model{
+			JobID:     job.ID,
+			Name:      fmt.Sprintf("Model for job %s", name),
+			ModelPath: relPath,
+			ModelSize: modelSize,
+			ModelType: "text_classification",
+			Framework: "pytorch",
+		}
+		if err := model.Create(h.db); err != nil {
+			utils.Error("RecoverModelsFromDisk: create model for %s: %v", name, err)
+			continue
+		}
+		pathSet[norm] = struct{}{}
+		recovered++
+	}
+
+	c.JSON(200, gin.H{
+		"code":    200,
+		"message": "success",
+		"data":    gin.H{"recovered": recovered, "message": fmt.Sprintf("已从 data/models 恢复 %d 个模型记录", recovered)},
+	})
+}
+
+func normModelPath(baseDir, p string) string {
+	p = filepath.Clean(p)
+	if p == "." {
+		return ""
+	}
+	if filepath.IsAbs(p) {
+		rel, err := filepath.Rel(baseDir, p)
+		if err != nil {
+			return p
+		}
+		p = rel
+	}
+	p = filepath.Clean(p)
+	return strings.TrimPrefix(strings.ReplaceAll(p, "\\", "/"), "./")
 }

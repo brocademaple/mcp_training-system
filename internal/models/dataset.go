@@ -12,6 +12,7 @@ type Dataset struct {
 	UserID           int            `json:"user_id"`
 	Name             string         `json:"name"`
 	Type             string         `json:"type"`
+	Usage            string         `json:"usage"` // "training" | "test"，与前端训练集/测试集 Tab 一一对应
 	Source           sql.NullString `json:"source"`
 	OriginalFilePath sql.NullString `json:"original_file_path"`
 	CleanedFilePath  sql.NullString `json:"cleaned_file_path"`
@@ -26,9 +27,13 @@ type Dataset struct {
 
 // Create creates a new dataset in the database
 func (d *Dataset) Create(db *sql.DB) error {
+	usage := d.Usage
+	if usage != "training" && usage != "test" {
+		usage = "training"
+	}
 	query := `
-		INSERT INTO datasets (user_id, name, type, source, original_file_path, file_size, status)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO datasets (user_id, name, type, "usage", source, original_file_path, file_size, status)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id, created_at, updated_at
 	`
 	err := db.QueryRow(
@@ -36,6 +41,7 @@ func (d *Dataset) Create(db *sql.DB) error {
 		d.UserID,
 		d.Name,
 		d.Type,
+		usage,
 		d.Source,
 		d.OriginalFilePath,
 		d.FileSize,
@@ -49,7 +55,7 @@ func (d *Dataset) Create(db *sql.DB) error {
 func GetDatasetByID(db *sql.DB, id int) (*Dataset, error) {
 	dataset := &Dataset{}
 	query := `
-		SELECT id, user_id, name, type, source, original_file_path, cleaned_file_path,
+		SELECT id, user_id, name, type, COALESCE("usage",'training'), source, original_file_path, cleaned_file_path,
 		       row_count, column_count, file_size, status, error_message, created_at, updated_at
 		FROM datasets WHERE id = $1
 	`
@@ -58,6 +64,7 @@ func GetDatasetByID(db *sql.DB, id int) (*Dataset, error) {
 		&dataset.UserID,
 		&dataset.Name,
 		&dataset.Type,
+		&dataset.Usage,
 		&dataset.Source,
 		&dataset.OriginalFilePath,
 		&dataset.CleanedFilePath,
@@ -75,14 +82,30 @@ func GetDatasetByID(db *sql.DB, id int) (*Dataset, error) {
 	return dataset, nil
 }
 
-// GetByUserID retrieves all datasets for a user
+// GetByUserID retrieves all datasets for a user (no usage filter)
 func GetDatasetsByUserID(db *sql.DB, userID int) ([]*Dataset, error) {
+	return getDatasetsByUserIDWithUsage(db, userID, "")
+}
+
+// GetDatasetsByUserIDAndUsage 按用途筛选：usage 为 "training" 或 "test" 时只返回该用途；为空时返回全部
+func GetDatasetsByUserIDAndUsage(db *sql.DB, userID int, usage string) ([]*Dataset, error) {
+	return getDatasetsByUserIDWithUsage(db, userID, usage)
+}
+
+func getDatasetsByUserIDWithUsage(db *sql.DB, userID int, usage string) ([]*Dataset, error) {
 	query := `
-		SELECT id, user_id, name, type, source, original_file_path, cleaned_file_path,
+		SELECT id, user_id, name, type, COALESCE("usage",'training'), source, original_file_path, cleaned_file_path,
 		       row_count, column_count, file_size, status, error_message, created_at, updated_at
-		FROM datasets WHERE user_id = $1 ORDER BY created_at DESC
+		FROM datasets WHERE user_id = $1
 	`
-	rows, err := db.Query(query, userID)
+	args := []interface{}{userID}
+	if usage == "training" || usage == "test" {
+		query += ` AND COALESCE("usage",'training') = $2 ORDER BY created_at DESC`
+		args = append(args, usage)
+	} else {
+		query += ` ORDER BY created_at DESC`
+	}
+	rows, err := db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -96,6 +119,7 @@ func GetDatasetsByUserID(db *sql.DB, userID int) ([]*Dataset, error) {
 			&dataset.UserID,
 			&dataset.Name,
 			&dataset.Type,
+			&dataset.Usage,
 			&dataset.Source,
 			&dataset.OriginalFilePath,
 			&dataset.CleanedFilePath,

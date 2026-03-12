@@ -2,12 +2,13 @@ import api from './api';
 import type { ApiResponse, Dataset } from '@/types';
 
 export const datasetService = {
-  // Upload dataset
-  uploadDataset: async (file: File, name: string, type: string): Promise<ApiResponse> => {
+  // Upload dataset；usage 与当前 Tab 一致（training | test）
+  uploadDataset: async (file: File, name: string, type: string, usage: 'training' | 'test' = 'training'): Promise<ApiResponse> => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('name', name);
     formData.append('type', type);
+    formData.append('usage', usage);
 
     return api.post('/datasets/upload', formData, {
       headers: {
@@ -16,9 +17,10 @@ export const datasetService = {
     });
   },
 
-  // Get all datasets
-  getDatasets: async (): Promise<ApiResponse<{ total: number; datasets: Dataset[] }>> => {
-    return api.get('/datasets');
+  // Get datasets, optionally filtered by usage (training | test)，与「训练数据集/测试数据集」Tab 对应
+  getDatasets: async (usage?: 'training' | 'test'): Promise<ApiResponse<{ total: number; datasets: Dataset[] }>> => {
+    const params = usage ? { usage } : undefined;
+    return api.get('/datasets', { params });
   },
 
   // Get dataset detail
@@ -45,37 +47,35 @@ export const datasetService = {
     return api.delete(`/datasets/${id}`);
   },
 
-  // 从已有数据集按比例划分；onlyTest 为 true 时只新建测试集一条记录
+  // 从已清洗的训练集按比例划分出测试集，生成一条直接可用的测试集记录
   splitDataset: async (
     datasetId: number,
-    trainRatio: number,
-    onlyTest: boolean = true
+    trainRatio: number
   ): Promise<
     ApiResponse<{
-      train_dataset_id?: number;
       test_dataset_id: number;
-      train_count?: number;
       test_count: number;
     }>
   > => {
     return api.post(`/datasets/${datasetId}/split`, {
       train_ratio: trainRatio,
-      only_test: onlyTest,
     });
   },
 
-  // Import dataset from URL (crawl/fetch CSV from link)
+  // Import dataset from URL；usage 与当前 Tab 一致（training | test）
   importFromUrl: async (params: {
     name: string;
     url: string;
     type?: string;
+    usage?: 'training' | 'test';
     column_map?: Record<string, string>;
   }): Promise<ApiResponse<{ dataset_id: number; status: string }>> => {
-    const body: { name: string; url: string; type: string; column_map?: Record<string, string> } = {
+    const body: { name: string; url: string; type: string; usage?: string; column_map?: Record<string, string> } = {
       name: params.name,
       url: params.url,
       type: params.type || 'text',
     };
+    if (params.usage) body.usage = params.usage;
     if (params.column_map && Object.keys(params.column_map).length > 0) {
       body.column_map = params.column_map;
     }

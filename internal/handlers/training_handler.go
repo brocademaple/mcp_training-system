@@ -55,11 +55,11 @@ func (h *TrainingHandler) CreateJob(c *gin.Context) {
 	}
 	req.Hyperparams["epochs"] = float64(epochs)
 
-	// Create training job
+	datasetID := req.DatasetID
 	job := &models.TrainingJob{
 		UserID:      1, // Default user
 		Name:        req.Name,
-		DatasetID:   req.DatasetID,
+		DatasetID:   &datasetID,
 		ModelType:   req.ModelType,
 		Hyperparams: req.Hyperparams,
 		Status:      "queued",
@@ -94,11 +94,15 @@ func (h *TrainingHandler) checkQueuedJobDatasetReady(job *models.TrainingJob) {
 	if job == nil || job.Status != "queued" {
 		return
 	}
+	if job.DatasetID == nil {
+		_ = models.UpdateTrainingJobStatus(h.db, job.ID, "failed", "原数据集已删除，无法开始训练")
+		return
+	}
 	var status string
 	var cleanedPath, originalPath sql.NullString
 	err := h.db.QueryRow(
 		"SELECT status, cleaned_file_path, original_file_path FROM datasets WHERE id = $1",
-		job.DatasetID,
+		*job.DatasetID,
 	).Scan(&status, &cleanedPath, &originalPath)
 	if err != nil {
 		_ = models.UpdateTrainingJobStatus(h.db, job.ID, "failed", "dataset not found")
