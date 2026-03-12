@@ -122,3 +122,9 @@ func GetModelsByUserID(db *sql.DB, userID int) ([]*Model, error) {
 	}
 	return models, rows.Err()
 }
+
+// UpdateModelSize updates the model_size field for a model (e.g. after recalculating from disk)
+func UpdateModelSize(db *sql.DB, modelID int, size int64) error {
+	_, err := db.Exec("UPDATE models SET model_size = $1 WHERE id = $2", size, modelID)
+	return err
+}

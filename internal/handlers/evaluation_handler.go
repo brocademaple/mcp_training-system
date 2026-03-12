@@ -38,9 +38,21 @@ func (h *EvaluationHandler) CreateEvaluation(c *gin.Context) {
 		return
 	}
 
-	// Start evaluation in background
+	// 立即插入一条占位记录（status=running），列表可马上显示；后台任务完成后更新该记录
+	placeholder := &models.Evaluation{
+		ModelID:  req.ModelID,
+		Accuracy: 0, Precision: 0, Recall: 0, F1Score: 0,
+		Status: "running",
+	}
+	if err := placeholder.Create(h.db); err != nil {
+		c.JSON(500, gin.H{"code": 500, "message": fmt.Sprintf("Failed to create evaluation record: %v", err)})
+		return
+	}
+	evalID := placeholder.ID
+
+	// Start evaluation in background; on success update the placeholder
 	go func() {
-		if err := h.evalAgent.Evaluate(req.ModelID, req.TestDatasetID); err != nil {
+		if err := h.evalAgent.Evaluate(req.ModelID, req.TestDatasetID, evalID); err != nil {
 			fmt.Printf("Evaluation failed: %v\n", err)
 		}
 	}()
@@ -49,7 +61,8 @@ func (h *EvaluationHandler) CreateEvaluation(c *gin.Context) {
 		"code":    200,
 		"message": "success",
 		"data": gin.H{
-			"status": "processing",
+			"status":       "processing",
+			"evaluation_id": evalID,
 		},
 	})
 }

@@ -30,6 +30,8 @@ Get-Content internal/database/migrations/003_add_job_name.sql | docker exec -i p
 
 （若为旧库且曾建过 users 表，需再执行：`Get-Content internal/database/migrations/005_remove_users.sql | docker exec -i postgres-mcp-training psql -U mcp_user -d mcp_training`）
 
+评估任务状态与错误信息（评估中/失败原因）需执行：`Get-Content internal/database/migrations/006_add_evaluation_status.sql | docker exec -i postgres-mcp-training psql -U mcp_user -d mcp_training`
+
 ---
 
 ## 3. 安装 Python 依赖

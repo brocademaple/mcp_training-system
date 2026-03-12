@@ -45,18 +45,55 @@ def evaluate_model(model_path, test_data_path, report_suffix=None):
         model = AutoModelForSequenceClassification.from_pretrained(model_path)
         tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 
-        # Pipeline with return_all_scores for ROC (probability of each class)
+        # Pipeline: top_k=None 等价于原 return_all_scores=True，用于 ROC 概率
         classifier = pipeline(
             "text-classification",
             model=model,
             tokenizer=tokenizer,
-            return_all_scores=True,
+            top_k=None,
         )
 
-        # Load test data
-        df = pd.read_csv(test_data_path)
-        texts = df["text"].tolist()
-        true_labels = df["label"].tolist()
+        # Load test data (CSV or JSON)
+        if test_data_path.lower().endswith(".json"):
+            df = pd.read_json(test_data_path)
+        else:
+            df = pd.read_csv(test_data_path)
+
+        # 解析文本列：与训练脚本一致，支持 text/content/review/sentence/comment/instruction/input
+        text_col = None
+        for c in ("text", "content", "review", "sentence", "comment", "instruction", "input"):
+            if c in df.columns:
+                text_col = c
+                break
+        if text_col is None:
+            raise KeyError(
+                "测试集需包含文本列，列名可为 text/content/review/sentence/comment/instruction/input 之一。当前列: " + ", ".join(df.columns.astype(str))
+            )
+        texts = df[text_col].astype(str).tolist()
+
+        # 解析标签列：支持 label 或 labels，数值或可转为 0/1
+        label_col = None
+        for c in ("label", "labels"):
+            if c in df.columns:
+                label_col = c
+                break
+        if label_col is None:
+            raise KeyError(
+                "测试集需包含标签列 label 或 labels。当前列: " + ", ".join(df.columns.astype(str))
+            )
+        raw_labels = df[label_col].tolist()
+        # 统一为 0/1：若为字符串则映射 positive/1/true -> 1，其余 -> 0
+        def to_binary(x):
+            if x is None or (isinstance(x, float) and np.isnan(x)):
+                return 0
+            s = str(x).strip().lower()
+            if s in ("1", "true", "yes", "positive", "pos"):
+                return 1
+            try:
+                return 1 if int(float(x)) >= 1 else 0
+            except (ValueError, TypeError):
+                return 0
+        true_labels = [to_binary(x) for x in raw_labels]
 
         # Predictions and scores for ROC
         predictions = []

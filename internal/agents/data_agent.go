@@ -129,3 +129,46 @@ func (a *DataAgent) AnalyzeData(datasetID int) (map[string]interface{}, error) {
 	utils.Info("DataAgent: Data analysis completed for dataset %d", datasetID)
 	return result, nil
 }
+
+// SplitDatasetResult 划分数据集脚本的返回
+type SplitDatasetResult struct {
+	TrainPath  string
+	TestPath   string
+	TrainCount int
+	TestCount  int
+}
+
+// SplitDataset 从已有数据集中按比例划分训练集与测试集，写入 outputDir，返回两个文件路径与条数
+func (a *DataAgent) SplitDataset(inputPath, trainRatio, outputDir string) (*SplitDatasetResult, error) {
+	utils.Info("DataAgent: Splitting dataset %s with train_ratio=%s into %s", inputPath, trainRatio, outputDir)
+	result, err := a.executor.Execute("data/split_dataset.py", inputPath, trainRatio, outputDir)
+	if err != nil {
+		return nil, err
+	}
+	if result["status"] != "success" {
+		errMsg := "split failed"
+		if em, ok := result["error_message"].(string); ok {
+			errMsg = em
+		}
+		return nil, fmt.Errorf("%s", errMsg)
+	}
+	trainPath, _ := result["train_path"].(string)
+	testPath, _ := result["test_path"].(string)
+	if trainPath == "" || testPath == "" {
+		return nil, fmt.Errorf("split script did not return train_path or test_path")
+	}
+	trainCount := 0
+	testCount := 0
+	if v, ok := result["train_count"].(float64); ok {
+		trainCount = int(v)
+	}
+	if v, ok := result["test_count"].(float64); ok {
+		testCount = int(v)
+	}
+	return &SplitDatasetResult{
+		TrainPath:  trainPath,
+		TestPath:   testPath,
+		TrainCount: trainCount,
+		TestCount:  testCount,
+	}, nil
+}

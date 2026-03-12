@@ -25,8 +25,8 @@ func NewEvaluationAgent(db *sql.DB, executor *utils.PythonExecutor, reportDir st
 	}
 }
 
-// Evaluate evaluates a trained model
-func (a *EvaluationAgent) Evaluate(modelID int, testDatasetID int) error {
+// Evaluate evaluates a trained model. If evaluationID > 0, updates that record on success; otherwise creates a new one.
+func (a *EvaluationAgent) Evaluate(modelID int, testDatasetID int, evaluationID int) error {
 	utils.Info("EvaluationAgent: Starting evaluation for model %d", modelID)
 
 	// 1. Get model information
@@ -66,6 +66,9 @@ func (a *EvaluationAgent) Evaluate(modelID int, testDatasetID int) error {
 	result, err := a.executor.Execute("evaluation/evaluate_model.py", model.ModelPath, testDataPath, reportSuffix, a.reportDir)
 	if err != nil {
 		utils.Error("EvaluationAgent: Evaluation failed: %v", err)
+		if evaluationID > 0 {
+			_ = models.UpdateEvaluationStatus(a.db, evaluationID, "failed", err.Error())
+		}
 		return err
 	}
 
@@ -73,6 +76,9 @@ func (a *EvaluationAgent) Evaluate(modelID int, testDatasetID int) error {
 	if result["status"] != "success" {
 		errMsg := fmt.Sprintf("%v", result["error_message"])
 		utils.Error("EvaluationAgent: Evaluation failed: %s", errMsg)
+		if evaluationID > 0 {
+			_ = models.UpdateEvaluationStatus(a.db, evaluationID, "failed", errMsg)
+		}
 		return fmt.Errorf("evaluation failed: %s", errMsg)
 	}
 
@@ -81,30 +87,41 @@ func (a *EvaluationAgent) Evaluate(modelID int, testDatasetID int) error {
 	rocPath := getString(result, "roc_curve_path")
 	reportPath := getString(result, "report_path")
 
+	accuracy := getFloat(result, "accuracy")
+	precision := getFloat(result, "precision")
+	recall := getFloat(result, "recall")
+	f1Score := getFloat(result, "f1_score")
+	metrics := make(map[string]interface{})
+	if rocAuc, ok := result["roc_auc"]; ok {
+		if v, ok := rocAuc.(float64); ok {
+			metrics["roc_auc"] = v
+		}
+	}
+
+	if evaluationID > 0 {
+		if err := models.UpdateEvaluationResult(a.db, evaluationID, accuracy, precision, recall, f1Score, metrics, cmPath, rocPath, reportPath); err != nil {
+			utils.Error("EvaluationAgent: Failed to update evaluation: %v", err)
+			return err
+		}
+		utils.Info("EvaluationAgent: Evaluation completed for model %d, evaluation ID: %d", modelID, evaluationID)
+		return nil
+	}
+
 	evaluation := &models.Evaluation{
 		ModelID:             modelID,
-		Accuracy:            getFloat(result, "accuracy"),
-		Precision:           getFloat(result, "precision"),
-		Recall:              getFloat(result, "recall"),
-		F1Score:             getFloat(result, "f1_score"),
+		Accuracy:            accuracy,
+		Precision:           precision,
+		Recall:              recall,
+		F1Score:             f1Score,
+		Metrics:             metrics,
 		ConfusionMatrixPath: cmPath,
 		ROCCurvePath:        rocPath,
 		ReportPath:          reportPath,
 	}
-	if rocAuc, ok := result["roc_auc"]; ok {
-		if v, ok := rocAuc.(float64); ok {
-			if evaluation.Metrics == nil {
-				evaluation.Metrics = make(map[string]interface{})
-			}
-			evaluation.Metrics["roc_auc"] = v
-		}
-	}
-
 	if err := evaluation.Create(a.db); err != nil {
 		utils.Error("EvaluationAgent: Failed to save evaluation: %v", err)
 		return err
 	}
-
 	utils.Info("EvaluationAgent: Evaluation completed for model %d, evaluation ID: %d", modelID, evaluation.ID)
 	return nil
 }

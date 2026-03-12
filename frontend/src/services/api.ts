@@ -19,14 +19,17 @@ api.interceptors.request.use(
   }
 );
 
-// Response interceptor
+// Response interceptor：保留 status 便于调用方区分 404 等
 api.interceptors.response.use(
   (response) => {
     return response.data;
   },
   (error) => {
-    const message = error.response?.data?.message || error.message || '请求失败';
-    return Promise.reject(new Error(message));
+    const msg = error.response?.data?.message || error.message || '请求失败';
+    const status = error.response?.status;
+    const err = new Error(msg) as Error & { status?: number };
+    if (status != null) err.status = status;
+    return Promise.reject(err);
   }
 );
 

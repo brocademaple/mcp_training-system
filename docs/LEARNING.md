@@ -353,3 +353,179 @@ psql -h localhost -p 5433 -U root -d mcp_training -f internal/database/migration
 - **读 PRD 非功能**：错误重试、单元测试、日志规范，按 PRD 和 README 里的文档慢慢补。
 
 有问题随时查 `docs/API.md`、`PRD.md` 和本文件；改代码前先确定「这条请求」的完整链路，再动对应层（Handler → Agent → Python）。
+
+---
+
+## 十、Git：rebase、分支与从历史中移除不需要的文件
+
+本节整理「改写提交历史、去掉误提交的大文件」时用到的 Git 知识，便于以后查阅和操作。
+
+### 1. 基本概念
+
+- **分支**：本质是指向某次提交的指针。`main` 指向当前分支最新提交；`origin/main` 是上次从远程拉取时远程 `main` 的位置。
+- **提交历史**：一串按时间顺序排列的提交；每次提交有唯一 hash，包含「改了什么文件」和「父提交」。
+- **改写历史**：rebase、amend、filter-branch 等会生成新的提交 hash，历史线会变；若已推送到远程，需要**强制推送**才能更新远程。
+
+### 2. 什么时候用 rebase
+
+- **整理本地提交**：把多个小提交合并、改提交信息、调顺序。
+- **从某次提交里删掉不该提交的文件**：例如某次 commit 误把 `data/`、`results/` 等大文件加进去了，希望从**那一次提交**起就不再包含这些文件，让后续 push 变快、仓库变小。
+
+注意：rebase 会改写历史，只适合在**尚未推送**或**确定可以强制推送**的分支上做；多人协作分支要慎用。
+
+### 3. 交互式 rebase（`git rebase -i <父提交>`）
+
+命令形式：
+
+```bash
+git rebase -i <commit-hash>
+```
+
+会列出「从 `<commit-hash>` 之后到当前 HEAD」的所有提交，在编辑器里可以对每一行做：
+
+| 命令 | 含义 |
+|------|------|
+| `pick` | 保留该提交，不修改 |
+| `edit` | 停在该提交上，改完再 `git rebase --continue` |
+| `reword` | 保留改动，只改提交信息 |
+| `drop` | 丢弃该提交 |
+| `squash` | 与上一个提交合并 |
+
+常用流程：把某一行从 `pick` 改成 `edit` → 保存关闭 → Git 停在那次提交 → 你修改工作区或暂存区 → `git commit --amend` → `git rebase --continue`。
+
+### 4. 从「某一次提交」里移除已跟踪的大文件/目录
+
+目标：历史中**某一次提交**误加了 `data/`、`results/` 等，希望从那一次起这些路径就不再出现在 Git 历史里。
+
+#### 4.1 思路
+
+- 用 `git rebase -i` 在**误提交的那次**上选 `edit`。
+- 停在那次提交时，用 `git rm -r --cached <路径>` 只从**索引（暂存区）**里删掉这些路径，不删本地文件。
+- 用 `git commit --amend --no-edit` 把「删除这些路径」写进当前这次提交。
+- `git rebase --continue` 让后面的提交依次重放；若后面某次变成空提交，可用 `git rebase --skip`。
+
+这样，**该提交及之后**的历史里都不再包含这些文件，push 时就不会再上传它们。
+
+#### 4.2 具体步骤（示例：从 46001dd 里移除 data/ 和 results/）
+
+1. **确认要改的提交的父提交**  
+   例如要改的提交是 `46001dd`，其父提交是 `c0c8e7e`（first commit）。
+
+2. **避免「未跟踪文件被覆盖」**  
+   若工作区有未跟踪的 `data/`、`results/`、`logs/`，rebase 在切到旧提交时可能报错：  
+   `The following untracked working tree files would be overwritten by checkout`  
+   解决：先把这些目录临时移走，rebase 完成再移回。
+
+   ```powershell
+   Move-Item -Path data -Destination ../data.bak -Force
+   Move-Item -Path results -Destination ../results.bak -Force
+   Move-Item -Path logs -Destination ../logs.bak -Force
+   ```
+
+3. **开始交互式 rebase**
+
+   ```bash
+   git rebase -i c0c8e7e
+   ```
+
+   在编辑器里把 **46001dd** 那一行的 `pick` 改成 **`edit`**，保存并关闭。
+
+4. **停在那次提交时，从索引移除目录并修正该提交**
+
+   ```bash
+   git rm -r --cached data/
+   git rm -r --cached results/
+   git commit --amend --no-edit
+   git rebase --continue
+   ```
+
+   若后续停在「chore: 不再跟踪 data/」且提示无改动（因为前面已经删掉了），可执行：
+
+   ```bash
+   git rebase --skip
+   ```
+
+   然后继续 `git rebase --continue` 直到完成。
+
+5. **把临时移走的目录移回**
+
+   ```powershell
+   Move-Item -Path ../data.bak -Destination data -Force
+   Move-Item -Path ../results.bak -Destination results -Force
+   Move-Item -Path ../logs.bak -Destination logs -Force
+   ```
+
+6. **强制推送**（历史已改写，必须 force）
+
+   ```bash
+   git push --force-with-lease
+   ```
+
+   `--force-with-lease` 比 `--force` 更安全：若期间有人先 push 了同一分支，会拒绝覆盖，避免丢别人的提交。
+
+### 5. 只「从当前起不再跟踪」、不改写历史
+
+若不想动历史，只希望**以后**不再把 `data/`、`results/` 纳入提交：
+
+1. 在 `.gitignore` 里加上（示例）：
+
+   ```
+   /data
+   data/
+   results/
+   *.safetensors
+   *.pt
+   *.pth
+   *.bin
+   ```
+
+2. 从当前索引里移除（不删本地文件）：
+
+   ```bash
+   git rm -r --cached data/
+   git rm -r --cached results/
+   ```
+
+3. 提交这次「停止跟踪」的改动：
+
+   ```bash
+   git add .
+   git commit -m "chore: 不再跟踪 data/、results/"
+   ```
+
+这样历史里**过去**的提交仍然包含大文件，push 已推送过的分支时仍可能很慢；要彻底让仓库变小，需要像上一节那样用 rebase 从历史里移除。
+
+### 6. rebase 进行中 / 卡住时
+
+- **正在 rebase、想继续**：  
+  - 改完当前提交后：`git rebase --continue`  
+  - 当前提交想跳过（例如变成空提交）：`git rebase --skip`  
+  - 想放弃这次 rebase，回到 rebase 之前的状态：`git rebase --abort`
+
+- **`git rebase --abort` 报错**：  
+  若提示「untracked working tree files would be overwritten by reset」，说明工作区有未跟踪文件会被重置覆盖。先把该文件或目录临时移走，再执行 `git rebase --abort`，成功后再移回。
+
+- **提示已有 rebase 在进行**：  
+  `fatal: It seems that there is already a rebase-merge directory...`  
+  先决定是继续还是放弃：  
+  - 继续：`git rebase --continue`（或先做完当前步骤再 continue）  
+  - 放弃：先移开冲突的未跟踪文件（若有），再 `git rebase --abort`  
+  不要在不了解的情况下手动删 `.git/rebase-merge`，以免状态错乱。
+
+### 7. 多分支时的注意点
+
+- **只改当前分支**：`git rebase -i` 只影响当前分支上的提交；其他分支不受影响，直到你合并或再 rebase 它们。
+- **改过历史后**：同一分支在远程需要 `git push --force-with-lease`；别人若已经基于旧历史做了提交，需要他们用 `git pull --rebase` 或根据你的新历史重新整理自己的提交。
+- **origin/main 与本地 main**：`Your branch is ahead of 'origin/main' by N commits` 表示本地有 N 个提交还没 push；改过历史后，这 N 个提交的 hash 可能都变了，推送时要用 force-with-lease。
+
+### 8. 小结命令速查
+
+| 目的 | 命令 |
+|------|------|
+| 从某次提交起移除目录（需先移走工作区同名未跟踪目录） | `git rebase -i <父提交>` → 该提交改 `edit` → 停住后 `git rm -r --cached data/ results/` → `git commit --amend --no-edit` → `git rebase --continue` |
+| 只从当前起不再跟踪、不删本地文件 | `git rm -r --cached data/ results/` → `git add .` → `git commit` |
+| 改写历史后推送到远程 | `git push --force-with-lease` |
+| 放弃正在进行的 rebase | `git rebase --abort`（若有未跟踪文件冲突，先移走再 abort） |
+| 空提交时继续 rebase | `git rebase --skip` |
+
+把以上用到的知识（rebase、处理多分支、从分支历史中移除不想要的文件）集中放在本节，便于以后在同一项目或类似场景下复现操作。

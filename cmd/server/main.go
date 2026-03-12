@@ -58,7 +58,7 @@ func main() {
 
 	// Initialize Agents
 	dataAgent := agents.NewDataAgent(db, executor)
-	trainingAgent := agents.NewTrainingAgent(db, redisClient, executor)
+	trainingAgent := agents.NewTrainingAgent(db, redisClient, executor, ".")
 	evalAgent := agents.NewEvaluationAgent(db, executor, cfg.Storage.ReportDir)
 	utils.Info("Agents initialized")
 
@@ -85,6 +85,7 @@ func main() {
 		api.GET("/datasets/:id", datasetHandler.GetDatasetDetail)
 		api.GET("/datasets/:id/preview", datasetHandler.GetDatasetPreview)
 		api.POST("/datasets/:id/retry-clean", datasetHandler.RetryCleanDataset)
+		api.POST("/datasets/:id/split", datasetHandler.SplitDataset)
 		api.DELETE("/datasets/:id", datasetHandler.DeleteDataset)
 
 		// Training routes

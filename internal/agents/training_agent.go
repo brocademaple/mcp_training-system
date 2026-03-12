@@ -10,6 +10,7 @@ import (
 	"math"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,16 +25,21 @@ type TrainingAgent struct {
 	db       *sql.DB
 	redis    *redis.Client
 	executor *utils.PythonExecutor
+	baseDir  string // 项目根目录，用于解析相对路径的 model_path 并计算模型大小
 	// running 用于取消：jobID -> *exec.Cmd，Train 结束时删除
 	running sync.Map
 }
 
-// NewTrainingAgent creates a new training agent
-func NewTrainingAgent(db *sql.DB, redisClient *redis.Client, executor *utils.PythonExecutor) *TrainingAgent {
+// NewTrainingAgent creates a new training agent. baseDir 用于解析训练脚本返回的相对 model_path（如 ./data/models/job_1）。
+func NewTrainingAgent(db *sql.DB, redisClient *redis.Client, executor *utils.PythonExecutor, baseDir string) *TrainingAgent {
+	if baseDir == "" {
+		baseDir = "."
+	}
 	return &TrainingAgent{
 		db:       db,
 		redis:    redisClient,
 		executor: executor,
+		baseDir:  baseDir,
 	}
 }
 
@@ -226,9 +232,17 @@ func (a *TrainingAgent) Train(jobID int) error {
 
 	// 8. Save model to database（计算模型目录大小供前端「大小」列展示）
 	modelPath := finalResult["model_path"].(string)
+	absPath := modelPath
+	if !filepath.IsAbs(modelPath) {
+		absPath = filepath.Join(a.baseDir, modelPath)
+	}
+	absPath = filepath.Clean(absPath)
 	modelSize := int64(0)
-	if size, err := utils.GetDirSize(modelPath); err == nil {
+	if size, err := utils.GetDirSize(absPath); err == nil {
 		modelSize = size
+		utils.Info("TrainingAgent: Model dir size computed: %d bytes (%s)", modelSize, absPath)
+	} else {
+		utils.Error("TrainingAgent: GetDirSize failed for %q: %v (model_size will be 0)", absPath, err)
 	}
 	model := &models.Model{
 		JobID:     jobID,

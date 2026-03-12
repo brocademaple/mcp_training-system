@@ -1,20 +1,32 @@
 import React, { useEffect, useState } from 'react';
-import { Card, Table, Button, Upload, Modal, Form, Input, Select, message, Tag, List, Typography, Popconfirm, Tooltip } from 'antd';
-import { UploadOutlined, ReloadOutlined, LinkOutlined, CloudDownloadOutlined, TableOutlined, DeleteOutlined, SyncOutlined } from '@ant-design/icons';
+import { Card, Table, Button, Upload, Modal, Form, Input, InputNumber, Select, Slider, Tabs, Checkbox, message, Tag, List, Typography, Popconfirm, Tooltip } from 'antd';
+import { UploadOutlined, ReloadOutlined, LinkOutlined, CloudDownloadOutlined, TableOutlined, DeleteOutlined, SyncOutlined, PartitionOutlined } from '@ant-design/icons';
 import type { UploadFile } from 'antd/es/upload/interface';
 import { datasetService } from '@/services/dataset';
 import type { Dataset } from '@/types';
 
-// 在线数据集预设：国内加速优先（ghproxy / 直连），可直接用于文本分类（需含 text、label 列或通过 column_map 映射）
-const ONLINE_DATASETS = [
-  // ---------- 国内可访问（GitHub 加速或直连） ----------
+// 在线数据集预设：国内加速优先；支持情感、主题分类等多种文本任务，以及图像参考
+// taskCategory 用于展示：sentiment=情感, topic=主题/新闻, other=其他文本, image=图像（参考）
+type OnlinePreset = {
+  id: string;
+  name: string;
+  description: string;
+  url: string;
+  source: string;
+  taskCategory: 'sentiment' | 'topic' | 'other' | 'image';
+  column_map?: Record<string, string>;
+};
+
+const ONLINE_DATASETS: OnlinePreset[] = [
+  // ---------- 情感分类 ----------
   {
     id: 'chn-senticorp-ghproxy',
     name: 'ChnSentiCorp 酒店评论情感（国内加速）',
     description: '中文酒店评论二分类情感数据，经 ghproxy 加速拉取 GitHub 源，含 label、review；导入时自动将 review 映射为 text。',
     url: 'https://ghproxy.com/https://raw.githubusercontent.com/SophonPlus/ChineseNlpCorpus/master/datasets/ChnSentiCorp_htl_all/ChnSentiCorp_htl_all.csv',
     source: 'GitHub 国内加速',
-    column_map: { review: 'text' } as Record<string, string>,
+    taskCategory: 'sentiment',
+    column_map: { review: 'text' },
   },
   {
     id: 'chn-senticorp-github',
@@ -22,24 +34,45 @@ const ONLINE_DATASETS = [
     description: '同上数据集，GitHub raw 直连。若上一项失败可试此条（需网络可访问 GitHub）。',
     url: 'https://raw.githubusercontent.com/SophonPlus/ChineseNlpCorpus/master/datasets/ChnSentiCorp_htl_all/ChnSentiCorp_htl_all.csv',
     source: 'GitHub',
-    column_map: { review: 'text' } as Record<string, string>,
+    taskCategory: 'sentiment',
+    column_map: { review: 'text' },
   },
   {
-    id: 'hf-mirror-demo',
-    name: 'HF 示例 CSV（国内镜像 hf-mirror）',
-    description: 'Hugging Face 示例数据集通过国内镜像 hf-mirror.com 拉取，适合测试导入。若 404 可改用下方「从 URL 导入」手动粘贴直链。',
-    url: 'https://hf-mirror.com/datasets/lhoestq/demo1/resolve/main/data/train.csv',
-    source: 'hf-mirror 国内镜像',
+    id: 'weibo-senti-100k',
+    name: '微博情感 100k（ModelScope）',
+    description: '中文微博情感二分类，约 10 万条，国内 ModelScope 直连。适合较大规模情感分类。',
+    url: 'https://modelscope.cn/datasets/damo/nlp_weibo_sentiment_classification/resolve/master/weibo_senti_100k.csv',
+    source: 'ModelScope 国内',
+    taskCategory: 'sentiment',
     column_map: undefined,
   },
-  // ---------- 国外源（可能需代理） ----------
   {
     id: 'twitter-sentiment',
     name: 'Twitter 情感分析（GitHub）',
     description: 'Twitter 推文二分类情感数据，含 id、label、tweet；导入时自动将 tweet 映射为 text。',
     url: 'https://raw.githubusercontent.com/dD2405/Twitter_Sentiment_Analysis/master/train.csv',
     source: 'GitHub',
-    column_map: { tweet: 'text' } as Record<string, string>,
+    taskCategory: 'sentiment',
+    column_map: { tweet: 'text' },
+  },
+  // ---------- 主题/新闻分类 ----------
+  {
+    id: 'topic-demo-hf',
+    name: '主题/新闻分类示例（HF 镜像）',
+    description: '与 HF 示例格式相同，可用于主题分类、新闻类别等多分类文本任务。CSV 需含 text、label 列。',
+    url: 'https://hf-mirror.com/datasets/lhoestq/demo1/resolve/main/data/train.csv',
+    source: 'hf-mirror 国内镜像',
+    taskCategory: 'topic',
+    column_map: undefined,
+  },
+  {
+    id: 'hf-mirror-demo',
+    name: 'HF 示例 CSV（国内镜像 hf-mirror）',
+    description: 'Hugging Face 示例数据集通过国内镜像 hf-mirror.com 拉取，适合测试导入。若 404 可改用「从 URL 导入」手动粘贴直链。',
+    url: 'https://hf-mirror.com/datasets/lhoestq/demo1/resolve/main/data/train.csv',
+    source: 'hf-mirror 国内镜像',
+    taskCategory: 'other',
+    column_map: undefined,
   },
   {
     id: 'huggingface-demo',
@@ -47,6 +80,57 @@ const ONLINE_DATASETS = [
     description: 'Hugging Face 官方示例 train.csv。国外源，网络不佳时可试上方 hf-mirror 或 ghproxy。',
     url: 'https://huggingface.co/datasets/lhoestq/demo1/resolve/main/data/train.csv',
     source: 'Hugging Face',
+    taskCategory: 'other',
+    column_map: undefined,
+  },
+  // ---------- 图像（参考，当前仅说明；训练为文本分类） ----------
+  {
+    id: 'image-ref',
+    name: '图像分类数据集（参考）',
+    description: '当前系统训练为文本分类（BERT）。图像分类需后续扩展：可先通过「从 URL 导入」上传含 图片路径,label 的 CSV，待支持图像训练后使用。',
+    url: '',
+    source: '参考',
+    taskCategory: 'image',
+    column_map: undefined,
+  },
+];
+
+// 测试数据集预设：与上述训练集对应的官方/常用测试集，用于评估时选作测试集
+const ONLINE_TEST_DATASETS: OnlinePreset[] = [
+  {
+    id: 'hf-demo1-test',
+    name: 'HF demo1 测试集（对应 HF 示例训练集）',
+    description: '与 lhoestq/demo1 的 train.csv 同数据集的官方 test 分割，格式一致（含 text、label），适合作为 HF 示例训练集评估时的测试集。',
+    url: 'https://hf-mirror.com/datasets/lhoestq/demo1/resolve/main/data/test.csv',
+    source: 'hf-mirror 国内镜像',
+    taskCategory: 'other',
+    column_map: undefined,
+  },
+  {
+    id: 'hf-demo1-test-official',
+    name: 'HF demo1 测试集（Hugging Face 直连）',
+    description: '同上，Hugging Face 官方直链。若国内镜像不可用可试此条。',
+    url: 'https://huggingface.co/datasets/lhoestq/demo1/resolve/main/data/test.csv',
+    source: 'Hugging Face',
+    taskCategory: 'other',
+    column_map: undefined,
+  },
+  {
+    id: 'twitter-sentiment-test',
+    name: 'Twitter 情感分析测试集（对应 Twitter 训练集）',
+    description: '与 dD2405/Twitter_Sentiment_Analysis 的 train.csv 同仓库的 test.csv，二分类情感，列名含 tweet；导入时自动映射 tweet→text。',
+    url: 'https://raw.githubusercontent.com/dD2405/Twitter_Sentiment_Analysis/master/test.csv',
+    source: 'GitHub',
+    taskCategory: 'sentiment',
+    column_map: { tweet: 'text' },
+  },
+  {
+    id: 'chn-senticorp-test-tsv',
+    name: 'ChnSentiCorp 测试集（TSV，对应 ChnSentiCorp 训练集）',
+    description: 'ChnSentiCorp 官方 test 分割（TSV 格式）。若导入后清洗异常，可下载到本地将分隔符改为逗号另存为 CSV 再通过「上传」导入。',
+    url: 'https://raw.githubusercontent.com/duanruixue/chnsenticorp/main/test.tsv',
+    source: 'GitHub',
+    taskCategory: 'sentiment',
     column_map: undefined,
   },
 ];
@@ -64,8 +148,12 @@ const DatasetManagement: React.FC = () => {
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [datasetTab, setDatasetTab] = useState<'training' | 'test'>('training');
+  const [splitModalVisible, setSplitModalVisible] = useState(false);
+  const [splitLoading, setSplitLoading] = useState(false);
   const [form] = Form.useForm();
   const [urlForm] = Form.useForm();
+  const [splitForm] = Form.useForm();
 
   useEffect(() => {
     fetchDatasets();
@@ -147,7 +235,11 @@ const DatasetManagement: React.FC = () => {
     }
   };
 
-  const handleImportOnlinePreset = async (preset: (typeof ONLINE_DATASETS)[0]) => {
+  const handleImportOnlinePreset = async (preset: OnlinePreset) => {
+    if (!preset.url || preset.taskCategory === 'image') {
+      message.info('图像数据集导入与训练功能开发中，敬请期待。可先通过「从 URL 导入」上传含 图片路径,label 的 CSV 备用。');
+      return;
+    }
     setImportingId(preset.id);
     try {
       await datasetService.importFromUrl({
@@ -186,6 +278,42 @@ const DatasetManagement: React.FC = () => {
     }
   };
 
+  const handleSplitDataset = async (values: {
+    dataset_id: number;
+    test_ratio: number;
+    only_test?: boolean;
+  }) => {
+    setSplitLoading(true);
+    const trainRatio = 1 - (values.test_ratio ?? 0.2);
+    const onlyTest = values.only_test !== false;
+    try {
+      const res = await datasetService.splitDataset(values.dataset_id, trainRatio, onlyTest);
+      if (res.code === 200 && res.data) {
+        if (onlyTest) {
+          message.success(`已生成测试集 ${res.data.test_count} 条，正在清洗…`);
+        } else {
+          message.success(
+            `已划分：训练集 ${res.data.train_count} 条、测试集 ${res.data.test_count} 条，正在清洗…`
+          );
+        }
+        setSplitModalVisible(false);
+        splitForm.resetFields();
+        setTimeout(fetchDatasets, 1500);
+      } else {
+        message.error(res.message || '划分失败');
+      }
+    } catch (e: any) {
+      const status = e.status ?? e.response?.status;
+      if (status === 404) {
+        message.error('请求 404：请确认后端服务已重启（需包含「划分测试集」接口），并刷新数据集列表后重试。');
+      } else {
+        message.error(e.message || '划分失败');
+      }
+    } finally {
+      setSplitLoading(false);
+    }
+  };
+
   // 从 API 返回的 file_size 可能是 number 或 Go NullInt64 序列化的 { Int64, Valid }
   const getFileSizeNum = (raw: unknown): number | null => {
     if (raw == null) return null;
@@ -202,6 +330,15 @@ const DatasetManagement: React.FC = () => {
     if (typeof raw === 'object' && raw !== null && 'String' in (raw as object))
       return (raw as { String: string }).String || null;
     return null;
+  };
+
+  const getRowCountNum = (raw: unknown): number | null => {
+    if (raw == null) return null;
+    if (typeof raw === 'number' && !Number.isNaN(raw)) return raw;
+    if (typeof raw === 'object' && raw !== null && 'Int64' in (raw as object))
+      return (raw as { Int64: number }).Int64;
+    const n = Number(raw);
+    return Number.isNaN(n) ? null : n;
   };
 
   const columns = [
@@ -346,45 +483,53 @@ const DatasetManagement: React.FC = () => {
 
   return (
     <div>
-      <Card
-        title="数据集管理"
-        extra={
-          <div>
+      <Card>
+        <Tabs
+          activeKey={datasetTab}
+          onChange={(k) => setDatasetTab(k as 'training' | 'test')}
+          items={[
+            { key: 'training', label: '训练数据集' },
+            { key: 'test', label: '测试数据集' },
+          ]}
+          style={{ marginBottom: 12 }}
+        />
+        <div style={{ marginBottom: 12 }}>
+          <Button icon={<ReloadOutlined />} onClick={() => fetchDatasets(true)} style={{ marginRight: 8 }}>
+            刷新
+          </Button>
+          <Button
+            icon={<CloudDownloadOutlined />}
+            onClick={() => setOnlineModalVisible(true)}
+            style={{ marginRight: 8 }}
+          >
+            {datasetTab === 'test' ? '从在线导入测试集' : '从在线数据集导入'}
+          </Button>
+          <Button icon={<LinkOutlined />} onClick={() => setUrlModalVisible(true)} style={{ marginRight: 8 }}>
+            从 URL 导入
+          </Button>
+          <Button type="primary" icon={<UploadOutlined />} onClick={() => setUploadModalVisible(true)}>
+            上传数据集
+          </Button>
+          {datasetTab === 'test' && (
             <Button
-              icon={<ReloadOutlined />}
-              onClick={() => fetchDatasets(true)}
-              style={{ marginRight: 8 }}
+              icon={<PartitionOutlined />}
+              onClick={() => setSplitModalVisible(true)}
+              style={{ marginLeft: 8 }}
             >
-              刷新
+              从训练集划分测试集
             </Button>
-            <Button
-              icon={<CloudDownloadOutlined />}
-              onClick={() => setOnlineModalVisible(true)}
-              style={{ marginRight: 8 }}
-            >
-              从在线数据集导入
-            </Button>
-            <Button
-              icon={<LinkOutlined />}
-              onClick={() => setUrlModalVisible(true)}
-              style={{ marginRight: 8 }}
-            >
-              从 URL 导入
-            </Button>
-            <Button
-              type="primary"
-              icon={<UploadOutlined />}
-              onClick={() => setUploadModalVisible(true)}
-            >
-              上传数据集
-            </Button>
-          </div>
-        }
-      >
+          )}
+        </div>
         <div style={{ marginBottom: 12, color: '#666', fontSize: 13 }}>
-          <Typography.Text type="secondary">
-            说明：仅「<strong>清洗完成</strong>」的数据集可用于创建训练任务；上传后 CSV 会先自动清洗，JSON 会直接标记为可训练。
-          </Typography.Text>
+          {datasetTab === 'training' ? (
+            <Typography.Text type="secondary">
+              说明：仅「<strong>清洗完成</strong>」的数据集可用于创建训练任务；上传后 CSV 会先自动清洗，JSON 会直接标记为可训练。
+            </Typography.Text>
+          ) : (
+            <Typography.Text type="secondary">
+              说明：以下数据集可在<strong>创建评估任务</strong>时选作<strong>测试集</strong>；请确保状态为「清洗完成」。同一数据集既可作训练用，也可作测试用。
+            </Typography.Text>
+          )}
         </div>
         <Table
           columns={columns}
@@ -499,6 +644,69 @@ const DatasetManagement: React.FC = () => {
       </Modal>
 
       <Modal
+        title="从已有数据集生成测试集"
+        open={splitModalVisible}
+        onCancel={() => { setSplitModalVisible(false); splitForm.resetFields(); }}
+        onOk={() => splitForm.submit()}
+        confirmLoading={splitLoading}
+        okText="生成测试集"
+        cancelText="取消"
+        destroyOnClose
+      >
+        <Typography.Paragraph type="secondary" style={{ marginBottom: 16 }}>
+          从「清洗完成」的数据集中按比例随机抽出一部分，生成一条新的<strong>测试集</strong>记录（用于评估）。原有数据集仍可继续用于训练，这样训练与测试数据分离，评估更可靠。默认只生成测试集，不新建训练集。
+        </Typography.Paragraph>
+        <Form
+          form={splitForm}
+          layout="vertical"
+          initialValues={{ test_ratio: 0.2, only_test: true }}
+          onFinish={handleSplitDataset}
+        >
+          <Form.Item
+            name="dataset_id"
+            label="选择数据集"
+            rules={[{ required: true, message: '请选择数据集' }]}
+          >
+            <Select
+              placeholder="仅显示已清洗完成的数据集"
+              options={datasets
+                .filter((d) => d.status === 'ready')
+                .map((d) => ({ value: d.id, label: `${d.name} (ID: ${d.id}, ${getRowCountNum(d.row_count) ?? 0} 条)` }))}
+            />
+          </Form.Item>
+          <Form.Item
+            name="test_ratio"
+            label="测试集比例"
+            tooltip="从该数据中抽出多少比例作为测试集，建议 10%～30%"
+            rules={[
+              { required: true },
+              { type: 'number', min: 0.05, max: 0.5, message: '建议 0.05～0.5' },
+            ]}
+          >
+            <Slider
+              min={0.05}
+              max={0.5}
+              step={0.05}
+              marks={{ 0.05: '5%', 0.2: '20%', 0.3: '30%', 0.5: '50%' }}
+            />
+          </Form.Item>
+          <Form.Item noStyle shouldUpdate={(prev, cur) => prev.test_ratio !== cur.test_ratio}>
+            {({ getFieldValue }) => {
+              const r = getFieldValue('test_ratio') ?? 0.2;
+              return (
+                <div style={{ marginBottom: 16, color: '#666', fontSize: 13 }}>
+                  将生成：测试集约 {(r * 100).toFixed(0)}%
+                </div>
+              );
+            }}
+          </Form.Item>
+          <Form.Item name="only_test" valuePropName="checked">
+            <Checkbox>仅生成测试集（不新建训练集，原有数据集继续用于训练）</Checkbox>
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
         title={previewData ? `数据预览：${previewData.name}` : '数据预览'}
         open={previewModalVisible}
         onCancel={() => { setPreviewModalVisible(false); setPreviewData(null); }}
@@ -547,45 +755,56 @@ const DatasetManagement: React.FC = () => {
       </Modal>
 
       <Modal
-        title="从在线数据集导入"
+        title={datasetTab === 'test' ? '从在线导入测试集' : '从在线数据集导入'}
         open={onlineModalVisible}
         onCancel={() => setOnlineModalVisible(false)}
         footer={null}
         width={640}
       >
         <Typography.Paragraph type="secondary" style={{ marginBottom: 16 }}>
-          选择下方预设数据集，将从 Hugging Face / GitHub 等拉取 CSV 并导入到本系统。训练时请确保 CSV 含有 text、label 列（部分预设已自动做列名映射）。
+          {datasetTab === 'test' ? (
+            <>选择下方与现有训练集对应的测试集预设，拉取后可在「创建评估任务」时选作测试数据。格式需含 text、label（部分已做列名映射）。</>
+          ) : (
+            <>选择下方预设数据集，将从 Hugging Face / GitHub / ModelScope 等拉取 CSV 并导入。支持情感分类、主题分类等文本任务；训练时请确保 CSV 含 text、label 列（部分预设已自动做列名映射）。图像类为参考说明，当前训练为文本分类。</>
+          )}
         </Typography.Paragraph>
         <List
           itemLayout="vertical"
-          dataSource={ONLINE_DATASETS}
-          renderItem={(item) => (
-            <List.Item
-              key={item.id}
-              actions={[
-                <Button
-                  type="primary"
-                  icon={<CloudDownloadOutlined />}
-                  onClick={() => handleImportOnlinePreset(item)}
-                  loading={importingId === item.id}
-                >
-                  导入
-                </Button>,
-              ]}
-            >
-              <List.Item.Meta
-                title={
-                  <span>
-                    {item.name}
-                    <Tag color={item.source === 'Hugging Face' ? 'blue' : 'green'} style={{ marginLeft: 8 }}>
-                      {item.source}
-                    </Tag>
-                  </span>
-                }
-                description={item.description}
-              />
-            </List.Item>
-          )}
+          dataSource={datasetTab === 'test' ? ONLINE_TEST_DATASETS : ONLINE_DATASETS}
+          renderItem={(item) => {
+            const taskTag = { sentiment: '情感', topic: '主题', other: '文本', image: '图像参考' }[item.taskCategory];
+            const taskColor = { sentiment: 'green', topic: 'blue', other: 'default', image: 'purple' }[item.taskCategory];
+            const canImport = !!item.url && item.taskCategory !== 'image';
+            return (
+              <List.Item
+                key={item.id}
+                actions={[
+                  <Button
+                    type="primary"
+                    icon={<CloudDownloadOutlined />}
+                    onClick={() => handleImportOnlinePreset(item)}
+                    loading={importingId === item.id}
+                    disabled={!canImport}
+                  >
+                    {canImport ? '导入' : '参考'}
+                  </Button>,
+                ]}
+              >
+                <List.Item.Meta
+                  title={
+                    <span>
+                      {item.name}
+                      <Tag color={taskColor} style={{ marginLeft: 6 }}>{taskTag}</Tag>
+                      <Tag color={item.source.includes('国内') ? 'green' : item.source === 'Hugging Face' ? 'blue' : 'default'} style={{ marginLeft: 6 }}>
+                        {item.source}
+                      </Tag>
+                    </span>
+                  }
+                  description={item.description}
+                />
+              </List.Item>
+            );
+          }}
         />
       </Modal>
     </div>

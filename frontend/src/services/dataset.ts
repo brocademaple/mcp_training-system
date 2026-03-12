@@ -45,6 +45,25 @@ export const datasetService = {
     return api.delete(`/datasets/${id}`);
   },
 
+  // 从已有数据集按比例划分；onlyTest 为 true 时只新建测试集一条记录
+  splitDataset: async (
+    datasetId: number,
+    trainRatio: number,
+    onlyTest: boolean = true
+  ): Promise<
+    ApiResponse<{
+      train_dataset_id?: number;
+      test_dataset_id: number;
+      train_count?: number;
+      test_count: number;
+    }>
+  > => {
+    return api.post(`/datasets/${datasetId}/split`, {
+      train_ratio: trainRatio,
+      only_test: onlyTest,
+    });
+  },
+
   // Import dataset from URL (crawl/fetch CSV from link)
   importFromUrl: async (params: {
     name: string;

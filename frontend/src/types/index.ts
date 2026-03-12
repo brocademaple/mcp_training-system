@@ -68,6 +68,9 @@ export interface Evaluation {
   confusion_matrix_path?: string;
   roc_curve_path?: string;
   report_path?: string;
+  /** running | completed | failed，用于列表与进度弹窗 */
+  status?: 'running' | 'completed' | 'failed';
+  error_message?: string | null;
   created_at: string;
 }
 

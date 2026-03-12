@@ -327,6 +327,126 @@ func (h *DatasetHandler) RetryCleanDataset(c *gin.Context) {
 	c.JSON(200, gin.H{"code": 200, "message": "success", "data": gin.H{"status": "processing"}})
 }
 
+// SplitDataset 从已有数据集按比例划分出训练集与测试集，创建两条新数据集记录并触发清洗
+// POST /datasets/:id/split  Body: { "train_ratio": 0.8 }  (可选，默认 0.8)
+func (h *DatasetHandler) SplitDataset(c *gin.Context) {
+	id := c.Param("id")
+	var datasetID int
+	if _, err := fmt.Sscanf(id, "%d", &datasetID); err != nil {
+		c.JSON(400, gin.H{"code": 400, "message": "Invalid dataset id"})
+		return
+	}
+	dataset, err := models.GetDatasetByID(h.db, datasetID)
+	if err != nil || dataset == nil {
+		c.JSON(404, gin.H{"code": 404, "message": "Dataset not found"})
+		return
+	}
+	trainRatio := "0.8"
+	onlyTest := false
+	if body := struct {
+		TrainRatio float64 `json:"train_ratio"`
+		OnlyTest   bool    `json:"only_test"`
+	}{}; c.ShouldBindJSON(&body) == nil {
+		if body.TrainRatio > 0 && body.TrainRatio < 1 {
+			trainRatio = fmt.Sprintf("%.2f", body.TrainRatio)
+		}
+		onlyTest = body.OnlyTest
+	}
+
+	var inputPath string
+	tryPath := func(p string) bool {
+		if p == "" {
+			return false
+		}
+		if _, e := os.Stat(p); e == nil {
+			inputPath = p
+			return true
+		}
+		under := filepath.Join(h.uploadDir, filepath.Base(p))
+		if _, e := os.Stat(under); e == nil {
+			inputPath = under
+			return true
+		}
+		return false
+	}
+	if dataset.CleanedFilePath.Valid && tryPath(dataset.CleanedFilePath.String) {
+	} else if dataset.OriginalFilePath.Valid && tryPath(dataset.OriginalFilePath.String) {
+	} else {
+		c.JSON(400, gin.H{"code": 400, "message": "Dataset file not found on disk"})
+		return
+	}
+
+	result, err := h.dataAgent.SplitDataset(inputPath, trainRatio, h.uploadDir)
+	if err != nil {
+		c.JSON(400, gin.H{"code": 400, "message": fmt.Sprintf("划分失败: %v", err)})
+		return
+	}
+
+	baseName := dataset.Name
+	if baseName == "" {
+		baseName = fmt.Sprintf("数据集%d", datasetID)
+	}
+	trainName := baseName + "-训练集"
+	testName := baseName + "-测试集"
+	userID := 1
+	if dataset.UserID > 0 {
+		userID = dataset.UserID
+	}
+
+	var trainDS *models.Dataset
+	if !onlyTest {
+		trainDS = &models.Dataset{
+			UserID:            userID,
+			Name:              trainName,
+			Type:              dataset.Type,
+			Source:            dataset.Source,
+			OriginalFilePath:  sql.NullString{String: result.TrainPath, Valid: true},
+			FileSize:          sql.NullInt64{Int64: 0, Valid: false},
+			Status:            "uploading",
+		}
+		if err := trainDS.Create(h.db); err != nil {
+			c.JSON(500, gin.H{"code": 500, "message": fmt.Sprintf("创建训练集记录失败: %v", err)})
+			return
+		}
+	}
+	testDS := &models.Dataset{
+		UserID:            userID,
+		Name:              testName,
+		Type:              dataset.Type,
+		Source:            dataset.Source,
+		OriginalFilePath:  sql.NullString{String: result.TestPath, Valid: true},
+		FileSize:          sql.NullInt64{Int64: 0, Valid: false},
+		Status:            "uploading",
+	}
+	if err := testDS.Create(h.db); err != nil {
+		c.JSON(500, gin.H{"code": 500, "message": fmt.Sprintf("创建测试集记录失败: %v", err)})
+		return
+	}
+
+	if !onlyTest && trainDS != nil {
+		go func() {
+			_ = h.dataAgent.CleanData(trainDS.ID)
+		}()
+	}
+	go func() {
+		_ = h.dataAgent.CleanData(testDS.ID)
+	}()
+
+	respData := gin.H{
+		"test_dataset_id": testDS.ID,
+		"test_count":      result.TestCount,
+	}
+	if !onlyTest && trainDS != nil {
+		respData["train_dataset_id"] = trainDS.ID
+		respData["train_count"] = result.TrainCount
+	}
+	c.JSON(200, gin.H{
+		"code":    200,
+		"message": "success",
+		"data":    respData,
+	})
+}
+
 // DeleteDataset deletes a dataset by ID (record only; files may remain on disk).
 // DELETE /datasets/:id
 func (h *DatasetHandler) DeleteDataset(c *gin.Context) {

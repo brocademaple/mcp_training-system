@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"mcp-training-system/internal/models"
+	"mcp-training-system/internal/utils"
 )
 
 // ModelHandler handles model-related requests
@@ -41,6 +42,22 @@ func (h *ModelHandler) GetModels(c *gin.Context) {
 	if err != nil {
 		c.JSON(500, gin.H{"code": 500, "message": fmt.Sprintf("Failed to get models: %v", err)})
 		return
+	}
+
+	// 对 model_size 为 0 的已有记录，按磁盘目录补算并回写，便于前端正确展示
+	for _, m := range list {
+		if m.ModelSize > 0 {
+			continue
+		}
+		absPath := m.ModelPath
+		if !filepath.IsAbs(absPath) {
+			absPath = filepath.Join(h.baseDir, absPath)
+		}
+		absPath = filepath.Clean(absPath)
+		if size, err := utils.GetDirSize(absPath); err == nil && size > 0 {
+			_ = models.UpdateModelSize(h.db, m.ID, size)
+			m.ModelSize = size
+		}
 	}
 
 	c.JSON(200, gin.H{
