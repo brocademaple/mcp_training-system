@@ -7,6 +7,13 @@ import (
 	"time"
 )
 
+func nullIfEmpty(s string) interface{} {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	return s
+}
+
 // Evaluation represents an evaluation result in the system
 type Evaluation struct {
 	ID                   int                    `json:"id"`
@@ -32,16 +39,17 @@ func (e *Evaluation) Create(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	// 仅写入 001 基础列，兼容未执行 006/007 的库（无 status/error_message/name）
-	query := `
-		INSERT INTO evaluations (model_id, accuracy, precision, recall, f1_score, metrics,
-		                         confusion_matrix_path, roc_curve_path, report_path)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	// 优先写入 006/007 列（name/status/error_message），失败则回退到 001 基础列（兼容旧库）
+	queryNew := `
+		INSERT INTO evaluations (model_id, name, accuracy, precision, recall, f1_score, metrics,
+		                         confusion_matrix_path, roc_curve_path, report_path, status, error_message)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		RETURNING id, created_at
 	`
 	err = db.QueryRow(
-		query,
+		queryNew,
 		e.ModelID,
+		e.Name,
 		e.Accuracy,
 		e.Precision,
 		e.Recall,
@@ -50,8 +58,32 @@ func (e *Evaluation) Create(db *sql.DB) error {
 		e.ConfusionMatrixPath,
 		e.ROCCurvePath,
 		e.ReportPath,
+		e.Status,
+		nullIfEmpty(e.ErrorMessage),
 	).Scan(&e.ID, &e.CreatedAt)
-
+	if err == nil {
+		return nil
+	}
+	if strings.Contains(err.Error(), "does not exist") {
+		queryOld := `
+			INSERT INTO evaluations (model_id, accuracy, precision, recall, f1_score, metrics,
+			                         confusion_matrix_path, roc_curve_path, report_path)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			RETURNING id, created_at
+		`
+		return db.QueryRow(
+			queryOld,
+			e.ModelID,
+			e.Accuracy,
+			e.Precision,
+			e.Recall,
+			e.F1Score,
+			metricsJSON,
+			e.ConfusionMatrixPath,
+			e.ROCCurvePath,
+			e.ReportPath,
+		).Scan(&e.ID, &e.CreatedAt)
+	}
 	return err
 }
 
@@ -60,15 +92,17 @@ func GetEvaluationByID(db *sql.DB, id int) (*Evaluation, error) {
 	eval := &Evaluation{}
 	var metricsJSON []byte
 
-	// 仅查 001 基础列，兼容未执行 006/007 的库；status/error_message 在代码中赋默认值
-	query := `
-		SELECT id, model_id, accuracy, precision, recall, f1_score, metrics,
-		       confusion_matrix_path, roc_curve_path, report_path, created_at
+	// 优先读取 006/007 列（name/status/error_message），失败则回退到 001 基础列（兼容旧库）
+	queryNew := `
+		SELECT id, model_id, COALESCE(name,''), accuracy, precision, recall, f1_score, metrics,
+		       confusion_matrix_path, roc_curve_path, report_path,
+		       COALESCE(status,''), COALESCE(error_message,''), created_at
 		FROM evaluations WHERE id = $1
 	`
-	err := db.QueryRow(query, id).Scan(
+	err := db.QueryRow(queryNew, id).Scan(
 		&eval.ID,
 		&eval.ModelID,
+		&eval.Name,
 		&eval.Accuracy,
 		&eval.Precision,
 		&eval.Recall,
@@ -77,10 +111,36 @@ func GetEvaluationByID(db *sql.DB, id int) (*Evaluation, error) {
 		&eval.ConfusionMatrixPath,
 		&eval.ROCCurvePath,
 		&eval.ReportPath,
+		&eval.Status,
+		&eval.ErrorMessage,
 		&eval.CreatedAt,
 	)
 	if err != nil {
-		return nil, err
+		if strings.Contains(err.Error(), "does not exist") {
+			queryOld := `
+				SELECT id, model_id, accuracy, precision, recall, f1_score, metrics,
+				       confusion_matrix_path, roc_curve_path, report_path, created_at
+				FROM evaluations WHERE id = $1
+			`
+			err2 := db.QueryRow(queryOld, id).Scan(
+				&eval.ID,
+				&eval.ModelID,
+				&eval.Accuracy,
+				&eval.Precision,
+				&eval.Recall,
+				&eval.F1Score,
+				&metricsJSON,
+				&eval.ConfusionMatrixPath,
+				&eval.ROCCurvePath,
+				&eval.ReportPath,
+				&eval.CreatedAt,
+			)
+			if err2 != nil {
+				return nil, err2
+			}
+		} else {
+			return nil, err
+		}
 	}
 	inferStatusFromResult(eval)
 
@@ -96,15 +156,29 @@ func GetEvaluationByID(db *sql.DB, id int) (*Evaluation, error) {
 
 // inferStatusFromResult 根据报告与指标推断状态，避免「准确率 0 仍标已完成」；无法评估时给出具体原因与解决措施
 func inferStatusFromResult(e *Evaluation) {
+	// 若 DB 已显式记录状态（running/cancelled/failed/completed），优先尊重；
+	// 仅在 status 为空或 status=completed 但结果明显异常时进行推断修正。
+	if e.Status == "running" || e.Status == "cancelled" {
+		return
+	}
+	// 已标记失败且已有具体错误信息（如 Python 报错、获取测试集失败等）时不再覆盖为通用提示
+	if e.Status == "failed" && strings.TrimSpace(e.ErrorMessage) != "" {
+		return
+	}
+
 	if e.ReportPath == "" {
 		e.Status = "failed"
-		e.ErrorMessage = "未生成报告或评估异常。可能原因：脚本执行失败、测试集格式不符、模型加载失败。解决：查看后端/控制台日志定位报错；确认测试集含 text 与 label 列且与模型任务一致。"
+		if e.ErrorMessage == "" {
+			e.ErrorMessage = "未生成报告或评估异常。可能原因：脚本执行失败、测试集格式不符、模型加载失败。解决：查看后端/控制台日志定位报错；确认测试集含 text 与 label 列且与模型任务一致。"
+		}
 		return
 	}
 	acc, f1 := e.Accuracy, e.F1Score
 	if acc <= 0 && f1 <= 0 {
 		e.Status = "failed"
-		e.ErrorMessage = "评估完成但指标均为 0，无法反映真实效果。可能原因：测试集与模型任务不匹配、标签列名或取值与训练不一致、数据全为单一类别。解决：1) 确认测试集与训练集格式一致 2) 检查 label 列是否正确 3) 预览报告或查看日志排查。"
+		if e.ErrorMessage == "" {
+			e.ErrorMessage = "评估完成但指标均为 0，无法反映真实效果。可能原因：测试集与模型任务不匹配、标签列名或取值与训练不一致、数据全为单一类别。解决：1) 确认测试集与训练集格式一致 2) 检查 label 列是否正确 3) 预览报告或查看日志排查。"
+		}
 		return
 	}
 	e.Status = "completed"
@@ -145,36 +219,72 @@ func DeleteEvaluation(db *sql.DB, id int) error {
 
 // GetEvaluationsAll returns all evaluations, newest first（仅查 001 基础列，兼容未执行 006/007 的库）
 func GetEvaluationsAll(db *sql.DB) ([]*Evaluation, error) {
-	query := `
-		SELECT id, model_id, accuracy, precision, recall, f1_score, metrics,
-		       confusion_matrix_path, roc_curve_path, report_path, created_at
+	// 优先查新列；失败（列不存在）则回退旧列
+	queryNew := `
+		SELECT id, model_id, COALESCE(name,''), accuracy, precision, recall, f1_score, metrics,
+		       confusion_matrix_path, roc_curve_path, report_path,
+		       COALESCE(status,''), COALESCE(error_message,''), created_at
 		FROM evaluations
 		ORDER BY created_at DESC
 	`
-	rows, err := db.Query(query)
+	useNew := true
+	rows, err := db.Query(queryNew)
+	if err != nil && strings.Contains(err.Error(), "does not exist") {
+		queryOld := `
+			SELECT id, model_id, accuracy, precision, recall, f1_score, metrics,
+			       confusion_matrix_path, roc_curve_path, report_path, created_at
+			FROM evaluations
+			ORDER BY created_at DESC
+		`
+		useNew = false
+		rows, err = db.Query(queryOld)
+	}
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+
 	var list []*Evaluation
 	for rows.Next() {
 		e := &Evaluation{}
 		var metricsJSON []byte
-		if err := rows.Scan(
-			&e.ID,
-			&e.ModelID,
-			&e.Accuracy,
-			&e.Precision,
-			&e.Recall,
-			&e.F1Score,
-			&metricsJSON,
-			&e.ConfusionMatrixPath,
-			&e.ROCCurvePath,
-			&e.ReportPath,
-			&e.CreatedAt,
-		); err != nil {
-			return nil, err
+		if useNew {
+			if err := rows.Scan(
+				&e.ID,
+				&e.ModelID,
+				&e.Name,
+				&e.Accuracy,
+				&e.Precision,
+				&e.Recall,
+				&e.F1Score,
+				&metricsJSON,
+				&e.ConfusionMatrixPath,
+				&e.ROCCurvePath,
+				&e.ReportPath,
+				&e.Status,
+				&e.ErrorMessage,
+				&e.CreatedAt,
+			); err != nil {
+				return nil, err
+			}
+		} else {
+			if err := rows.Scan(
+				&e.ID,
+				&e.ModelID,
+				&e.Accuracy,
+				&e.Precision,
+				&e.Recall,
+				&e.F1Score,
+				&metricsJSON,
+				&e.ConfusionMatrixPath,
+				&e.ROCCurvePath,
+				&e.ReportPath,
+				&e.CreatedAt,
+			); err != nil {
+				return nil, err
+			}
 		}
+
 		inferStatusFromResult(e)
 		if len(metricsJSON) > 0 {
 			_ = json.Unmarshal(metricsJSON, &e.Metrics)

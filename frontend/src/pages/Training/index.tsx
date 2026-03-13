@@ -579,7 +579,18 @@ const TrainingManagement: React.FC = () => {
               try {
                 await trainingService.deleteJob(record.id);
                 message.success('已删除');
-                fetchJobs();
+                // 立刻从本地列表移除，保证用户“确认删除”后即时看到消失
+                setJobs((prev) => prev.filter((j) => j.id !== record.id));
+                // 若进度弹窗正打开该任务，关闭弹窗；并断开对应 WebSocket
+                if (progressModalJobId === record.id) setProgressModalJobId(null);
+                if (wsRefs.current[record.id]) {
+                  try {
+                    wsRefs.current[record.id].close();
+                  } catch (_) {}
+                  delete wsRefs.current[record.id];
+                }
+                // 再拉一次服务端列表，确保与后端最终一致（例如分页/排序变化）
+                fetchJobs(true);
               } catch (e: any) {
                 message.error(e?.message || '删除失败');
               }
@@ -606,7 +617,7 @@ const TrainingManagement: React.FC = () => {
           <div>
             <Button
               icon={<ReloadOutlined />}
-              onClick={fetchJobs}
+              onClick={() => fetchJobs(false)}
               style={{ marginRight: 8 }}
             >
               刷新

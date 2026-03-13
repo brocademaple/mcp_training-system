@@ -39,4 +39,16 @@ export const evaluationService = {
   deleteEvaluation: async (id: number): Promise<ApiResponse> => {
     return api.delete(`/evaluations/${id}`);
   },
+
+  // 失败原因洞察：根据 error_message 解析出问题归类、摘要与建议
+  getEvaluationInsight: async (
+    id: number
+  ): Promise<
+    ApiResponse<{
+      raw_message: string;
+      insight: { category: string; summary: string; suggestions: string[] };
+    }>
+  > => {
+    return api.get(`/evaluations/${id}/insight`);
+  },
 };

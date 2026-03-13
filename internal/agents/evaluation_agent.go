@@ -3,6 +3,7 @@ package agents
 import (
 	"database/sql"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"mcp-training-system/internal/models"
@@ -14,14 +15,19 @@ type EvaluationAgent struct {
 	db        *sql.DB
 	executor  *utils.PythonExecutor
 	reportDir string
+	baseDir   string // 项目根目录，用于将相对路径转为绝对路径供 Python 脚本使用
 }
 
-// NewEvaluationAgent creates a new evaluation agent
-func NewEvaluationAgent(db *sql.DB, executor *utils.PythonExecutor, reportDir string) *EvaluationAgent {
+// NewEvaluationAgent creates a new evaluation agent. baseDir 用于解析相对路径（如 data/models/job_1）。
+func NewEvaluationAgent(db *sql.DB, executor *utils.PythonExecutor, reportDir, baseDir string) *EvaluationAgent {
+	if baseDir == "" {
+		baseDir = "."
+	}
 	return &EvaluationAgent{
 		db:        db,
 		executor:  executor,
 		reportDir: reportDir,
+		baseDir:   baseDir,
 	}
 }
 
@@ -40,30 +46,60 @@ func (a *EvaluationAgent) Evaluate(modelID int, testDatasetID int, evaluationID 
 	var pathVal sql.NullString
 	if testDatasetID > 0 {
 		err = a.db.QueryRow(
-			"SELECT cleaned_file_path FROM datasets WHERE id = $1",
+			"SELECT cleaned_file_path FROM datasets WHERE id = $1 AND status = 'ready'",
 			testDatasetID,
 		).Scan(&pathVal)
+		if err != nil {
+			utils.Error("EvaluationAgent: Failed to get test dataset: %v", err)
+			return fmt.Errorf("无法获取测试集（请确认所选测试集存在且状态为「就绪」）: %v", err)
+		}
 	} else {
+		// 未指定测试集时，尝试使用该模型对应训练任务关联的数据集作为测试数据
+		var jobDatasetID sql.NullInt64
+		err = a.db.QueryRow("SELECT dataset_id FROM training_jobs WHERE id = $1", model.JobID).Scan(&jobDatasetID)
+		if err != nil {
+			utils.Error("EvaluationAgent: Failed to get job: %v", err)
+			return fmt.Errorf("无法获取训练任务信息: %v", err)
+		}
+		if !jobDatasetID.Valid {
+			msg := "未指定测试集，且该模型对应的训练数据集已删除。请先在「数据集管理」中准备一份测试集（或从训练集划分），在创建评估时选择该测试集。"
+			if evaluationID > 0 {
+				_ = models.UpdateEvaluationStatus(a.db, evaluationID, "failed", msg)
+			}
+			return fmt.Errorf("%s", msg)
+		}
 		err = a.db.QueryRow(`
-			SELECT d.cleaned_file_path FROM datasets d
+			SELECT cleaned_file_path FROM datasets d
 			JOIN training_jobs j ON j.dataset_id = d.id
 			WHERE j.id = $1
 		`, model.JobID).Scan(&pathVal)
-	}
-	if err != nil {
-		utils.Error("EvaluationAgent: Failed to get test data: %v", err)
-		return fmt.Errorf("failed to get test data: %v", err)
+		if err != nil {
+			utils.Error("EvaluationAgent: Failed to get test data: %v", err)
+			return fmt.Errorf("无法获取训练任务关联的数据集路径: %v", err)
+		}
 	}
 	if !pathVal.Valid || pathVal.String == "" {
-		return fmt.Errorf("test dataset has no cleaned file path (not ready)")
+		msg := "测试集尚未就绪（无可用文件路径）。请确认所选测试集已上传并处理完成，或从训练集划分出一份测试集后再评估。"
+		if evaluationID > 0 {
+			_ = models.UpdateEvaluationStatus(a.db, evaluationID, "failed", msg)
+		}
+		return fmt.Errorf("%s", msg)
 	}
 	testDataPath := pathVal.String
+	modelPath := model.ModelPath
+	// 转为绝对路径，避免 Python 脚本因工作目录不同找不到文件
+	if !filepath.IsAbs(modelPath) {
+		modelPath = filepath.Join(a.baseDir, modelPath)
+	}
+	if !filepath.IsAbs(testDataPath) {
+		testDataPath = filepath.Join(a.baseDir, testDataPath)
+	}
 
-	utils.Info("EvaluationAgent: Evaluating model at %s with data %s", model.ModelPath, testDataPath)
+	utils.Info("EvaluationAgent: Evaluating model at %s with data %s", modelPath, testDataPath)
 
 	// 3. Call Python evaluation script (report_suffix for unique filenames; report_dir so output matches server)
 	reportSuffix := fmt.Sprintf("%d_%d", modelID, time.Now().Unix())
-	result, err := a.executor.Execute("evaluation/evaluate_model.py", model.ModelPath, testDataPath, reportSuffix, a.reportDir)
+	result, err := a.executor.Execute("evaluation/evaluate_model.py", modelPath, testDataPath, reportSuffix, a.reportDir)
 	if err != nil {
 		utils.Error("EvaluationAgent: Evaluation failed: %v", err)
 		if evaluationID > 0 {

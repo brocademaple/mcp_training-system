@@ -8,17 +8,40 @@ import {
   SyncOutlined,
 } from '@ant-design/icons';
 import { datasetService } from '@/services/dataset';
+import { trainingService } from '@/services/training';
 import { syncService } from '@/services/sync';
 import type { Dataset } from '@/types';
+import type { TrainingJob } from '@/types';
 
 const Dashboard: React.FC = () => {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
+  const [jobs, setJobs] = useState<TrainingJob[]>([]);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     fetchDatasets();
+    fetchJobs();
   }, []);
+
+  // 有排队中/训练中时定期刷新任务数，使仪表盘与训练页一致
+  useEffect(() => {
+    const hasPending = jobs.some((j) => j.status === 'queued' || j.status === 'running');
+    if (!hasPending) return;
+    const timer = setInterval(fetchJobs, 4000);
+    return () => clearInterval(timer);
+  }, [jobs]);
+
+  const fetchJobs = async () => {
+    try {
+      const res = await trainingService.getJobs();
+      if (res.code === 200 && res.data?.jobs) {
+        setJobs(res.data.jobs);
+      }
+    } catch (_) {
+      // 静默失败，不打扰用户
+    }
+  };
 
   const fetchDatasets = async () => {
     setLoading(true);
@@ -42,6 +65,7 @@ const Dashboard: React.FC = () => {
         const { datasets_recovered = 0, models_recovered = 0, message: msg } = res.data;
         message.success(msg || `已恢复 ${datasets_recovered} 个数据集、${models_recovered} 个模型`);
         fetchDatasets();
+        fetchJobs();
       } else {
         message.warning((res as any).message || '同步完成');
       }
@@ -140,7 +164,7 @@ const Dashboard: React.FC = () => {
           <Card>
             <Statistic
               title="训练任务"
-              value={0}
+              value={jobs.length}
               prefix={<ExperimentOutlined />}
             />
           </Card>

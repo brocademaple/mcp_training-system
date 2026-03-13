@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"mcp-training-system/internal/agents"
 	"mcp-training-system/internal/models"
+	"mcp-training-system/internal/utils"
 )
 
 // EvaluationHandler handles evaluation-related requests
@@ -209,4 +210,40 @@ func (h *EvaluationHandler) PreviewReport(c *gin.Context) {
 	c.Header("Content-Disposition", "inline")
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	c.File(fullPath)
+}
+
+// GetEvaluationInsight 返回评估失败原因洞察：根据 error_message 解析出问题归类、摘要与建议操作
+// GET /evaluations/:id/insight
+func (h *EvaluationHandler) GetEvaluationInsight(c *gin.Context) {
+	id := c.Param("id")
+	var evalID int
+	if _, err := fmt.Sscanf(id, "%d", &evalID); err != nil || evalID <= 0 {
+		c.JSON(400, gin.H{"code": 400, "message": "Invalid evaluation id"})
+		return
+	}
+
+	eval, err := models.GetEvaluationByID(h.db, evalID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(404, gin.H{"code": 404, "message": "Evaluation not found"})
+			return
+		}
+		c.JSON(500, gin.H{"code": 500, "message": fmt.Sprintf("查询失败: %v", err)})
+		return
+	}
+
+	raw := eval.ErrorMessage
+	insight := utils.InsightFromErrorMessage(raw)
+	c.JSON(200, gin.H{
+		"code":    200,
+		"message": "success",
+		"data": gin.H{
+			"raw_message": raw,
+			"insight": gin.H{
+				"category":    insight.Category,
+				"summary":     insight.Summary,
+				"suggestions": insight.Suggestions,
+			},
+		},
+	})
 }

@@ -14,7 +14,7 @@ import {
   Progress,
   Tooltip,
 } from 'antd';
-import { PlusOutlined, ReloadOutlined, DownloadOutlined, SyncOutlined, StopOutlined, DeleteOutlined, EyeOutlined } from '@ant-design/icons';
+import { PlusOutlined, ReloadOutlined, DownloadOutlined, SyncOutlined, StopOutlined, DeleteOutlined, EyeOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import { evaluationService } from '@/services/evaluation';
 import { modelService } from '@/services/model';
 import { datasetService } from '@/services/dataset';
@@ -39,6 +39,14 @@ const EvaluationManagement: React.FC = () => {
   const [pageSize, setPageSize] = useState(10);
   const [cancelLoadingId, setCancelLoadingId] = useState<number | null>(null);
   const [deleteLoadingId, setDeleteLoadingId] = useState<number | null>(null);
+  const [detailModalEvalId, setDetailModalEvalId] = useState<number | null>(null);
+  const [insightLoading, setInsightLoading] = useState(false);
+  const [insightData, setInsightData] = useState<{
+    category: string;
+    summary: string;
+    suggestions: string[];
+  } | null>(null);
+  const [helpModalVisible, setHelpModalVisible] = useState(false);
   const [form] = Form.useForm();
 
   const fetchEvaluations = async (silent = false) => {
@@ -85,6 +93,32 @@ const EvaluationManagement: React.FC = () => {
       }
     });
   }, [progressModalEvalId]);
+
+  // 详情弹窗打开且该条为失败/取消时，拉取失败原因洞察（归类+摘要+建议）
+  useEffect(() => {
+    if (detailModalEvalId == null) {
+      setInsightData(null);
+      return;
+    }
+    const rec = evaluations.find((e) => e.id === detailModalEvalId);
+    const needInsight = rec && (rec.status === 'failed' || (rec.status === 'cancelled' && (rec.error_message?.trim() || '')));
+    if (!needInsight) {
+      setInsightData(null);
+      return;
+    }
+    setInsightLoading(true);
+    evaluationService
+      .getEvaluationInsight(detailModalEvalId)
+      .then((res) => {
+        if (res.code === 200 && res.data?.insight) {
+          setInsightData(res.data.insight);
+        } else {
+          setInsightData(null);
+        }
+      })
+      .catch(() => setInsightData(null))
+      .finally(() => setInsightLoading(false));
+  }, [detailModalEvalId, evaluations]);
 
   // 预览报告：打开弹窗时用当前 origin 请求预览接口，成功则设 iframe src，失败则展示友好提示（避免 iframe 内 404）
   useEffect(() => {
@@ -271,31 +305,55 @@ const EvaluationManagement: React.FC = () => {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      width: 160,
+      width: 200,
       render: (status: string, record: Evaluation) => {
         const s = status || 'completed';
+        const detailBtn = (
+          <Tooltip title="查看进度 / 成功阶段 / 失败原因（含控制台与脚本输出）">
+            <Button
+              type="text"
+              size="small"
+              icon={<EyeOutlined />}
+              onClick={() => setDetailModalEvalId(record.id)}
+              style={{ marginLeft: 4, padding: '0 4px', verticalAlign: 'middle' }}
+            />
+          </Tooltip>
+        );
         if (s === 'running') {
           const created = new Date(record.created_at).getTime();
           const mins = Math.floor((Date.now() - created) / 60000);
           const tip = mins > 0 ? `已运行 ${mins} 分钟，列表每 4 秒自动刷新` : '列表每 4 秒自动刷新';
           return (
-            <Tag color="processing" title={tip}>
-              评估中{mins > 0 ? `（${mins} 分钟）` : ''}
-            </Tag>
+            <span>
+              <Tag color="processing" title={tip}>
+                评估中{mins > 0 ? `（${mins} 分钟）` : ''}
+              </Tag>
+              {detailBtn}
+            </span>
           );
         }
         if (s === 'failed') {
-          const tip = record.error_message
-            ? `${record.error_message}`
-            : '评估失败，请查看详情或重新运行';
           return (
-            <Tooltip title={tip} placement="topLeft">
-              <Tag color="error">失败（悬停查看原因与解决措施）</Tag>
-            </Tooltip>
+            <span>
+              <Tag color="error">失败</Tag>
+              {detailBtn}
+            </span>
           );
         }
-        if (s === 'cancelled') return <Tag color="default">已取消</Tag>;
-        return <Tag color="success">已完成</Tag>;
+        if (s === 'cancelled') {
+          return (
+            <span>
+              <Tag color="default">已取消</Tag>
+              {detailBtn}
+            </span>
+          );
+        }
+        return (
+          <span>
+            <Tag color="success">已完成</Tag>
+            {detailBtn}
+          </span>
+        );
       },
     },
     {
@@ -420,7 +478,20 @@ const EvaluationManagement: React.FC = () => {
   return (
     <div>
       <Card
-        title="模型评估管理"
+        title={
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            模型评估管理
+            <Tooltip title="如何创建评估任务与选择测试集">
+              <Button
+                type="text"
+                size="small"
+                icon={<QuestionCircleOutlined />}
+                onClick={() => setHelpModalVisible(true)}
+                style={{ padding: '0 4px', verticalAlign: 'middle' }}
+              />
+            </Tooltip>
+          </span>
+        }
         extra={
           <div>
             <Button
@@ -457,6 +528,39 @@ const EvaluationManagement: React.FC = () => {
           }}
         />
       </Card>
+
+      {/* 如何创建评估任务与选择测试集说明 */}
+      <Modal
+        title="如何创建评估任务"
+        open={helpModalVisible}
+        onCancel={() => setHelpModalVisible(false)}
+        footer={[<Button key="close" type="primary" onClick={() => setHelpModalVisible(false)}>知道了</Button>]}
+        width={560}
+      >
+        <div style={{ lineHeight: 1.8, fontSize: 13 }}>
+          <p style={{ marginBottom: 12, fontWeight: 600 }}>一、创建步骤</p>
+          <ol style={{ marginBottom: 16, paddingLeft: 20 }}>
+            <li>点击「创建评估任务」。</li>
+            <li>在弹窗中<strong>选择要评估的模型</strong>（来自「模型管理」中已训练完成的模型）。</li>
+            <li><strong>选择测试数据集</strong>（推荐）：在「测试数据集」下拉框中选择一份已就绪的测试集；若留空，系统会尝试使用该模型对应训练任务当时使用的数据集（若该数据集已被删除则会失败）。</li>
+            <li>点击「创建」，任务会进入「评估中」；完成后可预览报告、下载报告。</li>
+          </ol>
+          <p style={{ marginBottom: 8, fontWeight: 600 }}>二、对模型的要求</p>
+          <ul style={{ marginBottom: 16, paddingLeft: 20 }}>
+            <li>模型必须来自<strong>已训练完成</strong>的任务（模型管理列表中可见）。</li>
+            <li>模型目录未被删除（通常位于 <code>data/models/job_*</code> 下）。</li>
+            <li>当前仅支持<strong>文本分类</strong>类模型（如 BERT 等）。</li>
+          </ul>
+          <p style={{ marginBottom: 8, fontWeight: 600 }}>三、对测试集的要求与如何选择</p>
+          <ul style={{ marginBottom: 0, paddingLeft: 20 }}>
+            <li>测试集状态须为<strong>「就绪」</strong>（已上传并处理完成，或由「从训练集划分测试集」生成）。</li>
+            <li>文件格式：CSV 或 JSON，且须包含：<br />
+              · 一列<strong>文本</strong>（列名可为 <code>text</code>、<code>content</code>、<code>review</code>、<code>sentence</code>、<code>comment</code>、<code>instruction</code>、<code>input</code> 之一）；<br />
+              · 一列<strong>标签</strong>（列名可为 <code>label</code>、<code>labels</code> 或 <code>output</code>），取值为 0/1 或可识别的二分类。</li>
+            <li><strong>建议</strong>：在「数据集管理」的「测试数据集」页签中上传或从训练集划分出一份测试集，创建评估时在下拉框中选择该测试集，这样最稳定、不易因原训练集删除而失败。</li>
+          </ul>
+        </div>
+      </Modal>
 
       <Modal
         title="创建评估任务"
@@ -608,6 +712,99 @@ const EvaluationManagement: React.FC = () => {
             )}
           </>
         )}
+      </Modal>
+
+      {/* 评估详情弹窗：当前进度 / 成功阶段 / 失败原因（含控制台与脚本输出） */}
+      <Modal
+        title={detailModalEvalId != null ? `评估详情 · ${getTaskName(evaluations.find((e) => e.id === detailModalEvalId) ?? { id: 0, model_id: 0, created_at: '' } as Evaluation)}` : '评估详情'}
+        open={detailModalEvalId != null}
+        onCancel={() => setDetailModalEvalId(null)}
+        footer={[<Button key="close" type="primary" onClick={() => setDetailModalEvalId(null)}>关闭</Button>]}
+        width={640}
+        destroyOnClose
+      >
+        {detailModalEvalId != null && (() => {
+          const r = evaluations.find((e) => e.id === detailModalEvalId);
+          if (!r) return <Spin tip="加载中…" />;
+          const status = r.status || 'completed';
+          const isEnd = status === 'completed' || status === 'failed' || status === 'cancelled';
+          const stepCurrent = status === 'running' ? 2 : isEnd ? 4 : 1;
+          const steps: { title: string; description?: string; status: StepStatus }[] = [
+            { title: '准备中', description: '加载模型与测试数据集', status: status === 'running' ? 'finish' : isEnd ? 'finish' : 'process' },
+            { title: '评估中', description: '推理并计算准确率、F1 等指标', status: status === 'running' ? 'process' : isEnd ? 'finish' : 'wait' },
+            { title: '生成报告', description: '混淆矩阵、ROC 曲线、HTML 报告', status: status === 'running' ? 'wait' : isEnd ? 'finish' : 'wait' },
+            {
+              title: status === 'completed' ? '已完成' : status === 'failed' ? '评估失败' : status === 'cancelled' ? '已取消' : '完成',
+              description: undefined,
+              status: status === 'running' ? 'wait' : status === 'completed' ? 'finish' : 'error',
+            },
+          ];
+          return (
+            <div>
+              <div style={{ marginBottom: 16, fontSize: 13, color: '#666' }}>
+                {status === 'running' && '当前评估进度如下，状态会定期刷新。'}
+                {status === 'completed' && '以下为本次评估的成功阶段，可在此页预览或下载报告。'}
+                {status === 'failed' && '评估未完成，下方展示来自控制台或脚本的失败原因与输出。'}
+                {status === 'cancelled' && '该任务已取消，若有说明将显示在下方。'}
+              </div>
+              <Steps
+                current={stepCurrent}
+                status={status === 'failed' || status === 'cancelled' ? 'error' : 'finish'}
+                direction="vertical"
+                items={steps}
+              />
+              {(status === 'failed' || status === 'cancelled') && (r.error_message?.trim() || '') && (
+                <div style={{ marginTop: 20 }}>
+                  {/* 失败原因洞察：问题归类 + 摘要 + 建议操作 */}
+                  <div style={{ marginBottom: 16, padding: 12, background: '#fff7e6', border: '1px solid #ffd591', borderRadius: 8 }}>
+                    <div style={{ fontWeight: 600, marginBottom: 8, color: '#d46b08' }}>失败原因洞察</div>
+                    {insightLoading ? (
+                      <Spin size="small" tip="解析中…" />
+                    ) : insightData ? (
+                      <>
+                        <div style={{ marginBottom: 6 }}>
+                          <span style={{ color: '#666', marginRight: 6 }}>问题归类：</span>
+                          <Tag color="orange">{insightData.category}</Tag>
+                        </div>
+                        <div style={{ marginBottom: 8, fontSize: 13, color: '#262626' }}>{insightData.summary}</div>
+                        <div style={{ fontSize: 12, color: '#595959' }}>
+                          <span style={{ fontWeight: 600 }}>建议操作：</span>
+                          <ul style={{ margin: '4px 0 0 0', paddingLeft: 18 }}>
+                            {insightData.suggestions.map((s, i) => (
+                              <li key={i}>{s}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      </>
+                    ) : (
+                      <span style={{ fontSize: 12, color: '#8c8c8c' }}>暂无结构化洞察，请查看下方原始输出。</span>
+                    )}
+                  </div>
+                  <div style={{ marginBottom: 8, fontWeight: 600, color: status === 'failed' ? '#cf1322' : '#666' }}>
+                    原始输出（控制台 / 脚本）
+                  </div>
+                  <pre
+                    style={{
+                      margin: 0,
+                      padding: 12,
+                      background: '#f5f5f5',
+                      borderRadius: 8,
+                      border: '1px solid #e8e8e8',
+                      maxHeight: 360,
+                      overflow: 'auto',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                      fontSize: 12,
+                      color: '#262626',
+                    }}
+                  >
+                    {r.error_message}
+                  </pre>
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </Modal>
     </div>
   );

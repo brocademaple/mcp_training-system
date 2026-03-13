@@ -59,7 +59,7 @@ func main() {
 	// Initialize Agents
 	dataAgent := agents.NewDataAgent(db, executor)
 	trainingAgent := agents.NewTrainingAgent(db, redisClient, executor, ".")
-	evalAgent := agents.NewEvaluationAgent(db, executor, cfg.Storage.ReportDir)
+	evalAgent := agents.NewEvaluationAgent(db, executor, cfg.Storage.ReportDir, ".")
 	utils.Info("Agents initialized")
 
 	// Initialize Handlers (baseDir "." for resolving relative model paths)
@@ -98,9 +98,10 @@ func main() {
 		api.POST("/training/jobs/:id/cancel", trainingHandler.CancelJob)
 		api.DELETE("/training/jobs/:id", trainingHandler.DeleteJob)
 
-		// Evaluation routes
+		// Evaluation routes（带 /insight 子路径的需放在 /:id 前，避免被当作 id 匹配）
 		api.POST("/evaluations", evalHandler.CreateEvaluation)
 		api.GET("/evaluations", evalHandler.GetEvaluations)
+		api.GET("/evaluations/:id/insight", evalHandler.GetEvaluationInsight)
 		api.GET("/evaluations/:id", evalHandler.GetEvaluationResult)
 		api.POST("/evaluations/:id/cancel", evalHandler.CancelEvaluation)
 		api.DELETE("/evaluations/:id", evalHandler.DeleteEvaluation)
