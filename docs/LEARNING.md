@@ -394,6 +394,42 @@ cd frontend && npm i && npm run dev
 - **不需要迁移的情况**：
   - 只改业务逻辑、路由、前端、Python，但不改表结构。
 
+#### 2.1 数据库迁移是什么、会不会跟着数据库、什么时候需要重新执行
+
+**迁移（migration）** = 一段 SQL，用来**改表结构**（加列、改约束等）。执行一次后，**改动会永久保存在当前这个数据库里**，不会因为重启应用或重启 Docker 而消失。
+
+- **「这些更改会跟着数据库吗？」**  
+  会。迁移改的是**数据库本身**（PostgreSQL 里的表结构、数据）。只要不删库、不换库，这些列和约束会一直在。
+
+- **「每次都要执行这些语句吗？」**  
+  **不用每次**。每条迁移在**同一个数据库上只需执行一次**。执行过一次 006、007 后，`evaluations` 表里已经有 `status`、`error_message`、`name` 列了，不用再跑。
+
+- **什么时候需要执行 / 重新执行？**
+  - **新库**：新建了一个数据库（例如新电脑克隆项目、新环境 `docker-compose up` 建了新的 Postgres 卷），需要按顺序执行从 001 到你用到的所有迁移。
+  - **旧库升级**：以前只跑过 001～003，现在代码用到了评估状态、数据集用途等，就需要**补跑** 006、007、008、009，每个**只跑一次**即可。
+  - **同一条迁移对同一库重复执行**：本项目的迁移用了 `ADD COLUMN IF NOT EXISTS` 等，**重复执行不会报错**，也不会重复加列；但正常使用下没必要重复执行。
+
+- **那条命令在干什么？**  
+  `Get-Content internal/database/migrations/006_add_evaluation_status.sql | docker exec -i postgres-mcp-training psql -U mcp_user -d mcp_training`  
+  - `Get-Content ...`：读出 006 这个 SQL 文件的内容。  
+  - `| docker exec -i postgres-mcp-training psql ...`：把内容通过管道传给**正在运行的 Postgres 容器**里的 `psql`，在 `mcp_training` 库里执行这段 SQL。  
+  也就是：**把本地的 006.sql 在 Docker 里的数据库上执行一遍**，执行完，库里就多了对应列，以后不用再执行这条。
+
+#### 2.2 本项目的迁移清单（按顺序）
+
+| 迁移文件 | 作用 | 何时需要执行 |
+|----------|------|--------------|
+| `001_init.sql` | 建表（datasets, training_jobs, models, evaluations 等） | 全新库第一次初始化 |
+| `002_seed_default_user.sql` | 插入默认用户 id=1（若仍用 users 表） | 依赖 users 时首次初始化 |
+| `003_add_job_name.sql` | 训练任务表增加 `name` 列 | 旧库未加过时执行一次 |
+| `005_remove_users.sql` | 移除 users 相关（若项目已不用用户表） | 仅旧库曾建过 users 时按需执行 |
+| `006_add_evaluation_status.sql` | evaluations 表增加 `status`、`error_message` | 要用「评估中/失败/原因」时执行一次 |
+| `007_add_evaluation_name.sql` | evaluations 表增加 `name` | 要用评估任务名称列时执行一次 |
+| `008_add_dataset_usage.sql` | datasets 表增加 `usage`（训练/测试集区分） | 要用训练集/测试集分离时执行一次 |
+| `009_dataset_delete_set_null.sql` | 删除数据集时训练任务不级联删除，仅置空 dataset_id | 要保留已删数据集对应的任务与模型时执行一次 |
+
+执行过一次后，**这些更改会一直跟着这个数据库**；只有换新库或新环境时，才需要重新按顺序执行对应的迁移。
+
 ### 3. 推荐命令（按当前 `.env`：root/5433）
 
 在项目根目录，初始化 + seed 一次：
@@ -401,6 +437,13 @@ cd frontend && npm i && npm run dev
 ```bash
 psql -h localhost -p 5433 -U root -d mcp_training -f internal/database/migrations/001_init.sql
 psql -h localhost -p 5433 -U root -d mcp_training -f internal/database/migrations/002_seed_default_user.sql
+```
+
+使用 Docker 时（PowerShell），例如执行 006、007：
+
+```powershell
+Get-Content internal/database/migrations/006_add_evaluation_status.sql | docker exec -i postgres-mcp-training psql -U mcp_user -d mcp_training
+Get-Content internal/database/migrations/007_add_evaluation_name.sql | docker exec -i postgres-mcp-training psql -U mcp_user -d mcp_training
 ```
 
 ---

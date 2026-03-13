@@ -15,11 +15,24 @@ import {
   Steps,
   Spin,
   Popconfirm,
+  Tabs,
+  Typography,
 } from 'antd';
-import { PlusOutlined, ReloadOutlined, EyeOutlined, RedoOutlined, DeleteOutlined, SyncOutlined, StopOutlined } from '@ant-design/icons';
+import {
+  PlusOutlined,
+  ReloadOutlined,
+  EyeOutlined,
+  RedoOutlined,
+  DeleteOutlined,
+  SyncOutlined,
+  StopOutlined,
+  DownloadOutlined,
+  FolderOpenOutlined,
+} from '@ant-design/icons';
 import { trainingService } from '@/services/training';
 import { datasetService } from '@/services/dataset';
-import type { TrainingJob, Dataset } from '@/types';
+import { modelService } from '@/services/model';
+import type { TrainingJob, Dataset, Model } from '@/types';
 
 type StepStatus = 'wait' | 'process' | 'finish' | 'error';
 
@@ -29,6 +42,10 @@ const TrainingManagement: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [progressModalJobId, setProgressModalJobId] = useState<number | null>(null);
+  const [activeTab, setActiveTab] = useState<'jobs' | 'models'>('jobs');
+  const [models, setModels] = useState<Model[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsRecovering, setModelsRecovering] = useState(false);
   const [form] = Form.useForm();
   const wsRefs = useRef<Record<number, WebSocket>>({});
 
@@ -111,6 +128,20 @@ const TrainingManagement: React.FC = () => {
     }
   };
 
+  const fetchModels = async () => {
+    setModelsLoading(true);
+    try {
+      const response = await modelService.getModels();
+      if (response.code === 200 && response.data) {
+        setModels(response.data.models || []);
+      }
+    } catch (error: any) {
+      message.error(error.message || '获取模型列表失败');
+    } finally {
+      setModelsLoading(false);
+    }
+  };
+
   // 打开进度弹窗时若该任务为「排队中」，拉取一次最新状态（后端会修正为失败等）并更新列表，避免显示滞后
   const refreshJobWhenOpeningProgress = async (jobId: number) => {
     const job = jobs.find((j) => j.id === jobId);
@@ -179,6 +210,46 @@ const TrainingManagement: React.FC = () => {
       setTimeout(fetchJobs, 500);
     } catch (error: any) {
       message.error(error.message || '创建任务失败');
+    }
+  };
+
+  const formatModelSize = (size: number | null | undefined): string => {
+    if (size == null || size === 0) return '—';
+    const n = Number(size);
+    if (Number.isNaN(n) || n <= 0) return '—';
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(2)} KB`;
+    return `${(n / 1024 / 1024).toFixed(2)} MB`;
+  };
+
+  const getModelSizeNum = (raw: unknown): number | null => {
+    if (raw == null) return null;
+    if (typeof raw === 'number' && !Number.isNaN(raw)) return raw;
+    if (typeof raw === 'object' && raw !== null && 'Int64' in (raw as object))
+      return (raw as { Int64: number }).Int64;
+    const n = Number(raw);
+    return Number.isNaN(n) ? null : n;
+  };
+
+  const handleRecoverModelsFromDisk = async () => {
+    setModelsRecovering(true);
+    try {
+      const res = await modelService.recoverFromDisk();
+      if (res.code === 200 && res.data) {
+        const n = (res.data as any).recovered ?? (res.data as any).models_recovered ?? 0;
+        const msg =
+          n > 0
+            ? `已从 data/models 恢复 ${n} 个模型记录`
+            : (res.data as any).message || '未发现可恢复的模型目录';
+        message.success(msg);
+        fetchModels();
+      } else {
+        message.warning((res as any).message || '恢复完成');
+      }
+    } catch (e: any) {
+      message.error(e?.message || '从磁盘恢复失败');
+    } finally {
+      setModelsRecovering(false);
     }
   };
 
@@ -609,40 +680,174 @@ const TrainingManagement: React.FC = () => {
     },
   ];
 
+  const modelColumns = [
+    {
+      title: 'ID',
+      dataIndex: 'id',
+      key: 'id',
+      width: 72,
+    },
+    {
+      title: '名称',
+      dataIndex: 'name',
+      key: 'name',
+      width: 160,
+      ellipsis: true,
+      render: (name: string) => name || '—',
+    },
+    {
+      title: '训练任务',
+      dataIndex: 'job_id',
+      key: 'job_id',
+      width: 96,
+    },
+    {
+      title: '模型类型',
+      dataIndex: 'model_type',
+      key: 'model_type',
+      width: 160,
+      ellipsis: true,
+      render: (v: string) =>
+        v ? (
+          <Tooltip title={v}>
+            <span style={{ whiteSpace: 'nowrap' }}>{v}</span>
+          </Tooltip>
+        ) : (
+          '—'
+        ),
+    },
+    {
+      title: '框架',
+      dataIndex: 'framework',
+      key: 'framework',
+      width: 96,
+      render: (v: string) => v || '—',
+    },
+    {
+      title: '大小',
+      dataIndex: 'model_size',
+      key: 'model_size',
+      width: 100,
+      render: (size: unknown) => formatModelSize(getModelSizeNum(size)),
+    },
+    {
+      title: '存储路径',
+      dataIndex: 'model_path',
+      key: 'model_path',
+      ellipsis: true,
+      render: (path: string) =>
+        path ? (
+          <Tooltip title={path}>
+            <Typography.Text copyable={{ text: path }} style={{ maxWidth: 200 }} ellipsis>
+              {path}
+            </Typography.Text>
+          </Tooltip>
+        ) : (
+          '—'
+        ),
+    },
+    {
+      title: '创建时间',
+      dataIndex: 'created_at',
+      key: 'created_at',
+      width: 172,
+      render: (text: string) => (text ? new Date(text).toLocaleString('zh-CN') : '—'),
+    },
+    {
+      title: '操作',
+      key: 'action',
+      width: 100,
+      render: (_: any, record: Model) => (
+        <span style={{ display: 'inline-block', maxWidth: '100%' }}>
+          <Button
+            type="primary"
+            size="small"
+            icon={<DownloadOutlined />}
+            href={modelService.getDownloadUrl(record.id)}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ maxWidth: '100%' }}
+          >
+            下载
+          </Button>
+        </span>
+      ),
+    },
+  ];
+
+  useEffect(() => {
+    if (activeTab === 'models' && models.length === 0) {
+      fetchModels();
+    }
+  }, [activeTab]);
+
   return (
     <div>
-      <Card
-        title="训练任务管理"
-        extra={
-          <div>
-            <Button
-              icon={<ReloadOutlined />}
-              onClick={() => fetchJobs(false)}
-              style={{ marginRight: 8 }}
-            >
-              刷新
-            </Button>
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={() => {
-                setCreateModalVisible(true);
-                form.setFieldsValue({ name: getDefaultJobName() });
-              }}
-            >
-              创建训练任务
-            </Button>
-          </div>
-        }
-      >
-        <Table
-          columns={columns}
-          dataSource={jobs}
-          rowKey="id"
-          loading={loading}
-          pagination={{ pageSize: 10 }}
-        />
-      </Card>
+      <Tabs activeKey={activeTab} onChange={(k) => setActiveTab(k as 'jobs' | 'models')}>
+        <Tabs.TabPane tab="训练任务" key="jobs">
+          <Card
+            title="训练任务管理"
+            extra={
+              <div>
+                <Button
+                  icon={<ReloadOutlined />}
+                  onClick={() => fetchJobs(false)}
+                  style={{ marginRight: 8 }}
+                >
+                  刷新
+                </Button>
+                <Button
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  onClick={() => {
+                    setCreateModalVisible(true);
+                    form.setFieldsValue({ name: getDefaultJobName() });
+                  }}
+                >
+                  创建训练任务
+                </Button>
+              </div>
+            }
+          >
+            <Table
+              columns={columns}
+              dataSource={jobs}
+              rowKey="id"
+              loading={loading}
+              pagination={{ pageSize: 10 }}
+            />
+          </Card>
+        </Tabs.TabPane>
+        <Tabs.TabPane tab="模型管理" key="models">
+          <Card
+            title="模型管理"
+            extra={
+              <span style={{ display: 'flex', gap: 8 }}>
+                <Button
+                  icon={<FolderOpenOutlined />}
+                  onClick={handleRecoverModelsFromDisk}
+                  loading={modelsRecovering}
+                >
+                  从磁盘恢复
+                </Button>
+                <Button icon={<ReloadOutlined />} onClick={fetchModels}>
+                  刷新
+                </Button>
+              </span>
+            }
+          >
+            <Table
+              columns={modelColumns}
+              dataSource={models}
+              rowKey="id"
+              loading={modelsLoading}
+              pagination={{ pageSize: 10 }}
+              locale={{ emptyText: '暂无模型，请先完成训练任务' }}
+              scroll={{ x: 'max-content' }}
+            />
+          </Card>
+        </Tabs.TabPane>
+      </Tabs>
 
       {/* 训练进度详情弹窗：时间线 + 关键节点 + 实时状态；标题栏带「刷新状态」走 GetJobStatus 即时拉取 */}
       <Modal

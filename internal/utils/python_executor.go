@@ -92,9 +92,28 @@ func (e *PythonExecutor) Execute(script string, args ...string) (map[string]inte
 		return nil, fmt.Errorf("%s", msg)
 	}
 
+	// 优先尝试直接解析；若失败，再从输出中提取最后一行 JSON（用于忽略前面的警告/日志）
 	var result map[string]interface{}
-	if err := json.Unmarshal(output, &result); err != nil {
-		return nil, fmt.Errorf("failed to parse python output: %v, output: %s", err, string(output))
+	if err := json.Unmarshal(output, &result); err == nil {
+		return result, nil
 	}
-	return result, nil
+
+	// 回退：从输出中自下而上寻找最后一行形如 {...} 的 JSON，并尝试解析
+	text := strings.TrimSpace(string(output))
+	lines := strings.Split(text, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		if !(strings.HasPrefix(line, "{") && strings.HasSuffix(line, "}")) {
+			continue
+		}
+		var last map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &last); err == nil {
+			return last, nil
+		}
+	}
+
+	return nil, fmt.Errorf("failed to parse python output: %v, output: %s", "no valid JSON object found", text)
 }

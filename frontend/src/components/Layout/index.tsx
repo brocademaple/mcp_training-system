@@ -94,11 +94,6 @@ const Layout: React.FC = () => {
       label: '模型训练',
     },
     {
-      key: '/models',
-      icon: <CloudServerOutlined />,
-      label: '模型管理',
-    },
-    {
       key: '/evaluation',
       icon: <BarChartOutlined />,
       label: '模型评估',

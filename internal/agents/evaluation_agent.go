@@ -39,7 +39,11 @@ func (a *EvaluationAgent) Evaluate(modelID int, testDatasetID int, evaluationID 
 	model, err := models.GetModelByID(a.db, modelID)
 	if err != nil {
 		utils.Error("EvaluationAgent: Failed to get model: %v", err)
-		return fmt.Errorf("failed to get model: %v", err)
+		msg := fmt.Sprintf("获取模型失败: %v", err)
+		if evaluationID > 0 {
+			_ = models.UpdateEvaluationStatus(a.db, evaluationID, "failed", msg)
+		}
+		return fmt.Errorf("%s", msg)
 	}
 
 	// 2. Get test dataset path (may be NULL)
@@ -51,7 +55,11 @@ func (a *EvaluationAgent) Evaluate(modelID int, testDatasetID int, evaluationID 
 		).Scan(&pathVal)
 		if err != nil {
 			utils.Error("EvaluationAgent: Failed to get test dataset: %v", err)
-			return fmt.Errorf("无法获取测试集（请确认所选测试集存在且状态为「就绪」）: %v", err)
+			msg := fmt.Sprintf("无法获取测试集（请确认所选测试集存在且状态为「就绪」）: %v", err)
+			if evaluationID > 0 {
+				_ = models.UpdateEvaluationStatus(a.db, evaluationID, "failed", msg)
+			}
+			return fmt.Errorf("%s", msg)
 		}
 	} else {
 		// 未指定测试集时，尝试使用该模型对应训练任务关联的数据集作为测试数据
@@ -59,7 +67,11 @@ func (a *EvaluationAgent) Evaluate(modelID int, testDatasetID int, evaluationID 
 		err = a.db.QueryRow("SELECT dataset_id FROM training_jobs WHERE id = $1", model.JobID).Scan(&jobDatasetID)
 		if err != nil {
 			utils.Error("EvaluationAgent: Failed to get job: %v", err)
-			return fmt.Errorf("无法获取训练任务信息: %v", err)
+			msg := fmt.Sprintf("无法获取训练任务信息: %v", err)
+			if evaluationID > 0 {
+				_ = models.UpdateEvaluationStatus(a.db, evaluationID, "failed", msg)
+			}
+			return fmt.Errorf("%s", msg)
 		}
 		if !jobDatasetID.Valid {
 			msg := "未指定测试集，且该模型对应的训练数据集已删除。请先在「数据集管理」中准备一份测试集（或从训练集划分），在创建评估时选择该测试集。"
@@ -75,7 +87,11 @@ func (a *EvaluationAgent) Evaluate(modelID int, testDatasetID int, evaluationID 
 		`, model.JobID).Scan(&pathVal)
 		if err != nil {
 			utils.Error("EvaluationAgent: Failed to get test data: %v", err)
-			return fmt.Errorf("无法获取训练任务关联的数据集路径: %v", err)
+			msg := fmt.Sprintf("无法获取训练任务关联的数据集路径: %v", err)
+			if evaluationID > 0 {
+				_ = models.UpdateEvaluationStatus(a.db, evaluationID, "failed", msg)
+			}
+			return fmt.Errorf("%s", msg)
 		}
 	}
 	if !pathVal.Valid || pathVal.String == "" {

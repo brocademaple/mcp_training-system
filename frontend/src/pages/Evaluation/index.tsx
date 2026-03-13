@@ -6,6 +6,7 @@ import {
   Modal,
   Form,
   Select,
+  Input,
   message,
   Tag,
   Steps,
@@ -199,6 +200,18 @@ const EvaluationManagement: React.FC = () => {
   };
 
   const openCreateModal = () => {
+    const now = new Date();
+    const defaultName = `评估任务-${now.toLocaleString('zh-CN', {
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    })}`;
+    form.setFieldsValue({
+      name: defaultName,
+      model_id: undefined,
+      test_dataset_id: undefined,
+    });
     setCreateModalVisible(true);
     fetchModels();
     fetchDatasets();
@@ -208,6 +221,7 @@ const EvaluationManagement: React.FC = () => {
     try {
       await evaluationService.createEvaluation({
         model_id: values.model_id,
+        name: values.name,
         test_dataset_id: values.test_dataset_id || undefined,
       });
       message.success('评估任务创建成功');
@@ -292,8 +306,22 @@ const EvaluationManagement: React.FC = () => {
     {
       title: '序号',
       key: 'order',
-      width: 72,
+      width: 56,
       render: (_: unknown, __: Evaluation, index: number) => (page - 1) * pageSize + index + 1,
+    },
+    {
+      title: '评估名称',
+      dataIndex: 'name',
+      key: 'evalName',
+      width: 220,
+      render: (_: unknown, record: Evaluation) => {
+        const text = record.name && record.name.trim() ? record.name.trim() : getTaskName(record);
+        return (
+          <div style={{ maxWidth: 220, whiteSpace: 'normal', wordBreak: 'break-all', lineHeight: 1.4 }}>
+            {text}
+          </div>
+        );
+      },
     },
     {
       title: '任务名',
@@ -308,6 +336,11 @@ const EvaluationManagement: React.FC = () => {
       width: 200,
       render: (status: string, record: Evaluation) => {
         const s = status || 'completed';
+        const hasReport = !!record.report_path;
+        const effectiveStatus =
+          s === 'running' && hasReport
+            ? 'completed'
+            : s || (hasReport ? 'completed' : 'completed');
         const detailBtn = (
           <Tooltip title="查看进度 / 成功阶段 / 失败原因（含控制台与脚本输出）">
             <Button
@@ -319,20 +352,26 @@ const EvaluationManagement: React.FC = () => {
             />
           </Tooltip>
         );
-        if (s === 'running') {
+        if (s === 'running' && !hasReport) {
           const created = new Date(record.created_at).getTime();
           const mins = Math.floor((Date.now() - created) / 60000);
-          const tip = mins > 0 ? `已运行 ${mins} 分钟，列表每 4 秒自动刷新` : '列表每 4 秒自动刷新';
+          const tip =
+            mins > 0
+              ? `该评估任务自创建起已持续运行约 ${mins} 分钟，列表每 4 秒自动刷新`
+              : '该评估任务刚刚启动，列表每 4 秒自动刷新';
           return (
             <span>
               <Tag color="processing" title={tip}>
-                评估中{mins > 0 ? `（${mins} 分钟）` : ''}
+                <div>评估中</div>
+                <div style={{ fontSize: 12, opacity: 0.8 }}>
+                  {mins > 0 ? `（已运行 ${mins} 分钟）` : '（刚刚启动）'}
+                </div>
               </Tag>
               {detailBtn}
             </span>
           );
         }
-        if (s === 'failed') {
+        if (effectiveStatus === 'failed') {
           return (
             <span>
               <Tag color="error">失败</Tag>
@@ -340,7 +379,7 @@ const EvaluationManagement: React.FC = () => {
             </span>
           );
         }
-        if (s === 'cancelled') {
+        if (effectiveStatus === 'cancelled') {
           return (
             <span>
               <Tag color="default">已取消</Tag>
@@ -350,7 +389,24 @@ const EvaluationManagement: React.FC = () => {
         }
         return (
           <span>
-            <Tag color="success">已完成</Tag>
+            <Tag color="success">
+              <div>已完成</div>
+            </Tag>
+            {s === 'running' && hasReport && (
+              <div
+                style={{
+                  marginTop: 2,
+                  padding: '0 6px',
+                  borderRadius: 10,
+                  background: '#f5f5f5',
+                  fontSize: 11,
+                  color: '#8c8c8c',
+                  display: 'inline-block',
+                }}
+              >
+                结果已生成
+              </div>
+            )}
             {detailBtn}
           </span>
         );
@@ -359,19 +415,37 @@ const EvaluationManagement: React.FC = () => {
     {
       title: '当前进度',
       key: 'progress',
-      width: 140,
+      width: 120,
       render: (_: unknown, record: Evaluation) => {
         const s = record.status || 'completed';
-        if (s === 'running') {
-          return <Progress percent={50} status="active" size="small" showInfo={false} />;
+        const hasReport = !!record.report_path;
+        const effectiveStatus = s === 'running' && hasReport ? 'completed' : s;
+        if (effectiveStatus === 'running') {
+          return (
+            <div style={{ width: 80 }}>
+              <Progress percent={50} status="active" size="small" showInfo={false} />
+            </div>
+          );
         }
-        if (s === 'failed') {
-          return <Progress percent={0} status="exception" size="small" />;
+        if (effectiveStatus === 'failed') {
+          return (
+            <div style={{ width: 80 }}>
+              <Progress percent={0} status="exception" size="small" />
+            </div>
+          );
         }
-        if (s === 'cancelled') {
-          return <Progress percent={0} size="small" />;
+        if (effectiveStatus === 'cancelled') {
+          return (
+            <div style={{ width: 80 }}>
+              <Progress percent={0} size="small" />
+            </div>
+          );
         }
-        return <Progress percent={100} status="success" size="small" />;
+        return (
+          <div style={{ width: 80 }}>
+            <Progress percent={100} status="success" size="small" />
+          </div>
+        );
       },
     },
     {
@@ -379,16 +453,30 @@ const EvaluationManagement: React.FC = () => {
       dataIndex: 'accuracy',
       key: 'accuracy',
       width: 100,
-      render: (value: number, record: Evaluation) =>
-        record.status === 'running' || record.status === 'cancelled' ? '—' : `${((value ?? 0) * 100).toFixed(2)}%`,
+      render: (value: number, record: Evaluation) => {
+        const s = record.status || 'completed';
+        const hasReport = !!record.report_path;
+        const effectiveStatus = s === 'running' && hasReport ? 'completed' : s;
+        if (effectiveStatus === 'running' || effectiveStatus === 'cancelled') {
+          return '—';
+        }
+        return `${((value ?? 0) * 100).toFixed(2)}%`;
+      },
     },
     {
       title: 'F1分数',
       dataIndex: 'f1_score',
       key: 'f1_score',
       width: 100,
-      render: (value: number, record: Evaluation) =>
-        record.status === 'running' || record.status === 'cancelled' ? '—' : `${((value ?? 0) * 100).toFixed(2)}%`,
+      render: (value: number, record: Evaluation) => {
+        const s = record.status || 'completed';
+        const hasReport = !!record.report_path;
+        const effectiveStatus = s === 'running' && hasReport ? 'completed' : s;
+        if (effectiveStatus === 'running' || effectiveStatus === 'cancelled') {
+          return '—';
+        }
+        return `${((value ?? 0) * 100).toFixed(2)}%`;
+      },
     },
     {
       title: '创建时间',
@@ -401,77 +489,83 @@ const EvaluationManagement: React.FC = () => {
       title: '操作',
       key: 'action',
       width: 120,
-      render: (_: any, record: Evaluation) => (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 0 }}>
-          {record.status === 'running' && (
-            <Button
-              type="link"
-              icon={<SyncOutlined />}
-              onClick={() => setProgressModalEvalId(record.id)}
-              style={{ paddingLeft: 0, paddingRight: 4, height: 28 }}
-            >
-              查看进度
-            </Button>
-          )}
-          {record.report_path && (
-            <>
+      render: (_: any, record: Evaluation) => {
+        const s = record.status || 'completed';
+        const hasReport = !!record.report_path;
+        const effectiveStatus = s === 'running' && hasReport ? 'completed' : s;
+        const isRunning = effectiveStatus === 'running';
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 0 }}>
+            {isRunning && (
               <Button
                 type="link"
-                icon={<EyeOutlined />}
-                onClick={() => setPreviewReportEvalId(record.id)}
+                icon={<SyncOutlined />}
+                onClick={() => setProgressModalEvalId(record.id)}
                 style={{ paddingLeft: 0, paddingRight: 4, height: 28 }}
               >
-                预览报告
+                查看进度
               </Button>
-              <Button
-                type="link"
-                icon={<DownloadOutlined />}
-                href={evaluationService.getReportDownloadUrl(record.id)}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ paddingLeft: 0, paddingRight: 4, height: 28 }}
+            )}
+            {record.report_path && (
+              <>
+                <Button
+                  type="link"
+                  icon={<EyeOutlined />}
+                  onClick={() => setPreviewReportEvalId(record.id)}
+                  style={{ paddingLeft: 0, paddingRight: 4, height: 28 }}
+                >
+                  预览报告
+                </Button>
+                <Button
+                  type="link"
+                  icon={<DownloadOutlined />}
+                  href={evaluationService.getReportDownloadUrl(record.id)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ paddingLeft: 0, paddingRight: 4, height: 28 }}
+                >
+                  下载报告
+                </Button>
+              </>
+            )}
+            {isRunning && (
+              <Popconfirm
+                title="确定中止该评估任务？"
+                onConfirm={() => handleCancelEvaluation(record.id)}
+                okText="确定"
+                cancelText="取消"
               >
-                下载报告
-              </Button>
-            </>
-          )}
-          {record.status === 'running' && (
+                <Button
+                  type="link"
+                  danger
+                  icon={<StopOutlined />}
+                  loading={cancelLoadingId === record.id}
+                  style={{ paddingLeft: 0, paddingRight: 4, height: 28 }}
+                >
+                  中止
+                </Button>
+              </Popconfirm>
+            )}
             <Popconfirm
-              title="确定中止该评估任务？"
-              onConfirm={() => handleCancelEvaluation(record.id)}
-              okText="确定"
+              title="确定删除该评估记录？删除后不可恢复。"
+              onConfirm={() => handleDeleteEvaluation(record.id)}
+              okText="删除"
               cancelText="取消"
+              okButtonProps={{ danger: true }}
             >
               <Button
                 type="link"
                 danger
-                icon={<StopOutlined />}
-                loading={cancelLoadingId === record.id}
+                icon={<DeleteOutlined />}
+                loading={deleteLoadingId === record.id}
                 style={{ paddingLeft: 0, paddingRight: 4, height: 28 }}
               >
-                中止
+                删除
               </Button>
             </Popconfirm>
-          )}
-          <Popconfirm
-            title="确定删除该评估记录？删除后不可恢复。"
-            onConfirm={() => handleDeleteEvaluation(record.id)}
-            okText="删除"
-            cancelText="取消"
-            okButtonProps={{ danger: true }}
-          >
-            <Button
-              type="link"
-              danger
-              icon={<DeleteOutlined />}
-              loading={deleteLoadingId === record.id}
-              style={{ paddingLeft: 0, paddingRight: 4, height: 28 }}
-            >
-              删除
-            </Button>
-          </Popconfirm>
-        </div>
-      ),
+          </div>
+        );
+      },
     },
   ];
 
@@ -575,6 +669,13 @@ const EvaluationManagement: React.FC = () => {
       >
         <Form form={form} layout="vertical" onFinish={handleCreateEvaluation}>
           <Form.Item
+            name="name"
+            label="评估名称"
+            rules={[{ required: true, message: '请输入评估名称' }]}
+          >
+            <Input placeholder="例如：情感分类-基础模型 vs 测试集A" />
+          </Form.Item>
+          <Form.Item
             name="model_id"
             label="选择模型"
             rules={[{ required: true, message: '请选择要评估的模型' }]}
@@ -634,7 +735,9 @@ const EvaluationManagement: React.FC = () => {
         {progressModalEvalId != null && (() => {
           const evalRow = evaluations.find((e) => e.id === progressModalEvalId);
           if (!evalRow) return <Spin tip="加载中…" />;
-          const status = evalRow.status || 'completed';
+          const hasReport = !!evalRow.report_path;
+          const rawStatus = evalRow.status || 'completed';
+          const status = rawStatus === 'running' && hasReport ? 'completed' : rawStatus;
           const isEnd = status === 'completed' || status === 'failed' || status === 'cancelled';
           const currentStep = status === 'running' ? 2 : isEnd ? 4 : 1; // running 时高亮「评估中」
           const steps: { title: string; description?: string; status: StepStatus }[] = [
@@ -661,6 +764,34 @@ const EvaluationManagement: React.FC = () => {
           ];
           return (
             <div>
+              {/* 基本信息区：模型 / 测试集 / 创建时间 / 状态 */}
+              <div style={{ marginBottom: 16, padding: 12, background: '#fafafa', borderRadius: 8, fontSize: 13 }}>
+                <div style={{ marginBottom: 4 }}>
+                  <span style={{ color: '#8c8c8c' }}>评估名称：</span>
+                  <span style={{ fontWeight: 500 }}>{getTaskName(evalRow)}</span>
+                </div>
+                <div style={{ marginBottom: 4 }}>
+                  <span style={{ color: '#8c8c8c' }}>模型 ID：</span>
+                  <span>{evalRow.model_id}</span>
+                </div>
+                <div style={{ marginBottom: 4 }}>
+                  <span style={{ color: '#8c8c8c' }}>创建时间：</span>
+                  <span>{new Date(evalRow.created_at).toLocaleString('zh-CN')}</span>
+                </div>
+                <div>
+                  <span style={{ color: '#8c8c8c' }}>当前状态：</span>
+                  <span>
+                    {status === 'running'
+                      ? '评估中：正在用测试集跑推理并计算各项指标'
+                      : status === 'completed'
+                      ? '已完成：指标和报告均已生成'
+                      : status === 'failed'
+                      ? '评估失败：可查看失败原因洞察与原始输出'
+                      : '已取消'}
+                  </span>
+                </div>
+              </div>
+
               <Steps
                 current={currentStep}
                 status={status === 'failed' || status === 'cancelled' ? 'error' : 'finish'}
@@ -669,7 +800,7 @@ const EvaluationManagement: React.FC = () => {
               />
               {status === 'running' && (
                 <div style={{ marginTop: 16, padding: 12, background: '#e6f7ff', borderRadius: 8, fontSize: 13, color: '#0050b3' }}>
-                  状态每 2 秒自动刷新。若超过 5～10 分钟仍无变化，请查看运行后端的终端是否有报错，或点击「刷新状态」再试。
+                  状态每 2 秒自动刷新。当前阶段主要在「评估中」和「生成报告」之间切换。若超过 5～10 分钟仍无变化，请查看运行后端的终端是否有报错，或点击「刷新状态」再试。
                 </div>
               )}
               {(status === 'failed' || status === 'cancelled') && evalRow.error_message && (
@@ -719,14 +850,45 @@ const EvaluationManagement: React.FC = () => {
         title={detailModalEvalId != null ? `评估详情 · ${getTaskName(evaluations.find((e) => e.id === detailModalEvalId) ?? { id: 0, model_id: 0, created_at: '' } as Evaluation)}` : '评估详情'}
         open={detailModalEvalId != null}
         onCancel={() => setDetailModalEvalId(null)}
-        footer={[<Button key="close" type="primary" onClick={() => setDetailModalEvalId(null)}>关闭</Button>]}
+        footer={[
+          <Button
+            key="refresh"
+            icon={<SyncOutlined />}
+            onClick={async () => {
+              if (detailModalEvalId == null) return;
+              try {
+                const res = await evaluationService.getEvaluationResult(detailModalEvalId);
+                if (res.code === 200 && res.data) {
+                  const d = res.data as Evaluation;
+                  setEvaluations((prev) => prev.map((e) => (e.id === detailModalEvalId ? { ...e, ...d } : e)));
+                  message.success('已刷新评估详情');
+                }
+              } catch (e: any) {
+                if (e?.status === 404) {
+                  setDetailModalEvalId(null);
+                  message.info('该评估不存在或已删除，已关闭详情窗口');
+                  fetchEvaluations();
+                } else {
+                  message.error(e?.message || '刷新失败');
+                }
+              }
+            }}
+          >
+            刷新
+          </Button>,
+          <Button key="close" type="primary" onClick={() => setDetailModalEvalId(null)}>
+            关闭
+          </Button>,
+        ]}
         width={640}
         destroyOnClose
       >
         {detailModalEvalId != null && (() => {
           const r = evaluations.find((e) => e.id === detailModalEvalId);
           if (!r) return <Spin tip="加载中…" />;
-          const status = r.status || 'completed';
+          const rawStatus = r.status || 'completed';
+          const hasReport = !!r.report_path;
+          const status = rawStatus === 'running' && hasReport ? 'completed' : rawStatus;
           const isEnd = status === 'completed' || status === 'failed' || status === 'cancelled';
           const stepCurrent = status === 'running' ? 2 : isEnd ? 4 : 1;
           const steps: { title: string; description?: string; status: StepStatus }[] = [

@@ -10,6 +10,7 @@ export const evaluationService = {
   // Create evaluation
   createEvaluation: async (params: {
     model_id: number;
+    name?: string;
     test_dataset_id?: number;
   }): Promise<ApiResponse> => {
     return api.post('/evaluations', params);

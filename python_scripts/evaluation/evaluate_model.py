@@ -9,6 +9,8 @@ import json
 import os
 import base64
 import re
+import warnings
+
 import numpy as np
 import pandas as pd
 from sklearn.metrics import (
@@ -22,6 +24,16 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline
+
+# 避免 matplotlib 在保存中文标题/说明时打印大量 Glyph 缺失的 UserWarning，
+# 这些警告会混入 stdout/stderr，干扰 Go 侧对 JSON 输出的解析。
+warnings.filterwarnings("ignore", category=UserWarning, module="matplotlib")
+
+# 解决中文标题/标签的「口口口」乱码问题：
+# - 指定一个支持中文的字体族（Windows 常见为 SimHei / Microsoft YaHei）。
+# - 关闭坐标轴负号的 unicode 转换问题，避免负号显示为方块。
+matplotlib.rcParams["font.sans-serif"] = ["SimHei", "Microsoft YaHei", "Arial Unicode MS", "DejaVu Sans"]
+matplotlib.rcParams["axes.unicode_minus"] = False
 
 
 def get_positive_score(result_list):

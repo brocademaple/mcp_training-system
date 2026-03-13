@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -32,8 +33,9 @@ func NewEvaluationHandler(db *sql.DB, evalAgent *agents.EvaluationAgent, reportD
 // CreateEvaluation creates a new evaluation
 func (h *EvaluationHandler) CreateEvaluation(c *gin.Context) {
 	var req struct {
-		ModelID       int `json:"model_id"`
-		TestDatasetID int `json:"test_dataset_id"`
+		ModelID       int    `json:"model_id"`
+		Name          string `json:"name"`
+		TestDatasetID int    `json:"test_dataset_id"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -42,9 +44,13 @@ func (h *EvaluationHandler) CreateEvaluation(c *gin.Context) {
 	}
 
 	// 立即插入一条占位记录（status=running），列表可马上显示；后台任务完成后更新该记录
+	displayName := req.Name
+	if strings.TrimSpace(displayName) == "" {
+		displayName = fmt.Sprintf("评估-模型%d-%s", req.ModelID, time.Now().Format("20060102-150405"))
+	}
 	placeholder := &models.Evaluation{
 		ModelID:  req.ModelID,
-		Name:     fmt.Sprintf("评估-模型%d-%s", req.ModelID, time.Now().Format("20060102-150405")),
+		Name:     displayName,
 		Accuracy: 0, Precision: 0, Recall: 0, F1Score: 0,
 		Status: "running",
 	}
@@ -64,6 +70,7 @@ func (h *EvaluationHandler) CreateEvaluation(c *gin.Context) {
 		}()
 		if err := h.evalAgent.Evaluate(req.ModelID, req.TestDatasetID, evalID); err != nil {
 			fmt.Printf("Evaluation failed: %v\n", err)
+			_ = models.UpdateEvaluationStatus(h.db, evalID, "failed", err.Error())
 		}
 	}()
 

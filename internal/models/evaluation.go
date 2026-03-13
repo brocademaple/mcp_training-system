@@ -158,7 +158,16 @@ func GetEvaluationByID(db *sql.DB, id int) (*Evaluation, error) {
 func inferStatusFromResult(e *Evaluation) {
 	// 若 DB 已显式记录状态（running/cancelled/failed/completed），优先尊重；
 	// 仅在 status 为空或 status=completed 但结果明显异常时进行推断修正。
-	if e.Status == "running" || e.Status == "cancelled" {
+	if e.Status == "running" {
+		// 若已生成报告（有 report_path），但状态仍为 running，说明成功路径未显式更新 status，
+		// 这里自动纠正为 completed，避免列表一直显示「评估中」。
+		if strings.TrimSpace(e.ReportPath) != "" {
+			e.Status = "completed"
+			e.ErrorMessage = ""
+		}
+		return
+	}
+	if e.Status == "cancelled" {
 		return
 	}
 	// 已标记失败且已有具体错误信息（如 Python 报错、获取测试集失败等）时不再覆盖为通用提示
@@ -185,7 +194,7 @@ func inferStatusFromResult(e *Evaluation) {
 	e.ErrorMessage = ""
 }
 
-// UpdateResult 更新已有评估记录的结果（仅更新 001 基础列，兼容无 006 的库）
+// UpdateResult 更新已有评估记录的结果（主要更新 001 基础列；若存在 006 列则顺便把 status 置为 completed）
 func UpdateEvaluationResult(db *sql.DB, id int, accuracy, precision, recall, f1Score float64, metrics map[string]interface{}, confusionMatrixPath, rocCurvePath, reportPath string) error {
 	metricsJSON, _ := json.Marshal(metrics)
 	if metricsJSON == nil {
@@ -197,7 +206,21 @@ func UpdateEvaluationResult(db *sql.DB, id int, accuracy, precision, recall, f1S
 		    confusion_matrix_path = $6, roc_curve_path = $7, report_path = $8
 		WHERE id = $9
 	`, accuracy, precision, recall, f1Score, metricsJSON, confusionMatrixPath, rocCurvePath, reportPath, id)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// 若存在 status/error_message 列，则把状态显式标记为 completed，清空错误信息；
+	// 对未执行 006 的旧库，此语句会因列不存在报错，需忽略。
+	_, err2 := db.Exec(`
+		UPDATE evaluations
+		SET status = 'completed', error_message = ''
+		WHERE id = $1
+	`, id)
+	if err2 != nil && strings.Contains(err2.Error(), "does not exist") {
+		return nil
+	}
+	return err2
 }
 
 // UpdateEvaluationStatus 将评估标记为失败或取消并写入错误信息（需 006 迁移；无该列时静默忽略）
