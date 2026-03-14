@@ -200,6 +200,26 @@ const Dashboard: React.FC = () => {
   activities.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
   const recentActivities = activities.slice(0, 8);
 
+  /** 最近动态叙述文案：数据集/流水线用叙述；训练任务在下方单独用「名称 + 小字状态」展示 */
+  const getActivityLabel = (a: ActivityItem): string => {
+    if (a.type === 'dataset') return `上传了 ${a.title || '数据集'} 数据集`;
+    if (a.type === 'pipeline') {
+      if (a.status === 'running') return `流水线 #${a.id} 运行中……`;
+      if (a.status === 'completed') return `流水线 #${a.id} 已完成……`;
+      if (a.status === 'failed') return `流水线 #${a.id} 失败`;
+      return `流水线 #${a.id}`;
+    }
+    return a.title || '';
+  };
+
+  /** 训练任务状态文案与颜色（小字展示） */
+  const getJobStatusText = (status?: string): { text: string; color: string } => {
+    if (status === 'running' || status === 'queued') return { text: '进行中', color: '#1890ff' };
+    if (status === 'completed') return { text: '已完成', color: '#52c41a' };
+    if (status === 'failed') return { text: '失败', color: '#ff4d4f' };
+    return { text: status || '—', color: 'rgba(0,0,0,0.45)' };
+  };
+
   const handleNav = (path: string) => {
     if (nextStep.type === 'agent' && path === '/') {
       goToAgent();
@@ -264,7 +284,7 @@ const Dashboard: React.FC = () => {
               suffix="个"
             />
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              {readyCount} 个就绪可训练
+              <span style={{ color: '#52c41a', fontWeight: 500 }}>{readyCount}</span> 个就绪可训练
             </Typography.Text>
           </Card>
         </Col>
@@ -276,7 +296,8 @@ const Dashboard: React.FC = () => {
               prefix={<ExperimentOutlined />}
             />
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              {runningJobCount} 个进行中，{completedJobCount} 个已完成
+              <span style={{ color: '#1890ff', fontWeight: 500 }}>{runningJobCount}</span> 个进行中，
+              <span style={{ color: '#52c41a', fontWeight: 500 }}>{completedJobCount}</span> 个已完成
             </Typography.Text>
           </Card>
         </Col>
@@ -314,11 +335,15 @@ const Dashboard: React.FC = () => {
                   {a.type === 'dataset' && <DatabaseOutlined style={{ color: '#1890ff' }} />}
                   {a.type === 'job' && <ExperimentOutlined style={{ color: '#52c41a' }} />}
                   {a.type === 'pipeline' && <RocketOutlined style={{ color: '#13c2c2' }} />}
-                  <span>{a.title}</span>
-                  {a.status && (
-                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                      {a.status}
-                    </Typography.Text>
+                  {a.type === 'job' ? (
+                    <>
+                      <span>{a.title || `训练任务 #${a.id}`}</span>
+                      <span style={{ fontSize: 12, color: getJobStatusText(a.status).color }}>
+                        {getJobStatusText(a.status).text}
+                      </span>
+                    </>
+                  ) : (
+                    <span>{getActivityLabel(a)}</span>
                   )}
                 </span>
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>

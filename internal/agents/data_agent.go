@@ -20,9 +20,14 @@ func NewDataAgent(db *sql.DB, executor *utils.PythonExecutor) *DataAgent {
 	}
 }
 
-// CleanData cleans a dataset by removing duplicates and missing values
-func (a *DataAgent) CleanData(datasetID int) error {
+// CleanData cleans a dataset by removing duplicates and missing values.
+// dataAgentPrompt 为可选：用户在前端设定的 Data Agent 规划偏好（规模/语言/领域等），会写入流水线并在此传入；
+// 当前清洗脚本未使用，后续「Data Agent 自行规划」数据获取时可作为 LLM/规划 的 prompt 使用。
+func (a *DataAgent) CleanData(datasetID int, dataAgentPrompt string) error {
 	utils.Info("DataAgent: Starting data cleaning for dataset %d", datasetID)
+	if dataAgentPrompt != "" {
+		utils.Info("DataAgent: data_agent_prompt (for future use): %s", dataAgentPrompt)
+	}
 
 	// 1. Query database to get file path (may be NULL)
 	var pathVal sql.NullString

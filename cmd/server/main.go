@@ -62,6 +62,10 @@ func main() {
 	} else {
 		utils.Info("pipeline_instances table ready")
 	}
+	// 增加 data_agent_prompt 列（若不存在）
+	if _, err := db.Exec(`ALTER TABLE pipeline_instances ADD COLUMN IF NOT EXISTS data_agent_prompt TEXT`); err != nil {
+		log.Printf("Warning: add data_agent_prompt column: %v", err)
+	}
 
 	// Connect to Redis
 	redisClient, err := database.NewRedisClient(

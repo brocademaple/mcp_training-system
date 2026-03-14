@@ -77,7 +77,11 @@ func (c *Coordinator) handleDataAgentMessage(msg *MCPMessage) error {
 	switch msg.Action {
 	case "clean_data":
 		datasetID := int(msg.Payload["dataset_id"].(float64))
-		return c.dataAgent.CleanData(datasetID)
+		var dataAgentPrompt string
+		if p, ok := msg.Payload["data_agent_prompt"].(string); ok && p != "" {
+			dataAgentPrompt = p
+		}
+		return c.dataAgent.CleanData(datasetID, dataAgentPrompt)
 	case "analyze_data":
 		datasetID := int(msg.Payload["dataset_id"].(float64))
 		_, err := c.dataAgent.AnalyzeData(datasetID)
@@ -113,23 +117,24 @@ func (c *Coordinator) handleEvaluationAgentMessage(msg *MCPMessage) error {
 	}
 }
 
-// RunPipeline executes a complete pipeline: clean -> train -> evaluate
-func (c *Coordinator) RunPipeline(datasetID int, trainConfig map[string]interface{}) (*models.PipelineInstance, error) {
+// RunPipeline executes a complete pipeline: clean -> train -> evaluate.
+// dataAgentPrompt 为用户在前端设定的 Data Agent 规划偏好（规模/语言/领域等），会写入库并传给 Data Agent，供后续「自行规划」数据获取时使用。
+func (c *Coordinator) RunPipeline(datasetID int, trainConfig map[string]interface{}, dataAgentPrompt string) (*models.PipelineInstance, error) {
 	sessionID := uuid.New().String()
 	utils.Info("MCP Coordinator: Starting pipeline for dataset %d, session: %s", datasetID, sessionID)
 
-	// Create pipeline instance
+	// Create pipeline instance（含 data_agent_prompt，用于驱动 Data Agent）
 	var pipelineID int
 	err := c.db.QueryRow(`
-		INSERT INTO pipeline_instances (session_id, dataset_id, status, current_step)
-		VALUES ($1, $2, 'running', 'clean_data')
+		INSERT INTO pipeline_instances (session_id, dataset_id, status, current_step, data_agent_prompt)
+		VALUES ($1, $2, 'running', 'clean_data', NULLIF(TRIM($3), ''))
 		RETURNING id
-	`, sessionID, datasetID).Scan(&pipelineID)
+	`, sessionID, datasetID, dataAgentPrompt).Scan(&pipelineID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create pipeline instance: %v", err)
 	}
 
-	go c.executePipelineAsync(pipelineID, sessionID, datasetID, trainConfig)
+	go c.executePipelineAsync(pipelineID, sessionID, datasetID, trainConfig, dataAgentPrompt)
 
 	pipeline := &models.PipelineInstance{
 		ID:          pipelineID,
@@ -141,7 +146,7 @@ func (c *Coordinator) RunPipeline(datasetID int, trainConfig map[string]interfac
 	return pipeline, nil
 }
 
-func (c *Coordinator) executePipelineAsync(pipelineID int, sessionID string, datasetID int, trainConfig map[string]interface{}) {
+func (c *Coordinator) executePipelineAsync(pipelineID int, sessionID string, datasetID int, trainConfig map[string]interface{}, dataAgentPrompt string) {
 	defer func() {
 		if r := recover(); r != nil {
 			utils.Error("Pipeline %d panic: %v", pipelineID, r)
@@ -149,8 +154,12 @@ func (c *Coordinator) executePipelineAsync(pipelineID int, sessionID string, dat
 		}
 	}()
 
-	// Step 1: Clean data
-	if err := c.executeStep(pipelineID, sessionID, "clean_data", datasetID, nil); err != nil {
+	// Step 1: Clean data（将 data_agent_prompt 传入 payload，供 Data Agent 当前/后续使用）
+	extraClean := make(map[string]interface{})
+	if dataAgentPrompt != "" {
+		extraClean["data_agent_prompt"] = dataAgentPrompt
+	}
+	if err := c.executeStep(pipelineID, sessionID, "clean_data", datasetID, extraClean); err != nil {
 		c.updatePipelineStatus(pipelineID, "failed", "clean_data", err.Error())
 		return
 	}
@@ -203,6 +212,11 @@ func (c *Coordinator) executeStep(pipelineID int, sessionID, action string, targ
 	switch action {
 	case "clean_data":
 		payload["dataset_id"] = float64(targetID)
+		if extra != nil {
+			if p, ok := extra["data_agent_prompt"]; ok && p != nil {
+				payload["data_agent_prompt"] = p
+			}
+		}
 		msg = NewRequest("coordinator", "data-agent", action, payload)
 	case "train":
 		payload["job_id"] = float64(targetID)
@@ -288,9 +302,9 @@ func (c *Coordinator) updatePipelineEvalID(pipelineID, evalID int) {
 func (c *Coordinator) GetPipelineStatus(pipelineID int) (*models.PipelineInstance, error) {
 	var p models.PipelineInstance
 	err := c.db.QueryRow(`
-		SELECT id, session_id, dataset_id, status, current_step, job_id, model_id, eval_id, error_msg, created_at, updated_at
+		SELECT id, session_id, dataset_id, status, current_step, job_id, model_id, eval_id, error_msg, data_agent_prompt, created_at, updated_at
 		FROM pipeline_instances WHERE id = $1
-	`, pipelineID).Scan(&p.ID, &p.SessionID, &p.DatasetID, &p.Status, &p.CurrentStep, &p.JobID, &p.ModelID, &p.EvalID, &p.ErrorMsg, &p.CreatedAt, &p.UpdatedAt)
+	`, pipelineID).Scan(&p.ID, &p.SessionID, &p.DatasetID, &p.Status, &p.CurrentStep, &p.JobID, &p.ModelID, &p.EvalID, &p.ErrorMsg, &p.DataAgentPrompt, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}

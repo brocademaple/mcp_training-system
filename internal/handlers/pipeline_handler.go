@@ -22,8 +22,9 @@ func NewPipelineHandler(db *sql.DB, coordinator *mcp.Coordinator) *PipelineHandl
 }
 
 type CreatePipelineRequest struct {
-	DatasetID   int                    `json:"dataset_id" binding:"required"`
-	TrainConfig map[string]interface{} `json:"train_config"`
+	DatasetID       int                    `json:"dataset_id" binding:"required"`
+	TrainConfig     map[string]interface{} `json:"train_config"`
+	DataAgentPrompt string                 `json:"data_agent_prompt"` // 用户在前端设定的 Data Agent 规划偏好（规模/语言/领域等），写入 prompt 驱动 Data Agent
 }
 
 func (h *PipelineHandler) CreatePipeline(c *gin.Context) {
@@ -37,7 +38,7 @@ func (h *PipelineHandler) CreatePipeline(c *gin.Context) {
 		req.TrainConfig = map[string]interface{}{"model_type": "random_forest"}
 	}
 
-	pipeline, err := h.coordinator.RunPipeline(req.DatasetID, req.TrainConfig)
+	pipeline, err := h.coordinator.RunPipeline(req.DatasetID, req.TrainConfig, req.DataAgentPrompt)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -65,7 +66,7 @@ func (h *PipelineHandler) GetPipelineStatus(c *gin.Context) {
 
 func (h *PipelineHandler) ListPipelines(c *gin.Context) {
 	rows, err := h.db.Query(`
-		SELECT id, session_id, dataset_id, status, current_step, job_id, model_id, eval_id, error_msg, created_at, updated_at
+		SELECT id, session_id, dataset_id, status, current_step, job_id, model_id, eval_id, error_msg, data_agent_prompt, created_at, updated_at
 		FROM pipeline_instances ORDER BY created_at DESC LIMIT 100
 	`)
 	if err != nil {
@@ -80,10 +81,10 @@ func (h *PipelineHandler) ListPipelines(c *gin.Context) {
 		var id, datasetID int
 		var jobID, modelID, evalID sql.NullInt64
 		var sessionID, status, currentStep string
-		var errorMsg sql.NullString
+		var errorMsg, dataAgentPrompt sql.NullString
 		var createdAt, updatedAt interface{}
 
-		if err := rows.Scan(&id, &sessionID, &datasetID, &status, &currentStep, &jobID, &modelID, &evalID, &errorMsg, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&id, &sessionID, &datasetID, &status, &currentStep, &jobID, &modelID, &evalID, &errorMsg, &dataAgentPrompt, &createdAt, &updatedAt); err != nil {
 			continue
 		}
 
@@ -91,15 +92,20 @@ func (h *PipelineHandler) ListPipelines(c *gin.Context) {
 		if errorMsg.Valid {
 			errorMsgVal = errorMsg.String
 		}
+		dataAgentPromptVal := ""
+		if dataAgentPrompt.Valid {
+			dataAgentPromptVal = dataAgentPrompt.String
+		}
 		p := map[string]interface{}{
-			"id":           id,
-			"session_id":   sessionID,
-			"dataset_id":   datasetID,
-			"status":       status,
-			"current_step": currentStep,
-			"error_msg":    errorMsgVal,
-			"created_at":   createdAt,
-			"updated_at":   updatedAt,
+			"id":                id,
+			"session_id":       sessionID,
+			"dataset_id":       datasetID,
+			"status":           status,
+			"current_step":      currentStep,
+			"error_msg":        errorMsgVal,
+			"data_agent_prompt": dataAgentPromptVal,
+			"created_at":       createdAt,
+			"updated_at":       updatedAt,
 		}
 		if jobID.Valid {
 			p["job_id"] = jobID.Int64
