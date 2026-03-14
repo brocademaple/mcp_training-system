@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, Button, Select, Steps, Timeline, Tag, Space, Row, Col, Statistic, Progress, Switch, Radio, Input, Modal, Form, Upload, message } from 'antd';
 import type { UploadFile } from 'antd/es/upload/interface';
-import { RobotOutlined, PlayCircleOutlined, CheckCircleOutlined, CloseCircleOutlined, SyncOutlined, PlusOutlined, UploadOutlined, LinkOutlined, ArrowRightOutlined, EditOutlined, RightOutlined } from '@ant-design/icons';
+import { RobotOutlined, PlayCircleOutlined, CheckCircleOutlined, CloseCircleOutlined, SyncOutlined, PlusOutlined, UploadOutlined, LinkOutlined, ArrowRightOutlined, EditOutlined, RightOutlined, HomeOutlined, ThunderboltOutlined, ExperimentOutlined, DownOutlined, UpOutlined, MoonOutlined, SunOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import { datasetService } from '@/services/dataset';
+import { trainingService } from '@/services/training';
 import { DEFAULT_BASE_MODEL } from '@/constants/baseModels';
+import type { TrainingJob } from '@/types';
 import './index.css';
 
 const API_BASE = 'http://localhost:8080/api/v1';
@@ -104,6 +106,13 @@ const AgentCanvas: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [datasetsLoading, setDatasetsLoading] = useState(true);
 
+  // 入口区：未展开步骤前显示引导；展开后与步骤卡片动效衔接；任务列表可收起/展开
+  const [entryDismissed, setEntryDismissed] = useState(false);
+  const [entryListExpanded, setEntryListExpanded] = useState(false); // 展开步骤后，历史任务列表是否展开
+  const entryCollapsedBarRef = useRef<HTMLDivElement>(null); // 展开/收起那一行，用于展开后滚动露出
+  const [jobs, setJobs] = useState<TrainingJob[]>([]);
+  const [jobsLoading, setJobsLoading] = useState(true);
+
   // 画布步骤：1=仅步骤1, 2=步骤2（含附属卡片）, 3=训练计划与执行
   const [canvasStep, setCanvasStep] = useState<1 | 2 | 3>(1);
   const [modelType, setModelType] = useState<string>('');
@@ -124,6 +133,21 @@ const AgentCanvas: React.FC = () => {
 
   useEffect(() => {
     fetchDatasets();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await trainingService.getJobs();
+        if (!cancelled && res?.data?.jobs) setJobs(res.data.jobs);
+      } catch (_) {
+        if (!cancelled) setJobs([]);
+      } finally {
+        if (!cancelled) setJobsLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   // 切换模型类型时，若当前任务类型不在该类型下可选则清空
@@ -259,20 +283,165 @@ const AgentCanvas: React.FC = () => {
     window.location.href = '/';
   };
 
-  const themeMode = (localStorage.getItem('app-theme') as 'light' | 'dark') || 'light';
+  const [themeMode, setThemeMode] = useState<'light' | 'dark'>(() => (localStorage.getItem('app-theme') as 'light' | 'dark') || 'light');
+
+  useEffect(() => {
+    localStorage.setItem('app-theme', themeMode);
+  }, [themeMode]);
+
+  const jobCount = jobs.length;
+  const isFirstTime = !jobsLoading && jobCount === 0;
 
   return (
     <div className="agent-canvas" data-theme={themeMode}>
+      {/* 左侧边栏：主题切换 + 版本切换，固定于左下角，带简短文字提示 */}
+      <aside className="canvas-sider">
+        <div className="canvas-sider-inner">
+          <div className="canvas-sider-theme-wrap">
+            <span
+              className="canvas-sider-icon"
+              onClick={() => setThemeMode((t) => (t === 'light' ? 'dark' : 'light'))}
+              title={themeMode === 'light' ? '切换到深色模式' : '切换到浅色模式'}
+            >
+              {themeMode === 'light' ? <MoonOutlined /> : <SunOutlined />}
+            </span>
+            <span className="canvas-sider-hint">{themeMode === 'light' ? '切换深色' : '切换浅色'}</span>
+          </div>
+          <div className="canvas-sider-version-wrap">
+            <Switch
+              checked
+              onChange={() => switchToClassic()}
+              checkedChildren="Agent"
+              unCheckedChildren="经典"
+              size="small"
+              className="canvas-sider-version-switch"
+            />
+            <span className="canvas-sider-hint">切换到经典版</span>
+          </div>
+        </div>
+      </aside>
+
+      <div className="canvas-main">
       <div className="canvas-header">
         <div className="canvas-title">
           <RobotOutlined style={{ fontSize: 32, marginRight: 12 }} />
           <div>
-            <h1>MCP Agent 智能画布</h1>
-            <p>Multi-Agent 协同编排 · 意图与材料 → 制定计划 → 数据清洗→训练→评估</p>
+            <h1>训练从意图开始</h1>
+            <p>说出训练目标与数据来源，由 Agent 自动完成清洗、训练与评估</p>
           </div>
+        </div>
+        {entryDismissed && (
+          <Button type="link" icon={<HomeOutlined />} onClick={() => { setEntryDismissed(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
+            返回首页
+          </Button>
+        )}
+      </div>
+
+      {/* 入口区：引导语 + 任务列表（可收起）或零状态 + CTA；展开步骤后仅保留收起条+展开图标；首次使用时展开后隐藏整块 */}
+      <div className={`canvas-entry-block ${entryDismissed ? 'canvas-entry-block-collapsed' : ''} ${entryDismissed && isFirstTime ? 'canvas-entry-block-hidden' : ''}`}>
+        <div className="canvas-entry-inner">
+          {!jobsLoading && (
+            <>
+              {!entryDismissed ? (
+                <>
+                  {isFirstTime ? (
+                    <div className="canvas-entry-zero">
+                      <p className="canvas-entry-hint">还没有训练记录，点击下方开始创建你的第一次训练</p>
+                      <ul className="canvas-entry-guide">
+                        <li>选择训练目标（如情感分类、主题分类、多分类等）</li>
+                        <li>准备或上传数据集，或由 Data Agent 规划数据来源</li>
+                        <li>由 Agent 自动完成清洗、训练与评估</li>
+                      </ul>
+                    </div>
+                  ) : (
+                    <div className="canvas-entry-list-wrap">
+                      <p className="canvas-entry-hint">已进行 <strong>{jobCount}</strong> 次训练任务，点击下方创建新的训练任务</p>
+                      <ul className="canvas-entry-job-list">
+                        {jobs.slice(0, 8).map((j) => (
+                          <li key={j.id} className="canvas-entry-job-item">
+                            <ExperimentOutlined style={{ color: 'rgba(0,0,0,0.45)', marginRight: 8 }} />
+                            <span className="canvas-entry-job-name">{j.name || `训练任务 #${j.id}`}</span>
+                            <span
+                              className="canvas-entry-job-status"
+                              style={{
+                                color: j.status === 'completed' ? '#52c41a' : j.status === 'failed' || j.status === 'cancelled' ? '#ff4d4f' : '#1890ff',
+                              }}
+                            >
+                              {j.status === 'queued' || j.status === 'running' ? '进行中' : j.status === 'completed' ? '已完成' : j.status === 'failed' ? '失败' : '已取消'}
+                            </span>
+                            <span className="canvas-entry-job-time">
+                              {j.created_at ? new Date(j.created_at).toLocaleString('zh-CN') : ''}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  <Button
+                    type="primary"
+                    size="large"
+                    icon={<ThunderboltOutlined />}
+                    className={isFirstTime ? 'canvas-entry-cta canvas-entry-cta-prominent' : 'canvas-entry-cta'}
+                    onClick={() => setEntryDismissed(true)}
+                  >
+                    {isFirstTime ? '开始第一次训练' : '新的训练任务'}
+                  </Button>
+                </>
+              ) : (
+                <>
+                  {jobCount > 0 && (
+                    <div className="canvas-entry-collapsed-bar" ref={entryCollapsedBarRef}>
+                      <span className="canvas-entry-collapsed-text">已进行 <strong>{jobCount}</strong> 次训练任务</span>
+                      <Button
+                        type="link"
+                        size="small"
+                        icon={entryListExpanded ? <UpOutlined /> : <DownOutlined />}
+                        onClick={() => {
+                          const next = !entryListExpanded;
+                          setEntryListExpanded(next);
+                          if (next) {
+                            setTimeout(() => {
+                              entryCollapsedBarRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                            }, 80);
+                          }
+                        }}
+                        className="canvas-entry-expand-btn"
+                      >
+                        {entryListExpanded ? '收起' : '展开'}
+                      </Button>
+                    </div>
+                  )}
+                  {jobCount > 0 && entryListExpanded && (
+                    <ul className="canvas-entry-job-list canvas-entry-job-list-collapsed">
+                      {jobs.slice(0, 8).map((j) => (
+                        <li key={j.id} className="canvas-entry-job-item">
+                          <ExperimentOutlined style={{ color: 'rgba(0,0,0,0.45)', marginRight: 8 }} />
+                          <span className="canvas-entry-job-name">{j.name || `训练任务 #${j.id}`}</span>
+                          <span
+                            className="canvas-entry-job-status"
+                            style={{
+                              color: j.status === 'completed' ? '#52c41a' : j.status === 'failed' || j.status === 'cancelled' ? '#ff4d4f' : '#1890ff',
+                            }}
+                          >
+                            {j.status === 'queued' || j.status === 'running' ? '进行中' : j.status === 'completed' ? '已完成' : j.status === 'failed' ? '失败' : '已取消'}
+                          </span>
+                          <span className="canvas-entry-job-time">
+                            {j.created_at ? new Date(j.created_at).toLocaleString('zh-CN') : ''}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              )}
+            </>
+          )}
+          {jobsLoading && <div className="canvas-entry-loading">加载中…</div>}
         </div>
       </div>
 
+      {/* 步骤区：与入口动效衔接，展开后展示步骤卡片 */}
+      <div className={`canvas-steps-reveal ${entryDismissed ? 'canvas-steps-reveal-open' : ''}`}>
       {!currentPipeline ? (
         <div className="canvas-setup">
           {canvasStep === 3 ? (
@@ -652,6 +821,7 @@ const AgentCanvas: React.FC = () => {
           </Row>
         </div>
       )}
+      </div>
 
       {/* Agent 画布内独立的上传/导入弹窗（不跳转经典版） */}
       <Modal
@@ -730,20 +900,6 @@ const AgentCanvas: React.FC = () => {
           </Form.Item>
         </Form>
       </Modal>
-
-      {/* 与经典版侧栏底部样式一致的左下角版本切换 */}
-      <div className="canvas-version-footer">
-        <div className="canvas-version-footer-inner">
-          <div className="canvas-version-label">Agent版</div>
-          <Switch
-            checked
-            onChange={() => switchToClassic()}
-            checkedChildren="Agent"
-            unCheckedChildren="经典"
-            className="canvas-version-switch"
-          />
-          <div className="canvas-version-hint">切换到经典版</div>
-        </div>
       </div>
     </div>
   );

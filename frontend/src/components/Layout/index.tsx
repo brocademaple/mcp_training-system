@@ -88,33 +88,19 @@ const Layout: React.FC = () => {
     ? { algorithm: theme.darkAlgorithm }
     : { algorithm: theme.defaultAlgorithm };
 
-  const menuItems = [
-    {
-      key: '/',
-      icon: <DashboardOutlined />,
-      label: '仪表盘',
-    },
-    {
-      key: '/datasets',
-      icon: <DatabaseOutlined />,
-      label: '数据集管理',
-    },
-    {
-      key: '/training',
-      icon: <ExperimentOutlined />,
-      label: '模型训练',
-    },
-    {
-      key: '/evaluation',
-      icon: <BarChartOutlined />,
-      label: '模型评估',
-    },
-    {
-      key: '/pipelines',
-      icon: <RocketOutlined />,
-      label: '流水线历史',
-    },
-  ];
+  const menuItems = versionMode === 'agent'
+    ? [
+        { key: '/', icon: <RobotOutlined />, label: '首页' },
+        { key: '/datasets', icon: <DatabaseOutlined />, label: '数据集管理' },
+        { key: '/pipelines', icon: <RocketOutlined />, label: '流水线历史' },
+      ]
+    : [
+        { key: '/', icon: <DashboardOutlined />, label: '仪表盘' },
+        { key: '/datasets', icon: <DatabaseOutlined />, label: '数据集管理' },
+        { key: '/training', icon: <ExperimentOutlined />, label: '模型训练' },
+        { key: '/evaluation', icon: <BarChartOutlined />, label: '模型评估' },
+        { key: '/pipelines', icon: <RocketOutlined />, label: '流水线历史' },
+      ];
 
   return (
     <ConfigProvider theme={themeConfig}>

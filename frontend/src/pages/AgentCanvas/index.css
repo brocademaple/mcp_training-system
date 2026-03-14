@@ -1,8 +1,101 @@
-/* 与经典模式内容区一致：浅灰背景 + 白卡片 */
+/* 与经典模式一致：左侧边栏 + 主内容区 */
 .agent-canvas {
+  display: flex;
   min-height: 100vh;
   background: #f5f5f5;
+}
+
+/* 左侧边栏：仅主题 + 版本切换，与经典版风格一致，控件固定于左下角 */
+.canvas-sider {
+  width: 72px;
+  flex-shrink: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-right: 1px solid #f0f0f0;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.06);
+}
+
+.canvas-sider-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  padding: 0 0 24px 0;
+  margin-top: auto;
+  box-sizing: border-box;
+}
+
+.canvas-sider-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  font-size: 20px;
+  color: rgba(0, 0, 0, 0.65);
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background 0.2s, color 0.2s;
+}
+
+.canvas-sider-icon:hover {
+  background: rgba(0, 0, 0, 0.04);
+  color: #1890ff;
+}
+
+.canvas-sider-theme-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.canvas-sider-version-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.canvas-sider-version-switch {
+  margin: 0;
+}
+
+.canvas-sider-version-switch.ant-switch {
+  min-height: 24px;
+  height: 24px;
+}
+
+.canvas-sider-version-switch.ant-switch .ant-switch-handle {
+  top: 2px;
+}
+
+.canvas-sider-version-switch.ant-switch.ant-switch-sm .ant-switch-inner {
+  font-size: 11px;
+  line-height: 20px;
+}
+
+.canvas-sider-hint {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.45);
+  text-align: center;
+  line-height: 1.2;
+}
+
+.canvas-sider-version-hint {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.45);
+  text-align: center;
+  line-height: 1.2;
+}
+
+.canvas-main {
+  flex: 1;
+  min-width: 0;
   padding: 24px;
+  overflow-x: hidden;
 }
 
 .canvas-header {
@@ -47,10 +140,172 @@
   font-size: 14px;
 }
 
+/* 入口区：引导 + 任务列表/零状态 + CTA，与步骤区动效衔接；收窄宽度留白 */
+.canvas-entry-block {
+  max-width: 900px;
+  margin: 0 auto 24px;
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  padding: 24px 28px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.canvas-entry-block-collapsed {
+  padding: 10px 20px;
+}
+
+.canvas-entry-block-hidden {
+  display: none;
+}
+
+.canvas-entry-collapsed-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.canvas-entry-collapsed-text {
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.canvas-entry-expand-btn {
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.canvas-entry-job-list-collapsed {
+  margin-top: 12px;
+  max-height: 200px;
+}
+
+.canvas-entry-inner {
+  margin: 0;
+}
+
+.canvas-entry-hint {
+  font-size: 15px;
+  color: rgba(0, 0, 0, 0.65);
+  margin-bottom: 16px;
+}
+
+.canvas-entry-zero .canvas-entry-hint {
+  margin-bottom: 12px;
+}
+
+.canvas-entry-guide {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 20px 0;
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.55);
+  line-height: 1.8;
+}
+
+.canvas-entry-guide li {
+  padding-left: 20px;
+  position: relative;
+}
+
+.canvas-entry-guide li::before {
+  content: '·';
+  position: absolute;
+  left: 0;
+  color: #1890ff;
+  font-weight: bold;
+}
+
+.canvas-entry-list-wrap {
+  margin-bottom: 16px;
+}
+
+.canvas-entry-job-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 16px 0;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+  background: #fafafa;
+}
+
+.canvas-entry-job-item {
+  display: flex;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid #f0f0f0;
+  font-size: 13px;
+}
+
+.canvas-entry-job-item:last-child {
+  border-bottom: none;
+}
+
+.canvas-entry-job-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(0, 0, 0, 0.88);
+}
+
+.canvas-entry-job-status {
+  flex-shrink: 0;
+  margin: 0 12px;
+  font-size: 12px;
+}
+
+.canvas-entry-job-time {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.canvas-entry-cta {
+  min-width: 200px;
+  height: 44px;
+  font-size: 15px;
+}
+
+.canvas-entry-cta-prominent {
+  box-shadow: 0 4px 14px rgba(24, 144, 255, 0.45);
+  animation: canvas-entry-pulse 2s ease-in-out infinite;
+}
+
+@keyframes canvas-entry-pulse {
+  0%, 100% { box-shadow: 0 4px 14px rgba(24, 144, 255, 0.45); }
+  50% { box-shadow: 0 4px 20px rgba(24, 144, 255, 0.6); }
+}
+
+.canvas-entry-loading {
+  font-size: 14px;
+  color: rgba(0, 0, 0, 0.45);
+  padding: 16px 0;
+}
+
+/* 步骤区：左右滑入动效衔接，不上下滑动页面 */
+.canvas-steps-reveal {
+  max-width: 900px;
+  margin: 0 auto;
+  overflow: hidden;
+  opacity: 0;
+  transform: translateX(24px);
+  transition: opacity 0.35s ease, transform 0.4s cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+.canvas-steps-reveal-open {
+  opacity: 1;
+  transform: translateX(0);
+}
+
 .canvas-setup {
   min-height: 50vh;
   width: 100%;
-  max-width: 1200px;
+  max-width: 900px;
   margin: 0 auto;
 }
 
@@ -168,7 +423,7 @@
 .canvas-slider {
   overflow: hidden;
   width: 100%;
-  max-width: 1200px;
+  max-width: 900px;
   margin: 0 auto;
 }
 .canvas-slider-track {
@@ -269,6 +524,35 @@
 .agent-canvas[data-theme='dark'] .canvas-title p {
   color: rgba(255, 255, 255, 0.65);
 }
+.agent-canvas[data-theme='dark'] .canvas-entry-block {
+  background: #1f1f1f;
+  border-color: #434343;
+}
+.agent-canvas[data-theme='dark'] .canvas-entry-hint {
+  color: rgba(255, 255, 255, 0.65);
+}
+.agent-canvas[data-theme='dark'] .canvas-entry-guide {
+  color: rgba(255, 255, 255, 0.55);
+}
+.agent-canvas[data-theme='dark'] .canvas-entry-job-list {
+  background: #141414;
+  border-color: #434343;
+}
+.agent-canvas[data-theme='dark'] .canvas-entry-job-item {
+  border-color: #434343;
+}
+.agent-canvas[data-theme='dark'] .canvas-entry-job-name {
+  color: rgba(255, 255, 255, 0.88);
+}
+.agent-canvas[data-theme='dark'] .canvas-entry-job-time {
+  color: rgba(255, 255, 255, 0.45);
+}
+.agent-canvas[data-theme='dark'] .canvas-entry-loading {
+  color: rgba(255, 255, 255, 0.45);
+}
+.agent-canvas[data-theme='dark'] .canvas-entry-collapsed-text {
+  color: rgba(255, 255, 255, 0.65);
+}
 .agent-canvas[data-theme='dark'] .canvas-back-to-classic-btn {
   background: #1f1f1f !important;
   color: rgba(255, 255, 255, 0.85) !important;
@@ -316,56 +600,27 @@
   color: rgba(255, 255, 255, 0.4);
 }
 
-/* 与经典版侧栏底部一致的左下角版本切换（结构、字号、间距与 Layout .sider-footer 一致） */
-.canvas-version-footer {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  z-index: 100;
-  padding: 12px 16px;
-  border-top: 1px solid #f0f0f0;
-  border-right: 1px solid #f0f0f0;
-  background: #fff;
-  border-radius: 0 8px 0 0;
-  box-shadow: 2px -2px 8px rgba(0, 0, 0, 0.06);
-}
-.canvas-version-footer-inner {
-  padding: 8px 16px;
-  width: 100%;
-  box-sizing: border-box;
-}
-.canvas-version-label {
-  font-size: 14px;
-  font-weight: 500;
-  margin-bottom: 8px;
-  color: rgba(0, 0, 0, 0.88);
-}
-.canvas-version-switch {
-  margin-bottom: 8px;
-}
-.canvas-version-switch.ant-switch .ant-switch-inner {
-  font-size: 13px;
-  font-weight: 500;
-}
-.canvas-version-switch.ant-switch.ant-switch-checked .ant-switch-inner {
-  color: #fff;
-}
-.canvas-version-hint {
-  font-size: 12px;
-  color: rgba(0, 0, 0, 0.55);
-  margin-top: 4px;
-}
-.agent-canvas[data-theme='dark'] .canvas-version-footer {
+/* 深色模式：左侧边栏 */
+.agent-canvas[data-theme='dark'] .canvas-sider {
   background: #1f1f1f;
   border-color: #434343;
-  box-shadow: 2px -2px 8px rgba(0, 0, 0, 0.2);
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.2);
 }
-.agent-canvas[data-theme='dark'] .canvas-version-label {
-  color: rgba(255, 255, 255, 0.92);
+
+.agent-canvas[data-theme='dark'] .canvas-sider-icon {
+  color: rgba(255, 255, 255, 0.65);
 }
-.agent-canvas[data-theme='dark'] .canvas-version-switch.ant-switch:not(.ant-switch-checked) .ant-switch-inner {
+
+.agent-canvas[data-theme='dark'] .canvas-sider-icon:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #1890ff;
+}
+
+.agent-canvas[data-theme='dark'] .canvas-sider-hint,
+.agent-canvas[data-theme='dark'] .canvas-sider-version-hint {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.agent-canvas[data-theme='dark'] .canvas-sider-version-switch.ant-switch:not(.ant-switch-checked) .ant-switch-inner {
   color: rgba(255, 255, 255, 0.85);
-}
-.agent-canvas[data-theme='dark'] .canvas-version-hint {
-  color: rgba(255, 255, 255, 0.55);
 }
