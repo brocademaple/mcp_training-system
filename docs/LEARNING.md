@@ -116,6 +116,18 @@
 
 适用场景：之前因「数据集未就绪」失败，现在数据集已经 ready；或你想用同一配置再训练一次。无需重新创建任务。
 
+#### 5.7 预训练底模（文本与多模态）
+
+训练「文本分类」任务时，可在创建任务时选择**预训练底模**（`hyperparams.base_model`），系统会从 HuggingFace 加载对应 tokenizer 与模型进行微调。
+
+- **当前直接支持（文本分类）**：  
+  - `bert-base-uncased`（默认，英文）、`bert-base-chinese`（中文）、`hfl/chinese-bert-wwm-ext`、`hfl/chinese-roberta-wwm-ext`、`roberta-base`、`albert-base-v2`、`distilbert-base-uncased` 等。  
+  - 前端「创建训练任务」表单中有「预训练底模」下拉；Agent 流水线默认使用 `bert-base-uncased`，可在前端常量或流水线请求中改为其他 id。
+- **多模态底模**：  
+  - 如 `openai/clip-vit-base-patch32`、`Salesforce/blip-itm-base-coco` 等已在底模列表中预留；多模态训练需要**图像+文本**数据格式与专用训练/评估脚本，当前流程仍为「仅文本」分类，多模态为后续扩展预留。
+- **评估时**：  
+  - 评估脚本从保存的模型目录加载模型与 tokenizer；若目录内无 tokenizer，会读取训练时写入的 `training_config.json` 中的 `base_model` 回退加载对应 tokenizer，保证与训练一致。
+
 ### 6. 评估系统原理与「训练 → 评估」的衔接
 
 #### 6.1 评估系统是什么原理
@@ -310,6 +322,12 @@ cd frontend && npm i && npm run dev
 - **异步**：上传/创建任务后，清洗、训练、评估都在 `go func()` 里跑，所以接口先返回，状态要轮询或 WebSocket 看。
 - **数据集 error**：若因 Python/pandas 未装或编码问题导致清洗失败，修好环境后无需重新上传，在列表里对该条点「重试清洗」即可再次跑 `CleanData`（见上文例 4）。
 - **路径**：`original_file_path` / `cleaned_file_path` / `model_path` 多为相对路径（如 `./data/uploads/...`），当前工作目录一般是项目根目录；报告下载用 `reportDir + filepath.Base(report_path)` 拼绝对路径。
+
+#### 「从磁盘恢复」是什么、为何会多出很多数据集
+
+- **入口**：仪表盘或相关页的「从磁盘恢复」按钮调用 `POST /sync-from-disk`，会扫描 **data/uploads** 下所有 `.csv` / `.json` / `.tsv` **文件**（不含子目录），为**尚未在数据库中记录**的每个文件创建一条数据集记录（status=ready）。
+- **那 40 条从哪来**：说明 data/uploads 目录下有 40 个此类文件（可能是历史上传、测试文件、或临时文件）。每条记录的名称默认取**文件名**；若系统检测到文件名疑似乱码（编码异常、控制字符等），会改用「恢复_dataset.csv」等安全名称。
+- **如何清理**：在「数据集管理」中可：① 勾选多条记录后点击「批量删除选中」删除不需要的；② 对名称异常或乱码的条目可点「重命名」改为可读名称，或直接删除。删除仅移除数据库记录，**不会**删除 data/uploads 里的物理文件；若再次点「从磁盘恢复」，已删记录可能再次被恢复（因文件仍在）。若希望不再恢复某批文件，可从磁盘删除或移走 data/uploads 下对应文件后再点恢复。
 - **模型格式**：训练保存的是目录（Transformers），下载时用 zip 打包；若以后改成单文件 .pth，下载逻辑已支持单文件直接返回。
 
 ---
@@ -360,7 +378,7 @@ cd frontend && npm i && npm run dev
   - UI：Ant Design 5（`Card/Table/Button/Form/Modal/Menu` 等）。
   - 构建：Vite（`frontend/vite.config.ts`，含 `/api` 代理和 `/ws` WebSocket 代理）。
 - **页面结构**（`frontend/src/pages`）：
-  - `Dashboard`：仪表盘。
+  - `Dashboard`：工作台/仪表盘；定位与改造说明见 `docs/DASHBOARD_PRODUCT.md`。
   - `Dataset`：数据集管理（上传 / URL 导入 / 在线数据集导入 / 预览）。
   - `Training`：训练任务列表 + 创建任务 + 实时进度（含 WebSocket）。
   - `Model`：模型管理（列表 + 下载）。
@@ -427,8 +445,16 @@ cd frontend && npm i && npm run dev
 | `007_add_evaluation_name.sql` | evaluations 表增加 `name` | 要用评估任务名称列时执行一次 |
 | `008_add_dataset_usage.sql` | datasets 表增加 `usage`（训练/测试集区分） | 要用训练集/测试集分离时执行一次 |
 | `009_dataset_delete_set_null.sql` | 删除数据集时训练任务不级联删除，仅置空 dataset_id | 要保留已删数据集对应的任务与模型时执行一次 |
+| `010_create_pipeline_instances.sql` | 2.0 流水线实例表（session_id、job_id、model_id、eval_id 等） | 使用 Agent 版「一键流水线」或「流水线历史」前执行一次 |
 
 执行过一次后，**这些更改会一直跟着这个数据库**；只有换新库或新环境时，才需要重新按顺序执行对应的迁移。
+
+#### 2.3 2.0 转型检查（流水线与双版本）
+
+- **双版本**：侧栏底部可切换「经典版 / 手动版」与「Agent 版」；两版共用同一 DB，数据互通。
+- **一键流水线**：Agent 版画布选择数据集后「启动 Agent 流水线」，由编排层经 MCP 消息依次执行清洗 → 训练 → 评估。
+- **流水线历史**：经典版侧栏「流水线历史」可查看所有流水线实例（会话、状态、job_id、model_id、eval_id）；需先执行迁移 `010_create_pipeline_instances.sql`。
+- **训练 ↔ 模型 ↔ 评估**：训练任务列表有「模型」列与「创建评估」快捷入口；从训练页点「创建评估」会跳转评估页并自动打开创建弹窗且预填该模型。
 
 ### 3. 推荐命令（按当前 `.env`：root/5433）
 

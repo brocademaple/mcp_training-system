@@ -32,11 +32,14 @@ import {
 import { trainingService } from '@/services/training';
 import { datasetService } from '@/services/dataset';
 import { modelService } from '@/services/model';
+import { BASE_MODELS_TEXT, DEFAULT_BASE_MODEL } from '@/constants/baseModels';
+import { useNavigate } from 'react-router-dom';
 import type { TrainingJob, Dataset, Model } from '@/types';
 
 type StepStatus = 'wait' | 'process' | 'finish' | 'error';
 
 const TrainingManagement: React.FC = () => {
+  const navigate = useNavigate();
   const [jobs, setJobs] = useState<TrainingJob[]>([]);
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [loading, setLoading] = useState(false);
@@ -199,6 +202,7 @@ const TrainingManagement: React.FC = () => {
         dataset_id: values.dataset_id,
         model_type: values.model_type,
         hyperparams: {
+          base_model: values.base_model ?? DEFAULT_BASE_MODEL,
           learning_rate: values.learning_rate,
           batch_size: values.batch_size,
           epochs: values.epochs,
@@ -473,6 +477,28 @@ const TrainingManagement: React.FC = () => {
       key: 'model_type',
       width: 110,
       render: (type: string) => modelTypeLabel[type] ?? type,
+    },
+    {
+      title: '模型',
+      key: 'model',
+      width: 160,
+      render: (_: unknown, record: TrainingJob) => {
+        const model = models.find((m) => m.job_id === record.id);
+        if (!model) return <span style={{ color: '#999' }}>—</span>;
+        return (
+          <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span>{model.name || `模型 #${model.id}`}</span>
+            <Button
+              type="link"
+              size="small"
+              style={{ padding: 0, height: 'auto' }}
+              onClick={() => navigate('/evaluation', { state: { modelId: model.id } })}
+            >
+              创建评估
+            </Button>
+          </span>
+        );
+      },
     },
     {
       title: '数据集',
@@ -990,6 +1016,7 @@ const TrainingManagement: React.FC = () => {
           onFinish={handleCreateJob}
           initialValues={{
             model_type: 'text_classification',
+            base_model: DEFAULT_BASE_MODEL,
             learning_rate: 0.00002,
             batch_size: 16,
             epochs: 3,
@@ -1032,6 +1059,20 @@ const TrainingManagement: React.FC = () => {
           >
             <Select>
               <Select.Option value="text_classification">文本分类</Select.Option>
+            </Select>
+          </Form.Item>
+
+          <Form.Item
+            name="base_model"
+            label="预训练底模"
+            tooltip="文本分类使用的 HuggingFace 底模，支持中英文等"
+          >
+            <Select placeholder="选择底模" showSearch optionFilterProp="label">
+              {BASE_MODELS_TEXT.map((m) => (
+                <Select.Option key={m.id} value={m.id} label={m.label}>
+                  {m.label}
+                </Select.Option>
+              ))}
             </Select>
           </Form.Item>
 

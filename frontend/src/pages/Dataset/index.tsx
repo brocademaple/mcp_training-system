@@ -5,6 +5,14 @@ import type { UploadFile } from 'antd/es/upload/interface';
 import { datasetService } from '@/services/dataset';
 import type { Dataset } from '@/types';
 
+/** 名称是否疑似乱码（恢复数据集时文件名编码异常等） */
+function isLikelyGarbled(name: string): boolean {
+  if (!name || name.length > 200) return true;
+  if (name.includes('\uFFFD')) return true;
+  if (/[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(name)) return true;
+  return false;
+}
+
 // 在线数据集预设：国内加速优先；支持情感、主题分类等多种文本任务，以及图像参考
 // taskCategory 用于展示：sentiment=情感, topic=主题/新闻, other=其他文本, image=图像（参考）
 type OnlinePreset = {
@@ -170,9 +178,14 @@ const DatasetManagement: React.FC = () => {
   const [datasetTab, setDatasetTab] = useState<'training' | 'test'>('training');
   const [splitModalVisible, setSplitModalVisible] = useState(false);
   const [splitLoading, setSplitLoading] = useState(false);
+  const [selectedRowKeys, setSelectedRowKeys] = useState<number[]>([]);
+  const [renameModalVisible, setRenameModalVisible] = useState(false);
+  const [renameTarget, setRenameTarget] = useState<Dataset | null>(null);
+  const [renameLoading, setRenameLoading] = useState(false);
   const [form] = Form.useForm();
   const [urlForm] = Form.useForm();
   const [splitForm] = Form.useForm();
+  const [renameForm] = Form.useForm();
 
   useEffect(() => {
     fetchDatasets();
@@ -365,6 +378,26 @@ const DatasetManagement: React.FC = () => {
       title: '数据集名称',
       dataIndex: 'name',
       key: 'name',
+      render: (name: string, record: Dataset) => (
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
+          <span title={name}>{name || '—'}</span>
+          {isLikelyGarbled(record.name) && (
+            <Tag color="orange">名称异常</Tag>
+          )}
+          <Button
+            type="link"
+            size="small"
+            style={{ padding: 0, height: 'auto' }}
+            onClick={() => {
+              setRenameTarget(record);
+              renameForm.setFieldsValue({ name: record.name });
+              setRenameModalVisible(true);
+            }}
+          >
+            重命名
+          </Button>
+        </div>
+      ),
     },
     {
       title: '类型',
@@ -523,6 +556,26 @@ const DatasetManagement: React.FC = () => {
           <Button type="primary" icon={<UploadOutlined />} onClick={() => setUploadModalVisible(true)}>
             {datasetTab === 'test' ? '上传测试集' : '上传训练集'}
           </Button>
+          {selectedRowKeys.length > 0 && (
+            <Popconfirm
+              title={`确定删除选中的 ${selectedRowKeys.length} 个数据集？`}
+              onConfirm={async () => {
+                try {
+                  const res = await datasetService.bulkDelete(selectedRowKeys);
+                  const n = (res as any).data?.deleted ?? 0;
+                  message.success(`已删除 ${n} 个数据集`);
+                  setSelectedRowKeys([]);
+                  fetchDatasets();
+                } catch (e: any) {
+                  message.error(e?.message || '批量删除失败');
+                }
+              }}
+            >
+              <Button danger icon={<DeleteOutlined />} style={{ marginLeft: 8 }}>
+                批量删除选中 ({selectedRowKeys.length})
+              </Button>
+            </Popconfirm>
+          )}
           {datasetTab === 'test' && (
             <Button
               icon={<PartitionOutlined />}
@@ -549,6 +602,10 @@ const DatasetManagement: React.FC = () => {
           dataSource={datasetTab === 'training' ? trainingDatasets : testDatasets}
           rowKey="id"
           loading={loading}
+          rowSelection={{
+            selectedRowKeys,
+            onChange: (keys) => setSelectedRowKeys(keys as number[]),
+          }}
           pagination={{
             current: page,
             pageSize,
@@ -561,6 +618,45 @@ const DatasetManagement: React.FC = () => {
           }}
         />
       </Card>
+
+      <Modal
+        title="重命名数据集"
+        open={renameModalVisible}
+        onCancel={() => {
+          setRenameModalVisible(false);
+          setRenameTarget(null);
+          renameForm.resetFields();
+        }}
+        onOk={() => renameForm.submit()}
+        okText="保存"
+        cancelText="取消"
+        confirmLoading={renameLoading}
+      >
+        <Form
+          form={renameForm}
+          layout="vertical"
+          onFinish={async (values) => {
+            if (!renameTarget) return;
+            setRenameLoading(true);
+            try {
+              await datasetService.updateName(renameTarget.id, values.name?.trim() || '');
+              message.success('名称已更新');
+              setRenameModalVisible(false);
+              setRenameTarget(null);
+              renameForm.resetFields();
+              fetchDatasets();
+            } catch (e: any) {
+              message.error(e?.message || '更新失败');
+            } finally {
+              setRenameLoading(false);
+            }
+          }}
+        >
+          <Form.Item name="name" label="新名称" rules={[{ required: true, message: '请输入名称' }, { max: 200, message: '最多 200 字' }]}>
+            <Input placeholder="输入数据集显示名称" />
+          </Form.Item>
+        </Form>
+      </Modal>
 
       <Modal
         title={datasetTab === 'test' ? '上传测试集' : '上传训练集'}

@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"mcp-training-system/internal/models"
@@ -87,6 +89,43 @@ func (h *SyncHandler) SyncFromDisk(c *gin.Context) {
 	})
 }
 
+// isLikelyGarbled 判断名称是否疑似乱码（含替换字符、控制字符、或非 UTF-8 等）
+func isLikelyGarbled(name string) bool {
+	if name == "" || !utf8.ValidString(name) {
+		return true
+	}
+	if strings.ContainsRune(name, '\uFFFD') {
+		return true
+	}
+	runes := 0
+	ctrlOrWeird := 0
+	for _, r := range name {
+		runes++
+		if r == utf8.RuneError || unicode.Is(unicode.C, r) || unicode.Is(unicode.Cc, r) {
+			ctrlOrWeird++
+		}
+		if runes > 200 {
+			return true
+		}
+	}
+	if runes > 0 && ctrlOrWeird*2 >= runes {
+		return true
+	}
+	return false
+}
+
+// safeRecoveredName 为恢复的数据集生成可读名称，避免乱码文件名直接入库
+func safeRecoveredName(filename string, ext string) string {
+	if !isLikelyGarbled(filename) {
+		return filename
+	}
+	base := strings.TrimSuffix(filename, ext)
+	if base != "" && !isLikelyGarbled(base) {
+		return "恢复_" + base + ext
+	}
+	return fmt.Sprintf("恢复_dataset_%d%s", utils.GetTimestamp(), ext)
+}
+
 // syncDatasetsFromUploadDir 扫描 uploadDir 下文件，对未在 DB 中记录的文件创建数据集记录（status=ready，直接可用）
 func (h *SyncHandler) syncDatasetsFromUploadDir(userID int) (int, error) {
 	uploadDir := h.uploadDir
@@ -152,9 +191,10 @@ func (h *SyncHandler) syncDatasetsFromUploadDir(userID int) (int, error) {
 		if ext == ".json" {
 			dataType = "text"
 		}
+		displayName := safeRecoveredName(name, ext)
 		d := &models.Dataset{
 			UserID:           userID,
-			Name:             name,
+			Name:             displayName,
 			Type:             dataType,
 			Usage:            "training",
 			Source:           sql.NullString{String: "local", Valid: true},

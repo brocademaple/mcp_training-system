@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Layout as AntLayout, Menu, ConfigProvider, theme } from 'antd';
+import { Layout as AntLayout, Menu, ConfigProvider, theme, Switch } from 'antd';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
   DashboardOutlined,
@@ -13,6 +13,8 @@ import {
   SunOutlined,
   DoubleLeftOutlined,
   RightOutlined,
+  RobotOutlined,
+  RocketOutlined,
 } from '@ant-design/icons';
 import './index.css';
 
@@ -20,11 +22,13 @@ const { Sider, Content } = AntLayout;
 
 const STORAGE_THEME_KEY = 'app-theme';
 const STORAGE_SIDER_WIDTH_KEY = 'app-sider-width';
+const STORAGE_VERSION_KEY = 'app-version';
 const MIN_SIDER_WIDTH = 160;
 const MAX_SIDER_WIDTH = 420;
 const DEFAULT_SIDER_WIDTH = 220;
 
 type ThemeMode = 'light' | 'dark';
+type VersionMode = 'classic' | 'agent';
 
 const Layout: React.FC = () => {
   const navigate = useNavigate();
@@ -41,6 +45,9 @@ const Layout: React.FC = () => {
   });
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
     return (localStorage.getItem(STORAGE_THEME_KEY) as ThemeMode) || 'light';
+  });
+  const [versionMode, setVersionMode] = useState<VersionMode>(() => {
+    return (localStorage.getItem(STORAGE_VERSION_KEY) as VersionMode) || 'classic';
   });
 
   useEffect(() => {
@@ -73,6 +80,10 @@ const Layout: React.FC = () => {
     localStorage.setItem(STORAGE_THEME_KEY, themeMode);
   }, [themeMode]);
 
+  useEffect(() => {
+    localStorage.setItem(STORAGE_VERSION_KEY, versionMode);
+  }, [versionMode]);
+
   const themeConfig = themeMode === 'dark'
     ? { algorithm: theme.darkAlgorithm }
     : { algorithm: theme.defaultAlgorithm };
@@ -97,6 +108,11 @@ const Layout: React.FC = () => {
       key: '/evaluation',
       icon: <BarChartOutlined />,
       label: '模型评估',
+    },
+    {
+      key: '/pipelines',
+      icon: <RocketOutlined />,
+      label: '流水线历史',
     },
   ];
 
@@ -166,6 +182,26 @@ const Layout: React.FC = () => {
               inlineCollapsed={collapsed}
             />
             <div className="sider-footer">
+              <div className="sider-footer-inner">
+                <div className="sider-version-label">
+                  {versionMode === 'classic' ? '经典版' : 'Agent版'}
+                </div>
+                <Switch
+                  checked={versionMode === 'agent'}
+                  onChange={(checked) => {
+                    const newMode = checked ? 'agent' : 'classic';
+                    localStorage.setItem('app-version', newMode);
+                    // 切换模式后跳转到首页，避免停留在当前路径（如 /pipelines）导致重复报错
+                    window.location.href = '/';
+                  }}
+                  checkedChildren="Agent"
+                  unCheckedChildren="经典"
+                  className="sider-version-switch"
+                />
+                <div className="sider-version-hint">
+                  {versionMode === 'classic' ? '切换到 Agent 版' : '切换到经典版'}
+                </div>
+              </div>
               <span
                 className="sider-theme-toggle"
                 onClick={() => setThemeMode((t) => (t === 'light' ? 'dark' : 'light'))}

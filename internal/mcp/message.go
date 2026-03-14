@@ -8,13 +8,15 @@ import (
 
 // MCPMessage represents a message in the MCP protocol
 type MCPMessage struct {
-	ID        string                 `json:"id"`
-	Type      string                 `json:"type"` // "request" or "response"
-	From      string                 `json:"from"`
-	To        string                 `json:"to"`
-	Action    string                 `json:"action"`
-	Payload   map[string]interface{} `json:"payload"`
-	Timestamp time.Time              `json:"timestamp"`
+	ID                 string                 `json:"id"`
+	Type               string                 `json:"type"` // "request" or "response"
+	From               string                 `json:"from"`
+	To                 string                 `json:"to"`
+	Action             string                 `json:"action"`
+	Payload            map[string]interface{} `json:"payload"`
+	Timestamp          time.Time              `json:"timestamp"`
+	SessionID          string                 `json:"session_id,omitempty"`
+	PipelineInstanceID string                 `json:"pipeline_instance_id,omitempty"`
 }
 
 // NewRequest creates a new MCP request message

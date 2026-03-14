@@ -1,0 +1,371 @@
+/* 与经典模式内容区一致：浅灰背景 + 白卡片 */
+.agent-canvas {
+  min-height: 100vh;
+  background: #f5f5f5;
+  padding: 24px;
+}
+
+.canvas-header {
+  margin-bottom: 32px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* 切换到经典版按钮：与经典模式默认按钮风格一致 */
+.canvas-back-to-classic-btn {
+  background: #fff !important;
+  color: rgba(0, 0, 0, 0.88) !important;
+  border: 1px solid #d9d9d9 !important;
+  font-weight: 500;
+}
+.canvas-back-to-classic-btn:hover {
+  color: #1890ff !important;
+  border-color: #1890ff !important;
+  background: #fff !important;
+}
+.canvas-back-to-classic-btn .anticon {
+  color: inherit !important;
+}
+
+.canvas-title {
+  display: flex;
+  align-items: center;
+  color: rgba(0, 0, 0, 0.88);
+}
+
+.canvas-title h1 {
+  margin: 0;
+  color: rgba(0, 0, 0, 0.88);
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.canvas-title p {
+  margin: 4px 0 0 0;
+  color: rgba(0, 0, 0, 0.65);
+  font-size: 14px;
+}
+
+.canvas-setup {
+  min-height: 50vh;
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.canvas-setup.canvas-flow {
+  display: block;
+}
+
+.canvas-flow-hint {
+  font-size: 14px;
+  color: rgba(0, 0, 0, 0.6);
+  margin-bottom: 24px;
+  padding: 0 4px;
+}
+
+.canvas-flow-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+
+@media (min-width: 900px) {
+  .canvas-flow-row {
+    flex-wrap: nowrap;
+  }
+}
+
+.canvas-step-card {
+  flex: 1;
+  min-width: 280px;
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.canvas-step-card.canvas-step-single {
+  max-width: 560px;
+  margin: 0 auto;
+}
+
+.canvas-step-badge {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  background: #1890ff;
+  color: #fff;
+  border-radius: 4px;
+}
+
+.canvas-step-desc {
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.55);
+  margin-bottom: 16px;
+}
+
+.canvas-flow-connector {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16px;
+  min-width: 80px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 899px) {
+  .canvas-flow-connector {
+    width: 100%;
+    padding: 12px 0;
+    flex-direction: row;
+    min-width: 100%;
+  }
+}
+
+.canvas-flow-arrow {
+  font-size: 24px;
+  color: #1890ff;
+  margin-bottom: 8px;
+}
+
+@media (max-width: 899px) {
+  .canvas-flow-arrow {
+    margin-bottom: 0;
+    margin-right: 8px;
+    transform: rotate(90deg);
+  }
+}
+
+.canvas-flow-connector-text {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.4);
+  text-align: center;
+  max-width: 70px;
+  line-height: 1.3;
+}
+
+@media (max-width: 899px) {
+  .canvas-flow-connector-text {
+    max-width: none;
+    text-align: left;
+  }
+}
+
+.canvas-flow-actions {
+  display: flex;
+  justify-content: center;
+  padding-top: 8px;
+}
+
+/* 步骤 1 → 2 滑动动效：仅步骤 1 时显示第一屏，下一步后滑出并引入步骤 2 */
+.canvas-slider {
+  overflow: hidden;
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+.canvas-slider-track {
+  display: flex;
+  width: 200%;
+  transition: transform 0.45s cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+.canvas-slider.canvas-slider-step2 .canvas-slider-track {
+  transform: translateX(-50%);
+}
+.canvas-slider-panel {
+  width: 50%;
+  flex-shrink: 0;
+  padding-right: 24px;
+  box-sizing: border-box;
+}
+
+/* 步骤 2：主卡 + 右侧附属卡（上传与选择 / Data Agent 选项） */
+.canvas-step2-row {
+  display: flex;
+  align-items: stretch;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.canvas-step2-main {
+  flex: 1;
+  min-width: 280px;
+}
+.canvas-step2-side {
+  flex: 1;
+  min-width: 280px;
+  max-width: 400px;
+}
+
+.setup-card {
+  width: 500px;
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.setup-card h2 {
+  margin-bottom: 24px;
+  color: rgba(0, 0, 0, 0.88);
+}
+
+.canvas-no-data-hint {
+  margin-top: 8px;
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.65);
+}
+.canvas-no-data-hint .ant-btn-link {
+  padding: 0 4px;
+  height: auto;
+}
+
+.canvas-plan-desc {
+  margin-bottom: 16px;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.02);
+  border-radius: 8px;
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.canvas-agent-plan-note {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.5);
+  margin-bottom: 12px;
+  padding: 8px;
+  background: rgba(24, 144, 255, 0.06);
+  border-radius: 6px;
+}
+
+.canvas-board {
+  animation: fadeIn 0.5s;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.step-card, .mcp-card {
+  height: 100%;
+}
+
+/* 深色主题：与经典模式 Layout 深色一致 */
+.agent-canvas[data-theme='dark'] {
+  background: #141414;
+}
+.agent-canvas[data-theme='dark'] .canvas-title,
+.agent-canvas[data-theme='dark'] .canvas-title h1 {
+  color: rgba(255, 255, 255, 0.92);
+}
+.agent-canvas[data-theme='dark'] .canvas-title p {
+  color: rgba(255, 255, 255, 0.65);
+}
+.agent-canvas[data-theme='dark'] .canvas-back-to-classic-btn {
+  background: #1f1f1f !important;
+  color: rgba(255, 255, 255, 0.85) !important;
+  border-color: #434343 !important;
+}
+.agent-canvas[data-theme='dark'] .canvas-back-to-classic-btn:hover {
+  color: #1890ff !important;
+  border-color: #1890ff !important;
+  background: #1f1f1f !important;
+}
+.agent-canvas[data-theme='dark'] .setup-card {
+  background: #1f1f1f;
+  border-color: #434343;
+}
+.agent-canvas[data-theme='dark'] .setup-card h2 {
+  color: rgba(255, 255, 255, 0.92);
+}
+.agent-canvas[data-theme='dark'] .canvas-no-data-hint {
+  color: rgba(255, 255, 255, 0.65);
+}
+.agent-canvas[data-theme='dark'] .canvas-plan-desc {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.agent-canvas[data-theme='dark'] .canvas-agent-plan-note {
+  color: rgba(255, 255, 255, 0.6);
+  background: rgba(24, 144, 255, 0.12);
+}
+
+.agent-canvas[data-theme='dark'] .canvas-flow-hint {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.agent-canvas[data-theme='dark'] .canvas-step-card {
+  background: #1f1f1f;
+  border-color: #434343;
+}
+
+.agent-canvas[data-theme='dark'] .canvas-step-desc {
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.agent-canvas[data-theme='dark'] .canvas-flow-connector-text {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+/* 与经典版侧栏底部一致的左下角版本切换（结构、字号、间距与 Layout .sider-footer 一致） */
+.canvas-version-footer {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  z-index: 100;
+  padding: 12px 16px;
+  border-top: 1px solid #f0f0f0;
+  border-right: 1px solid #f0f0f0;
+  background: #fff;
+  border-radius: 0 8px 0 0;
+  box-shadow: 2px -2px 8px rgba(0, 0, 0, 0.06);
+}
+.canvas-version-footer-inner {
+  padding: 8px 16px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.canvas-version-label {
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 8px;
+  color: rgba(0, 0, 0, 0.88);
+}
+.canvas-version-switch {
+  margin-bottom: 8px;
+}
+.canvas-version-switch.ant-switch .ant-switch-inner {
+  font-size: 13px;
+  font-weight: 500;
+}
+.canvas-version-switch.ant-switch.ant-switch-checked .ant-switch-inner {
+  color: #fff;
+}
+.canvas-version-hint {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.55);
+  margin-top: 4px;
+}
+.agent-canvas[data-theme='dark'] .canvas-version-footer {
+  background: #1f1f1f;
+  border-color: #434343;
+  box-shadow: 2px -2px 8px rgba(0, 0, 0, 0.2);
+}
+.agent-canvas[data-theme='dark'] .canvas-version-label {
+  color: rgba(255, 255, 255, 0.92);
+}
+.agent-canvas[data-theme='dark'] .canvas-version-switch.ant-switch:not(.ant-switch-checked) .ant-switch-inner {
+  color: rgba(255, 255, 255, 0.85);
+}
+.agent-canvas[data-theme='dark'] .canvas-version-hint {
+  color: rgba(255, 255, 255, 0.55);
+}

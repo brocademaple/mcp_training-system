@@ -2,6 +2,7 @@ package models
 
 import (
 	"database/sql"
+	"strings"
 	"time"
 )
 
@@ -167,6 +168,12 @@ func UpdateDatasetStatus(db *sql.DB, id int, status string, errorMsg string) err
 		WHERE id = $3
 	`
 	_, err := db.Exec(query, status, errorMsg, id)
+	return err
+}
+
+// UpdateDatasetName 仅更新数据集名称（用于重命名、修正乱码等）
+func UpdateDatasetName(db *sql.DB, id int, name string) error {
+	_, err := db.Exec(`UPDATE datasets SET name = $1, updated_at = NOW() WHERE id = $2`, strings.TrimSpace(name), id)
 	return err
 }
 

@@ -79,12 +79,6 @@ const ModelManagement: React.FC = () => {
       render: (name: string) => name || '—',
     },
     {
-      title: '训练任务',
-      dataIndex: 'job_id',
-      key: 'job_id',
-      width: 96,
-    },
-    {
       title: '模型类型',
       dataIndex: 'model_type',
       key: 'model_type',

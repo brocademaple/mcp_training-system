@@ -117,9 +117,20 @@ def train_text_classification(dataset_path, hyperparams):
         if num_labels < 2:
             num_labels = 2
 
+        # Base model: 支持多种文本/多模态底模，由 hyperparams.base_model 或 base_model_id 传入
+        base_model = (
+            hyperparams.get("base_model")
+            or hyperparams.get("base_model_id")
+            or "bert-base-uncased"
+        )
+        if isinstance(base_model, str):
+            base_model = base_model.strip() or "bert-base-uncased"
+        else:
+            base_model = "bert-base-uncased"
+
         # Load tokenizer
-        _log("正在加载 tokenizer (bert-base-uncased)…")
-        tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+        _log(f"正在加载 tokenizer ({base_model})…")
+        tokenizer = AutoTokenizer.from_pretrained(base_model)
         _log("Tokenizer 加载完成")
 
         # Tokenize function
@@ -131,10 +142,10 @@ def train_text_classification(dataset_path, hyperparams):
         tokenized_dataset = dataset.map(tokenize_function, batched=True)
         _log("分词完成")
 
-        # Load model
-        _log("正在加载预训练模型 (bert-base-uncased)…")
+        # Load model（与 tokenizer 使用同一底模）
+        _log(f"正在加载预训练模型 ({base_model})…")
         model = AutoModelForSequenceClassification.from_pretrained(
-            "bert-base-uncased",
+            base_model,
             num_labels=num_labels
         )
         _log("模型加载完成")
@@ -182,6 +193,14 @@ def train_text_classification(dataset_path, hyperparams):
         model_save_path = f"./data/models/job_{hyperparams.get('job_id', 'unknown')}"
         _log(f"正在保存模型到 {model_save_path}…")
         trainer.save_model(model_save_path)
+        # 保存底模标识，供评估脚本 tokenizer 回退使用
+        try:
+            import os
+            config_path = os.path.join(model_save_path, "training_config.json")
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump({"base_model": base_model}, f, ensure_ascii=False)
+        except Exception:
+            pass
         _log("模型已保存")
 
         # Get final loss

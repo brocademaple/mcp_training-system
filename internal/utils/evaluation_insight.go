@@ -179,6 +179,19 @@ func InsightFromErrorMessage(raw string) EvaluationInsight {
 		}
 	}
 
+	// 10. 系统填充的通用提示（说明真实错误未写入，多为未执行迁移 006 或异常未落入可记录路径）
+	if strings.Contains(raw, "未生成报告或评估异常") && strings.Contains(raw, "可能原因") {
+		return EvaluationInsight{
+			Category: "未记录到具体错误",
+			Summary:  "当前显示的是系统通用提示，说明具体失败原因尚未写入数据库。",
+			Suggestions: []string{
+				"请查看运行后端的终端窗口（执行 go run 或 server 的窗口）中的完整报错，根据关键词排查。",
+				"若未执行过数据库迁移 006、007，请执行：Get-Content internal/database/migrations/006_add_evaluation_status.sql | docker exec -i postgres-mcp-training psql -U mcp_user -d mcp_training；007 同理，这样后续失败原因会正确保存并显示。",
+				"创建评估时务必选择「测试数据集」中一份已就绪的测试集；确认测试集含 text/content/… 等文本列和 label/labels/output 标签列。",
+			},
+		}
+	}
+
 	// 默认：无法精确归类，仍给出通用建议
 	return EvaluationInsight{
 		Category: "其他错误",

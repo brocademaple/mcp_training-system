@@ -47,6 +47,16 @@ export const datasetService = {
     return api.delete(`/datasets/${id}`);
   },
 
+  // Update dataset name (rename)
+  updateName: async (id: number, name: string): Promise<ApiResponse> => {
+    return api.patch(`/datasets/${id}`, { name });
+  },
+
+  // Bulk delete datasets by ids
+  bulkDelete: async (ids: number[]): Promise<ApiResponse<{ deleted?: number }>> => {
+    return api.post('/datasets/bulk-delete', { ids });
+  },
+
   // 从已清洗的训练集按比例划分出测试集，生成一条直接可用的测试集记录
   splitDataset: async (
     datasetId: number,

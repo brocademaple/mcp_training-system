@@ -9,6 +9,7 @@ import (
 	"mcp-training-system/internal/config"
 	"mcp-training-system/internal/database"
 	"mcp-training-system/internal/handlers"
+	"mcp-training-system/internal/mcp"
 	"mcp-training-system/internal/middleware"
 	"mcp-training-system/internal/utils"
 )
@@ -41,6 +42,27 @@ func main() {
 	defer db.Close()
 	utils.Info("Connected to PostgreSQL")
 
+	// 确保 2.0 流水线表存在（等价于执行迁移 010）
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS pipeline_instances (
+			id SERIAL PRIMARY KEY,
+			session_id VARCHAR(255) NOT NULL,
+			dataset_id INTEGER NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+			status VARCHAR(50) NOT NULL DEFAULT 'pending',
+			current_step VARCHAR(100),
+			job_id INTEGER REFERENCES training_jobs(id) ON DELETE SET NULL,
+			model_id INTEGER REFERENCES models(id) ON DELETE SET NULL,
+			eval_id INTEGER REFERENCES evaluations(id) ON DELETE SET NULL,
+			error_msg TEXT,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)
+	`); err != nil {
+		log.Printf("Warning: ensure pipeline_instances table: %v", err)
+	} else {
+		utils.Info("pipeline_instances table ready")
+	}
+
 	// Connect to Redis
 	redisClient, err := database.NewRedisClient(
 		cfg.Redis.Host,
@@ -62,6 +84,10 @@ func main() {
 	evalAgent := agents.NewEvaluationAgent(db, executor, cfg.Storage.ReportDir, ".")
 	utils.Info("Agents initialized")
 
+	// Initialize MCP Coordinator
+	coordinator := mcp.NewCoordinator(db, dataAgent, trainingAgent, evalAgent)
+	utils.Info("MCP Coordinator initialized")
+
 	// Initialize Handlers (baseDir "." for resolving relative model paths)
 	datasetHandler := handlers.NewDatasetHandler(db, dataAgent, cfg.Storage.UploadDir)
 	trainingHandler := handlers.NewTrainingHandler(db, trainingAgent)
@@ -69,6 +95,7 @@ func main() {
 	modelHandler := handlers.NewModelHandler(db, ".")
 	syncHandler := handlers.NewSyncHandler(db, ".", cfg.Storage.UploadDir)
 	trainingWSHandler := handlers.NewTrainingWSHandler(redisClient)
+	pipelineHandler := handlers.NewPipelineHandler(db, coordinator)
 	utils.Info("Handlers initialized")
 
 	// Setup Gin router
@@ -87,7 +114,9 @@ func main() {
 		api.GET("/datasets/:id/preview", datasetHandler.GetDatasetPreview)
 		api.POST("/datasets/:id/retry-clean", datasetHandler.RetryCleanDataset)
 		api.POST("/datasets/:id/split", datasetHandler.SplitDataset)
+		api.PATCH("/datasets/:id", datasetHandler.UpdateDatasetName)
 		api.DELETE("/datasets/:id", datasetHandler.DeleteDataset)
+		api.POST("/datasets/bulk-delete", datasetHandler.BulkDeleteDatasets)
 
 		// Training routes
 		api.POST("/training/jobs", trainingHandler.CreateJob)
@@ -115,6 +144,11 @@ func main() {
 
 		// 一键同步：从 data/uploads 与 data/models 补全数据集、模型及训练任务记录
 		api.POST("/sync-from-disk", syncHandler.SyncFromDisk)
+
+		// Pipeline routes (2.0 Agent版)
+		api.POST("/pipelines", pipelineHandler.CreatePipeline)
+		api.GET("/pipelines", pipelineHandler.ListPipelines)
+		api.GET("/pipelines/:id", pipelineHandler.GetPipelineStatus)
 	}
 
 	// WebSocket (no /api prefix)

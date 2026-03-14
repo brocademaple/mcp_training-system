@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Card,
   Table,
@@ -24,6 +25,8 @@ import type { Evaluation, Model, Dataset } from '@/types';
 type StepStatus = 'wait' | 'process' | 'finish' | 'error';
 
 const EvaluationManagement: React.FC = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
   const [loading, setLoading] = useState(false);
   const [createModalVisible, setCreateModalVisible] = useState(false);
@@ -199,7 +202,7 @@ const EvaluationManagement: React.FC = () => {
     }
   };
 
-  const openCreateModal = () => {
+  const openCreateModal = (presetModelId?: number) => {
     const now = new Date();
     const defaultName = `评估任务-${now.toLocaleString('zh-CN', {
       month: '2-digit',
@@ -209,13 +212,22 @@ const EvaluationManagement: React.FC = () => {
     })}`;
     form.setFieldsValue({
       name: defaultName,
-      model_id: undefined,
+      model_id: presetModelId ?? undefined,
       test_dataset_id: undefined,
     });
     setCreateModalVisible(true);
     fetchModels();
     fetchDatasets();
   };
+
+  // 从训练页「创建评估」跳转时，自动打开创建弹窗并预填 model_id
+  useEffect(() => {
+    const state = location.state as { modelId?: number } | null;
+    if (state?.modelId) {
+      openCreateModal(state.modelId);
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, []);
 
   const handleCreateEvaluation = async (values: any) => {
     try {
@@ -389,24 +401,26 @@ const EvaluationManagement: React.FC = () => {
         }
         return (
           <span>
-            <Tag color="success">
-              <div>已完成</div>
-            </Tag>
-            {s === 'running' && hasReport && (
-              <div
-                style={{
-                  marginTop: 2,
-                  padding: '0 6px',
-                  borderRadius: 10,
-                  background: '#f5f5f5',
-                  fontSize: 11,
-                  color: '#8c8c8c',
-                  display: 'inline-block',
-                }}
-              >
-                结果已生成
-              </div>
-            )}
+            <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
+              <Tag color="success">
+                <div>已完成</div>
+              </Tag>
+              {s === 'running' && hasReport && (
+                <div
+                  style={{
+                    padding: '0 6px',
+                    borderRadius: 10,
+                    background: '#f5f5f5',
+                    fontSize: 11,
+                    color: '#8c8c8c',
+                    display: 'inline-block',
+                    lineHeight: '18px',
+                  }}
+                >
+                  结果已生成
+                </div>
+              )}
+            </div>
             {detailBtn}
           </span>
         );

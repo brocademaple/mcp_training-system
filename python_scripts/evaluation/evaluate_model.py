@@ -58,7 +58,19 @@ def evaluate_model(model_path, test_data_path, report_suffix=None):
         try:
             tokenizer = AutoTokenizer.from_pretrained(model_path)
         except Exception:
-            tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+            # 回退：若训练时保存了 training_config.json，用其中 base_model 加载 tokenizer
+            fallback_base = "bert-base-uncased"
+            try:
+                import json as _json
+                config_path = os.path.join(model_path, "training_config.json")
+                if os.path.isfile(config_path):
+                    with open(config_path, "r", encoding="utf-8") as f:
+                        cfg = _json.load(f)
+                    if cfg.get("base_model"):
+                        fallback_base = cfg["base_model"]
+            except Exception:
+                pass
+            tokenizer = AutoTokenizer.from_pretrained(fallback_base)
 
         # BERT 等模型最大长度为 512，超长文本必须截断，否则报 token indices sequence length > 512
         max_length = min(512, getattr(tokenizer, "model_max_length", 512))

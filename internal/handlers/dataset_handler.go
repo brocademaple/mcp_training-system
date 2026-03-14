@@ -473,3 +473,52 @@ func (h *DatasetHandler) DeleteDataset(c *gin.Context) {
 	}
 	c.JSON(200, gin.H{"code": 200, "message": "success"})
 }
+
+// UpdateDatasetName 更新数据集名称（重命名）. PATCH /datasets/:id Body: { "name": "新名称" }
+func (h *DatasetHandler) UpdateDatasetName(c *gin.Context) {
+	id := c.Param("id")
+	var datasetID int
+	if _, err := fmt.Sscanf(id, "%d", &datasetID); err != nil {
+		c.JSON(400, gin.H{"code": 400, "message": "Invalid dataset id"})
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"code": 400, "message": "Invalid request body"})
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		c.JSON(400, gin.H{"code": 400, "message": "名称为空"})
+		return
+	}
+	if err := models.UpdateDatasetName(h.db, datasetID, name); err != nil {
+		c.JSON(500, gin.H{"code": 500, "message": fmt.Sprintf("更新失败: %v", err)})
+		return
+	}
+	c.JSON(200, gin.H{"code": 200, "message": "success"})
+}
+
+// BulkDeleteDatasets 批量删除数据集. POST /datasets/bulk-delete Body: { "ids": [1,2,3] }
+func (h *DatasetHandler) BulkDeleteDatasets(c *gin.Context) {
+	var req struct {
+		IDs []int `json:"ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || len(req.IDs) == 0 {
+		c.JSON(400, gin.H{"code": 400, "message": "请提供 ids 数组且至少一项"})
+		return
+	}
+	deleted := 0
+	for _, id := range req.IDs {
+		res, err := h.db.Exec("DELETE FROM datasets WHERE id = $1", id)
+		if err != nil {
+			continue
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			deleted++
+		}
+	}
+	c.JSON(200, gin.H{"code": 200, "message": "success", "data": gin.H{"deleted": deleted}})
+}

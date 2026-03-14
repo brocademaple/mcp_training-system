@@ -229,6 +229,51 @@ html, body, #root {
   border-top-color: rgba(255, 255, 255, 0.1);
 }
 
+/* 版本切换区域：内边距 */
+.sider-footer-inner {
+  padding: 8px 16px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* 版本标签：字号与对比度，深浅色模式均易读 */
+.sider-version-label {
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 8px;
+  color: rgba(0, 0, 0, 0.88);
+}
+.app-layout[data-theme='dark'] .sider-version-label {
+  color: rgba(255, 255, 255, 0.92);
+}
+
+/* 版本 Switch 内文字：字号与对比度 */
+.sider-version-switch {
+  margin-bottom: 8px;
+}
+.sider-version-switch.ant-switch .ant-switch-inner {
+  font-size: 13px;
+  font-weight: 500;
+}
+.layout-sider .sider-version-switch.ant-switch:not(.ant-switch-checked) .ant-switch-inner {
+  color: rgba(0, 0, 0, 0.75);
+}
+.app-layout[data-theme='dark'] .sider-version-switch.ant-switch:not(.ant-switch-checked) .ant-switch-inner {
+  color: rgba(255, 255, 255, 0.85);
+}
+.sider-version-switch.ant-switch.ant-switch-checked .ant-switch-inner {
+  color: #fff;
+}
+
+.sider-version-hint {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.55);
+  margin-top: 4px;
+}
+.app-layout[data-theme='dark'] .sider-version-hint {
+  color: rgba(255, 255, 255, 0.55);
+}
+
 .sider-theme-toggle {
   font-size: 20px;
   cursor: pointer;
