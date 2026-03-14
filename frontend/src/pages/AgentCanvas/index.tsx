@@ -115,8 +115,8 @@ const AgentCanvas: React.FC = () => {
 
   // 画布步骤：1=仅步骤1, 2=步骤2（含附属卡片）, 3=训练计划与执行
   const [canvasStep, setCanvasStep] = useState<1 | 2 | 3>(1);
-  const [modelType, setModelType] = useState<string>('');
-  const [modelIntent, setModelIntent] = useState<string>('');
+  const [modelType, setModelType] = useState<string>('text');
+  const [modelIntent, setModelIntent] = useState<string>('sentiment');
   const [intentNote, setIntentNote] = useState<string>('');
   const [materialSource, setMaterialSource] = useState<'upload' | 'agent' | null>(null);
   const [dataAgentOptions, setDataAgentOptions] = useState<DataAgentOptions>({});
@@ -518,12 +518,16 @@ const AgentCanvas: React.FC = () => {
                         onChange={(e) => setModelType(e.target.value)}
                         style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 8 }}
                       >
-                        {MODEL_TYPE_OPTIONS.map((opt) => (
-                          <Radio key={opt.value} value={opt.value} style={{ marginRight: 0 }}>
-                            <span>{opt.label}</span>
-                            <span style={{ marginLeft: 6, fontWeight: 400, color: 'rgba(0,0,0,0.55)', fontSize: 12 }}>{opt.desc}</span>
-                          </Radio>
-                        ))}
+                        {MODEL_TYPE_OPTIONS.map((opt) => {
+                          const available = opt.value === 'text';
+                          return (
+                            <Radio key={opt.value} value={opt.value} disabled={!available} style={{ marginRight: 0 }} className={!available ? 'canvas-option-locked' : ''}>
+                              <span>{opt.label}</span>
+                              <span style={{ marginLeft: 6, fontWeight: 400, color: 'rgba(0,0,0,0.55)', fontSize: 12 }}>{opt.desc}</span>
+                              {!available && <Tag color="default" style={{ marginLeft: 8, fontSize: 11 }}>开发中</Tag>}
+                            </Radio>
+                          );
+                        })}
                       </Radio.Group>
                     </div>
                     <div style={{ marginBottom: 12 }}>
@@ -538,12 +542,16 @@ const AgentCanvas: React.FC = () => {
                           onChange={(e) => setModelIntent(e.target.value)}
                           style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 8 }}
                         >
-                          {intentOptionsFiltered.map((opt) => (
-                            <Radio key={opt.value} value={opt.value} style={{ marginRight: 0 }}>
-                              <span>{opt.label}</span>
-                              <span style={{ marginLeft: 6, fontWeight: 400, color: 'rgba(0,0,0,0.55)', fontSize: 12 }}>{opt.desc}</span>
-                            </Radio>
-                          ))}
+                          {intentOptionsFiltered.map((opt) => {
+                            const available = opt.value === 'sentiment';
+                            return (
+                              <Radio key={opt.value} value={opt.value} disabled={!available} style={{ marginRight: 0 }} className={!available ? 'canvas-option-locked' : ''}>
+                                <span>{opt.label}</span>
+                                <span style={{ marginLeft: 6, fontWeight: 400, color: 'rgba(0,0,0,0.55)', fontSize: 12 }}>{opt.desc}</span>
+                                {!available && <Tag color="default" style={{ marginLeft: 8, fontSize: 11 }}>开发中</Tag>}
+                              </Radio>
+                            );
+                          })}
                         </Radio.Group>
                       )}
                     </div>
