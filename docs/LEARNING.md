@@ -2,6 +2,8 @@
 
 适合从零理解本项目，把「vibe coding」变成「能讲清楚、能改得动」的代码。
 
+**文档总索引与 AI 协作约定**：见 [SPEC_CODING.md](./SPEC_CODING.md)。
+
 ---
 
 ## 一、一句话理解项目
@@ -378,7 +380,7 @@ cd frontend && npm i && npm run dev
   - UI：Ant Design 5（`Card/Table/Button/Form/Modal/Menu` 等）。
   - 构建：Vite（`frontend/vite.config.ts`，含 `/api` 代理和 `/ws` WebSocket 代理）。
 - **页面结构**（`frontend/src/pages`）：
-  - `Dashboard`：工作台/仪表盘；定位与改造说明见 `docs/DASHBOARD_PRODUCT.md`。
+  - `Dashboard`：工作台/仪表盘；定位与 2.0 衔接见 `docs/PLANNING_2.0.md` 第八节。
   - `Dataset`：数据集管理（上传 / URL 导入 / 在线数据集导入 / 预览）。
   - `Training`：训练任务列表 + 创建任务 + 实时进度（含 WebSocket）。
   - `Model`：模型管理（列表 + 下载）。

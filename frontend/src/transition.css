@@ -1,6 +1,39 @@
+/* 整页不随主内容变长：仅右侧内容区滚动，左侧栏底部（版本切换）始终在视口内可见 */
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+
 .app-container {
   opacity: 1;
   transition: opacity 0.3s ease-in-out;
+  height: 100%;
+  min-height: 100%;
+  max-height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+/* React Router 6：匹配路由根节点占满视口；默认 column 给纵向页面根。Agent 画布为横向侧栏+主区，单独覆盖为 row */
+.app-container > * {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-container > .agent-canvas {
+  flex-direction: row;
+}
+
+/* 经典版 Ant Layout 同样为左侧栏 + 主内容横向排列 */
+.app-container > .ant-layout.app-layout {
+  flex-direction: row;
 }
 
 .app-container.transitioning {

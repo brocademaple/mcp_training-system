@@ -1,7 +1,13 @@
-/* 与经典模式一致：左侧边栏 + 主内容区 */
+/* 与经典模式一致：在 app-container 内占满视口高度，主内容区内部滚动 */
+/* 必须显式 row：全局 .app-container > * 会设 flex-direction:column，否则侧栏与主区纵向堆叠、主区高度为 0 呈白屏 */
 .agent-canvas {
   display: flex;
-  min-height: 100vh;
+  flex-direction: row;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
+  overflow: hidden;
   background: #f5f5f5;
 }
 
@@ -9,7 +15,9 @@
 .canvas-sider {
   width: 72px;
   flex-shrink: 0;
-  min-height: 100vh;
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   background: #fff;
@@ -92,10 +100,13 @@
 }
 
 .canvas-main {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
   padding: 24px;
   overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .canvas-header {
@@ -363,6 +374,55 @@
   font-size: 13px;
   color: rgba(0, 0, 0, 0.55);
   margin-bottom: 16px;
+}
+
+/* Data Agent 规划选项：必填/选填标识与提示 */
+.canvas-field-required,
+.canvas-field-optional {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+  margin-left: 8px;
+  transform: translateY(-1px);
+}
+.canvas-field-required {
+  color: #cf1322;
+  background: rgba(255, 77, 79, 0.12);
+  border: 1px solid rgba(255, 77, 79, 0.25);
+}
+.canvas-field-optional {
+  color: rgba(0, 0, 0, 0.55);
+  background: rgba(0, 0, 0, 0.04);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+.canvas-required-hint {
+  margin: 4px 0 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 77, 79, 0.08);
+  border: 1px dashed rgba(255, 77, 79, 0.35);
+  color: rgba(0, 0, 0, 0.75);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.agent-canvas[data-theme='dark'] .canvas-field-required {
+  color: #ff7875;
+  background: rgba(255, 77, 79, 0.16);
+  border-color: rgba(255, 120, 117, 0.35);
+}
+.agent-canvas[data-theme='dark'] .canvas-field-optional {
+  color: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+.agent-canvas[data-theme='dark'] .canvas-required-hint {
+  background: rgba(255, 77, 79, 0.12);
+  border-color: rgba(255, 120, 117, 0.28);
+  color: rgba(255, 255, 255, 0.82);
 }
 
 /* 步骤 1 中「开发中」选项置灰 */

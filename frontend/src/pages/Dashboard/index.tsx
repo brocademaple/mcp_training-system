@@ -100,7 +100,7 @@ const Dashboard: React.FC = () => {
   const runningJobCount = jobs.filter((j) => j.status === 'queued' || j.status === 'running').length;
   const completedJobCount = completedJobs.length;
 
-  // 推荐下一步（与 DASHBOARD_PRODUCT.md 一致）
+  // 推荐下一步（与 docs/PLANNING_2.0.md 第八节工作台定位一致）
   const getNextStep = (): { type: NextStepType; title: string; desc: string; primary: string; path: string } => {
     if (readyCount === 0 && processingCount === 0)
       return {
@@ -313,10 +313,11 @@ const Dashboard: React.FC = () => {
       </Row>
 
       {/* 最近动态 */}
-      <Card title="最近动态" loading={loading} style={{ marginBottom: 24 }}>
+      <Card title="最近动态" loading={loading} style={{ marginBottom: 16 }}>
         {recentActivities.length === 0 ? (
           <Typography.Text type="secondary">暂无数据，去上传数据集或创建训练任务吧</Typography.Text>
         ) : (
+          <div style={{ maxHeight: 'min(38vh, 280px)', overflowY: 'auto' }}>
           <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
             {recentActivities.map((a) => (
               <li
@@ -352,6 +353,7 @@ const Dashboard: React.FC = () => {
               </li>
             ))}
           </ul>
+          </div>
         )}
       </Card>
 

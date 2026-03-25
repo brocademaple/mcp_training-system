@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MCP Training System - Multi-Agent One-Click Training</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="bg-grid" aria-hidden="true"></div>
+
+    <header class="topbar">
+      <div class="container topbar-inner">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">MCP</div>
+          <div class="brand-text">
+            <div class="brand-title">MCP Training System</div>
+            <div class="brand-subtitle">Multi-Agent · MCP 编排 · 一键训练</div>
+          </div>
+        </div>
+        <nav class="topnav">
+          <a class="topnav-link" href="#features">能力</a>
+          <a class="topnav-link" href="#screenshots">截图</a>
+          <a class="topnav-link" href="#stack">技术栈</a>
+          <a class="topnav-link topnav-cta" href="../README.md">快速开始</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="container hero-inner">
+          <div class="hero-copy">
+            <h1 class="hero-title">把「数据 → 清洗 → 训练 → 评估」变成一键流水线</h1>
+            <p class="hero-desc">
+              系统同时支持经典版逐步操作与 Agent 版智能画布/流水线。
+              训练进度、评估结果与报告可追溯落库，便于复现与迭代。
+            </p>
+
+            <div class="hero-actions">
+              <a class="btn btn-primary" href="#screenshots">查看产品截图</a>
+              <a class="btn btn-ghost" href="../README.md">阅读项目说明</a>
+            </div>
+
+            <div class="badges" role="list" aria-label="tags">
+              <span class="badge" role="listitem">LIVE</span>
+              <span class="badge badge-accent">GITHUB PAGES</span>
+              <span class="badge">REPO</span>
+              <span class="badge badge-success">高可用训练链路</span>
+              <span class="badge badge-info">双版本互通</span>
+            </div>
+          </div>
+
+          <div class="hero-card" aria-label="overview card">
+            <div class="hero-card-title">你会在这里看到</div>
+            <ul class="hero-card-list">
+              <li>Agent 版：智能画布 + 步骤卡片（Data Agent / Training / Evaluation）</li>
+              <li>流水线：Coordinator 异步编排 clean → train → evaluate</li>
+              <li>经典版：仪表盘推荐下一步 + 任务/模型/评估管理</li>
+              <li>可追溯：pipeline_instances 记录会话与关联 ID</li>
+            </ul>
+            <div class="hero-card-note">
+              说明：下方“截图”使用 <code>docs/images/</code> 的文件作为展示入口；你把实际截图放进去并按命名规则替换即可。
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="features" class="section">
+        <div class="container">
+          <div class="section-head">
+            <h2 class="section-title">产品能力（扁平、可追溯）</h2>
+            <p class="section-desc">围绕训练链路的每个关键节点：数据、训练、评估、流水线与报告。</p>
+          </div>
+
+          <div class="grid grid-3">
+            <article class="card">
+              <div class="card-icon" aria-hidden="true">1</div>
+              <h3 class="card-title">数据集清洗与准备</h3>
+              <p class="card-desc">本地上传或从 URL 导入，清洗后生成就绪数据集并进入训练候选。</p>
+            </article>
+
+            <article class="card">
+              <div class="card-icon" aria-hidden="true">2</div>
+              <h3 class="card-title">训练任务管理（经典版）</h3>
+              <p class="card-desc">可查看进度、日志、重启/删除等操作；训练完成后产出模型。</p>
+            </article>
+
+            <article class="card">
+              <div class="card-icon" aria-hidden="true">3</div>
+              <h3 class="card-title">评估与报告闭环</h3>
+              <p class="card-desc">评估指标与报告（预览/下载）贯穿任务生命周期，支持错误原因洞察。</p>
+            </article>
+
+            <article class="card">
+              <div class="card-icon" aria-hidden="true">4</div>
+              <h3 class="card-title">Agent 版智能画布</h3>
+              <p class="card-desc">分步配置：先确认目标，再准备数据，再启动流水线编排。</p>
+            </article>
+
+            <article class="card">
+              <div class="card-icon" aria-hidden="true">5</div>
+              <h3 class="card-title">一键流水线（2.0 主线）</h3>
+              <p class="card-desc">Coordinator 异步执行清洗 → 训练 → 评估，并持久化流水线实例状态。</p>
+            </article>
+
+            <article class="card">
+              <div class="card-icon" aria-hidden="true">6</div>
+              <h3 class="card-title">双版本互通</h3>
+              <p class="card-desc">Agent 与经典版共享同一套数据表；切换不丢结果，易于演示与复用。</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="screenshots" class="section section-alt">
+        <div class="container">
+          <div class="section-head">
+            <h2 class="section-title">产品截图（图 1 ~ 图 5）</h2>
+            <p class="section-desc">你把实际截图放到 `docs/images/` 并按文件名替换即可显示真实效果。</p>
+          </div>
+
+          <div class="grid grid-2">
+            <div class="shot">
+              <div class="shot-label">图1 · 工作台/最近动态</div>
+              <img
+                class="shot-img"
+                src="./images/01-workflow.png"
+                alt="工作台/最近动态"
+                loading="lazy"
+              />
+            </div>
+            <div class="shot">
+              <div class="shot-label">图2 · 数据集管理/清洗结果</div>
+              <img
+                class="shot-img"
+                src="./images/02-datasets.png"
+                alt="数据集管理/清洗结果"
+                loading="lazy"
+              />
+            </div>
+            <div class="shot">
+              <div class="shot-label">图3 · 训练任务管理</div>
+              <img
+                class="shot-img"
+                src="./images/03-training-jobs.png"
+                alt="训练任务管理"
+                loading="lazy"
+              />
+            </div>
+            <div class="shot">
+              <div class="shot-label">图4 · 模型评估管理与报告</div>
+              <img
+                class="shot-img"
+                src="./images/04-evaluation.png"
+                alt="模型评估管理与报告"
+                loading="lazy"
+              />
+            </div>
+            <div class="shot">
+              <div class="shot-label">图5 · Agent 画布步骤配置</div>
+              <img
+                class="shot-img"
+                src="./images/05-agent-canvas.png"
+                alt="Agent 画布步骤配置"
+                loading="lazy"
+              />
+            </div>
+            <div class="shot">
+              <div class="shot-label">图6 · Data Agent 规划选项</div>
+              <img
+                class="shot-img"
+                src="./images/06-data-agent-plan.png"
+                alt="Data Agent 规划选项"
+                loading="lazy"
+              />
+            </div>
+          </div>
+
+          <div class="tip">
+            <div class="tip-title">命名规则</div>
+            <div class="tip-body">
+              将你的截图复制到 <code>docs/images/</code>，并使用下面文件名：<br />
+              <code>01-workflow.png</code>、<code>02-datasets.png</code>、<code>03-training-jobs.png</code>、
+              <code>04-evaluation.png</code>、<code>05-agent-canvas.png</code>、<code>06-data-agent-plan.png</code>。
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="stack" class="section">
+        <div class="container">
+          <div class="section-head">
+            <h2 class="section-title">技术栈</h2>
+            <p class="section-desc">对演示/部署友好，并支持 Python 脚本与 Go 编排协作。</p>
+          </div>
+
+          <div class="chips">
+            <span class="chip">Go · Gin</span>
+            <span class="chip">React · TypeScript</span>
+            <span class="chip">Ant Design</span>
+            <span class="chip">PostgreSQL</span>
+            <span class="chip">Redis</span>
+            <span class="chip">Python · PyTorch</span>
+            <span class="chip">Transformers</span>
+          </div>
+        </div>
+      </section>
+
+      <footer class="footer">
+        <div class="container footer-inner">
+          <div class="footer-left">
+            <div class="footer-title">MCP Training System</div>
+            <div class="footer-desc">双版本互通的训练链路演示与可追溯编排。</div>
+          </div>
+          <div class="footer-right">
+            <a class="footer-link" href="../README.md">README</a>
+            <a class="footer-link" href="../docs/LEARNING.md">LEARNING</a>
+            <a class="footer-link" href="../docs/PLANNING_2.0.md">2.0 规划</a>
+          </div>
+        </div>
+      </footer>
+    </main>
+  </body>
+</html>
+

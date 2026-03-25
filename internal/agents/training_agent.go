@@ -96,9 +96,13 @@ func (a *TrainingAgent) Train(jobID int) error {
 	models.SetTrainingJobStarted(a.db, jobID)
 	utils.Info("TrainingAgent: Job %d status updated to running", jobID)
 
-	// 4. Prepare Python command（Windows 下优先使用 .env 中的 PYTHON_PATH，避免找不到 py 导致 9009）
+	// 4. Prepare Python command（按 model_type 选择脚本：sft_finetune → finetune.py，其余 → train_text_clf.py）
 	hyperparamsJSON, _ = json.Marshal(hyperparams)
-	pyName, pyArgs := a.executor.CommandArgs("training/train_text_clf.py", datasetPath, string(hyperparamsJSON))
+	script := "training/train_text_clf.py"
+	if modelType == "sft_finetune" {
+		script = "training/finetune.py"
+	}
+	pyName, pyArgs := a.executor.CommandArgs(script, datasetPath, string(hyperparamsJSON))
 	cmd := exec.Command(pyName, pyArgs...)
 	// 强制 Python 子进程 stdout/stderr 使用 UTF-8，避免 Windows 下中文过程日志乱码
 	cmd.Env = append(os.Environ(), "PYTHONIOENCODING=utf-8")

@@ -1,6 +1,33 @@
 # MCP Training System
 
-基于 MCP 的多模型协同训练 Agent 系统
+> 基于 MCP 的多模型协同训练平台：支持经典版「逐步管理」，也支持 Agent 版「一键流水线（清洗→训练→评估）」。
+
+## 在线演示（GitHub Pages）
+
+项目主页：<https://brocademaple.github.io/mcp_training-system/>
+
+> 若你还没开启 Pages：把 **GitHub Pages 源**设置为 `docs/`（本项目已提供 `docs/index.html`）。
+
+## 产品亮点
+
+- **Agent 版一键流水线**：Coordinator 自动编排 Data Agent / Training Agent / Evaluation Agent，并落库 `pipeline_instances` 以便追溯。
+- **经典版工作台**：仪表盘/数据集/训练/评估互通，适合逐步操作与可控排错。
+- **训练与评估闭环**：训练任务进度、日志、评估指标、报告预览/下载贯穿全流程。
+- **双版本数据互通**：同一套 PostgreSQL / Redis，Agent 与经典版生成的结果可互相查看。
+- **可扩展的模型训练**：支持分类头训练与后续 SFT+LoRA 微调（通过 `model_type` 路由）。
+
+## 产品截图
+
+把截图文件放到 `docs/images/`，并按下列文件名命名（本仓库已创建占位目录）。页面会自动展示：
+
+- 图1：`docs/images/01-workflow.png`
+- 图2：`docs/images/02-datasets.png`
+- 图3：`docs/images/03-training-jobs.png`
+- 图4：`docs/images/04-evaluation.png`
+- 图5：`docs/images/05-agent-canvas.png`
+- 图6：`docs/images/06-data-agent-plan.png`
+
+说明：当前仓库用于展示的截图文件是占位图片链接；你把实际截图加入 `docs/images/` 后即可生效。
 
 ## 技术栈
 
@@ -10,10 +37,14 @@
 - **AI框架**: Python 3.8+, PyTorch, Transformers
 - **模型**: BERT (文本分类)
 
+## 文档索引
+
+规范、协作方式与全项目文档导航见 **[docs/SPEC_CODING.md](docs/SPEC_CODING.md)**（推荐 AI 协作者与人类开发者从此入口查阅 PRD、LEARNING、API、部署与 2.0 规划等）。
+
 ## 快速开始（推荐：本机运行，训练使用本机 GPU）
 
 本机运行后端与 Python 脚本，**训练可使用本机显卡（如 RTX 3060/4060）**；Docker 只用来跑 PostgreSQL 和 Redis。  
-完整步骤与命令也可直接看 **[docs/QUICKSTART.md](docs/QUICKSTART.md)**。
+数据库补跑迁移（006～010 等）见 **[docs/LEARNING.md](docs/LEARNING.md)** 第五节。
 
 ### 操作步骤与命令行（按顺序执行）
 
@@ -332,7 +363,8 @@ mcp-training-system/
 本项目严格按照PRD文档实现，包含完整的数据库设计、Agent架构、API接口和Web前端界面。
 
 ### 技术文档
-- **快速开始（本机运行）**：`docs/QUICKSTART.md`
+- **文档总索引与协作约定**：`docs/SPEC_CODING.md`
+- **学习指南与数据库迁移**：`docs/LEARNING.md`
 - 详细API文档：`docs/API.md`
 - 部署文档：`docs/DEPLOYMENT.md`
 - 前端文档：`frontend/README.md`

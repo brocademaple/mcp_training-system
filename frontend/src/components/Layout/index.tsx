@@ -104,7 +104,7 @@ const Layout: React.FC = () => {
 
   return (
     <ConfigProvider theme={themeConfig}>
-      <AntLayout className="app-layout" data-theme={themeMode} style={{ minHeight: '100vh' }}>
+      <AntLayout className="app-layout" data-theme={themeMode} style={{ flex: 1, minHeight: 0, height: '100%' }}>
         {siderHidden ? (
           <div
             className="sider-hidden-bar"

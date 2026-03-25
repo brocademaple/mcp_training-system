@@ -1,23 +1,35 @@
-/* 根节点与布局整体撑满视口，右侧与左侧栏无缝衔接 */
-html, body, #root {
-  height: 100%;
-  margin: 0;
-}
+/* 根节点高度由 transition.css 与 #root 统一控制（overflow:hidden 防整页滚动） */
 #root {
   width: 100%;
 }
 
-/* 整体：左右结构，左侧功能栏 + 右侧内容 */
+/* 左右结构：侧栏固定视口高度，主内容区单独滚动 */
 .app-layout {
   flex-direction: row;
+  flex: 1 1 auto;
+  min-height: 0;
   height: 100%;
   width: 100%;
-  min-height: 100vh;
+  max-height: 100%;
+  overflow: hidden;
 }
 
 .layout-sider {
-  min-height: 100vh;
+  height: 100%;
+  max-height: 100%;
+  flex-shrink: 0;
+  overflow: hidden;
   box-shadow: 2px 0 8px rgba(0, 0, 0, 0.06);
+}
+
+/* Ant Design Sider 内部容器参与 flex 链，保证菜单可滚动、底栏贴底 */
+.layout-sider .ant-layout-sider-children {
+  height: 100%;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .layout-sider:not(.ant-layout-sider-dark) {
@@ -31,8 +43,10 @@ html, body, #root {
 .sider-inner {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
   height: 100%;
-  min-height: 100vh;
+  max-height: 100%;
   position: relative;
 }
 
@@ -111,7 +125,10 @@ html, body, #root {
 .sider-hidden-bar {
   width: 20px;
   min-width: 20px;
-  min-height: 100vh;
+  align-self: stretch;
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
   background: #001529;
   cursor: pointer;
   display: flex;
@@ -211,8 +228,10 @@ html, body, #root {
 }
 
 .layout-menu {
-  flex: 1;
-  overflow: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding-top: 8px;
 }
 
@@ -299,20 +318,21 @@ html, body, #root {
   background: rgba(24, 144, 255, 0.15);
 }
 
-/* 右侧内容区撑满剩余宽高，与左侧栏无缝衔接 */
+/* 右侧内容区：仅此区域纵向滚动，避免侧栏被内容撑高 */
 .layout-content {
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
   padding: 24px;
   background: #f5f5f5;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   align-self: stretch;
 }
 .layout-content > * {
   background: #fff;
   padding: 24px;
-  min-height: calc(100vh - 48px);
+  min-height: auto;
   border-radius: 8px;
   box-sizing: border-box;
 }

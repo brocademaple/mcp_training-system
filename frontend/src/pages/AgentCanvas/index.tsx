@@ -291,6 +291,18 @@ const AgentCanvas: React.FC = () => {
 
   const jobCount = jobs.length;
   const isFirstTime = !jobsLoading && jobCount === 0;
+  const isDataAgentRequiredReady =
+    materialSource !== 'agent'
+      ? true
+      : Boolean(dataAgentOptions.scale && dataAgentOptions.language && dataAgentOptions.domain) &&
+        (dataAgentOptions.domain !== 'other' || Boolean(dataAgentOptions.customPrompt?.trim()));
+  const dataAgentRequiredMissing: string[] = [];
+  if (materialSource === 'agent') {
+    if (!dataAgentOptions.scale) dataAgentRequiredMissing.push('数据规模');
+    if (!dataAgentOptions.language) dataAgentRequiredMissing.push('语言');
+    if (!dataAgentOptions.domain) dataAgentRequiredMissing.push('领域');
+    if (dataAgentOptions.domain === 'other' && !dataAgentOptions.customPrompt?.trim()) dataAgentRequiredMissing.push('自定义要求（用于补充领域）');
+  }
 
   return (
     <div className="agent-canvas" data-theme={themeMode}>
@@ -633,9 +645,16 @@ const AgentCanvas: React.FC = () => {
                     {materialSource === 'agent' && (
                       <Card className="canvas-step-card canvas-step2-side" title="Data Agent 规划选项">
                         <p className="canvas-step-desc">设定数据获取偏好，这些选项将加入驱动 Data Agent 的 prompt。</p>
+                        {!isDataAgentRequiredReady && (
+                          <div className="canvas-required-hint">
+                            请先完成必填项：{dataAgentRequiredMissing.join('、')}
+                          </div>
+                        )}
                         <Space direction="vertical" style={{ width: '100%' }} size={12}>
                           <div>
-                            <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>数据规模</label>
+                            <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>
+                              数据规模 <span className="canvas-field-required">必填</span>
+                            </label>
                             <Select
                               placeholder="请选择"
                               style={{ width: '100%' }}
@@ -646,7 +665,9 @@ const AgentCanvas: React.FC = () => {
                             />
                           </div>
                           <div>
-                            <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>语言</label>
+                            <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>
+                              语言 <span className="canvas-field-required">必填</span>
+                            </label>
                             <Select
                               placeholder="请选择"
                               style={{ width: '100%' }}
@@ -657,7 +678,9 @@ const AgentCanvas: React.FC = () => {
                             />
                           </div>
                           <div>
-                            <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>领域</label>
+                            <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>
+                              领域 <span className="canvas-field-required">必填</span>
+                            </label>
                             <Select
                               placeholder="请选择"
                               style={{ width: '100%' }}
@@ -668,7 +691,9 @@ const AgentCanvas: React.FC = () => {
                             />
                           </div>
                           <div>
-                            <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>时效</label>
+                            <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>
+                              时效 <span className="canvas-field-optional">选填</span>
+                            </label>
                             <Select
                               placeholder="请选择"
                               style={{ width: '100%' }}
@@ -679,7 +704,9 @@ const AgentCanvas: React.FC = () => {
                             />
                           </div>
                           <div>
-                            <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>质量要求</label>
+                            <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>
+                              质量要求 <span className="canvas-field-optional">选填</span>
+                            </label>
                             <Select
                               placeholder="请选择"
                               style={{ width: '100%' }}
@@ -690,7 +717,9 @@ const AgentCanvas: React.FC = () => {
                             />
                           </div>
                           <div>
-                            <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>来源偏好</label>
+                            <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>
+                              来源偏好 <span className="canvas-field-optional">选填</span>
+                            </label>
                             <Select
                               placeholder="请选择"
                               style={{ width: '100%' }}
@@ -701,7 +730,9 @@ const AgentCanvas: React.FC = () => {
                             />
                           </div>
                           <div>
-                            <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>自定义要求</label>
+                            <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>
+                              自定义要求 {dataAgentOptions.domain === 'other' ? <span className="canvas-field-required">必填</span> : <span className="canvas-field-optional">选填</span>}
+                            </label>
                             <Input.TextArea
                               placeholder="例如：仅使用近两年数据、需包含多方言、排除某类来源等"
                               value={dataAgentOptions.customPrompt ?? ''}
@@ -727,6 +758,7 @@ const AgentCanvas: React.FC = () => {
                       disabled={
                         !materialSource ||
                         (materialSource === 'upload' && !selectedDataset)
+                        || (materialSource === 'agent' && !isDataAgentRequiredReady)
                       }
                     >
                       下一步，制定训练计划

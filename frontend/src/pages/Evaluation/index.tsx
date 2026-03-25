@@ -326,6 +326,13 @@ const EvaluationManagement: React.FC = () => {
       dataIndex: 'name',
       key: 'evalName',
       width: 220,
+      onHeaderCell: () => ({
+        style: {
+          whiteSpace: 'normal',
+          wordBreak: 'break-word',
+          lineHeight: 1.2,
+        },
+      }),
       render: (_: unknown, record: Evaluation) => {
         const text = record.name && record.name.trim() ? record.name.trim() : getTaskName(record);
         return (

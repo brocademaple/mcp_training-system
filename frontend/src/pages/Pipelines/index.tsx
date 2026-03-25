@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Card, Table, Button, Tag, message, Alert } from 'antd';
 import { ReloadOutlined, RocketOutlined } from '@ant-design/icons';
 import { pipelineService, type PipelineInstance } from '@/services/pipeline';
+import './index.css';
 
 const statusMap: Record<string, { color: string; text: string }> = {
   running: { color: 'processing', text: '运行中' },
@@ -87,6 +88,7 @@ const PipelinesPage: React.FC = () => {
 
   return (
     <Card
+      className="pipelines-page"
       title={
         <span>
           <RocketOutlined style={{ marginRight: 8 }} />
@@ -105,7 +107,7 @@ const PipelinesPage: React.FC = () => {
           showIcon
           message="示例数据"
           description="当前无流水线记录。下表为示例数据，仅用于展示表格结构；实际记录将在 Agent 版执行「启动 Agent 流水线」后产生。"
-          style={{ marginBottom: 16 }}
+          style={{ marginBottom: 16, wordBreak: 'break-word', overflowWrap: 'break-word' }}
         />
       )}
       {fetchError && (
@@ -113,17 +115,19 @@ const PipelinesPage: React.FC = () => {
           type="warning"
           showIcon
           message="列表加载失败，当前显示示例数据"
-          style={{ marginBottom: 16 }}
+          style={{ marginBottom: 16, wordBreak: 'break-word' }}
         />
       )}
-      <Table
-        rowKey="id"
-        columns={columns}
-        dataSource={dataSource}
-        loading={loading}
-        pagination={{ pageSize: 10, showSizeChanger: true }}
-        size="small"
-      />
+      <div className="pipelines-table-wrap">
+        <Table
+          rowKey="id"
+          columns={columns}
+          dataSource={dataSource}
+          loading={loading}
+          pagination={{ pageSize: 10, showSizeChanger: true }}
+          size="small"
+        />
+      </div>
     </Card>
   );
 };

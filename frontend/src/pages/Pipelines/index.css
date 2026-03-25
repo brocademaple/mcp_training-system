@@ -1,0 +1,21 @@
+/* 流水线历史页：防止表格与提示文案撑破容器 */
+.pipelines-page .ant-card-body {
+  max-width: 100%;
+  overflow-x: hidden; /* 由内部 table-wrap 负责横向滚动，避免整页出现横向滚动条 */
+}
+
+.pipelines-page .ant-alert-description {
+  word-break: break-word;
+  overflow-wrap: break-word;
+  white-space: normal;
+}
+
+.pipelines-table-wrap {
+  overflow-x: auto;
+  max-width: 100%;
+  margin: 0 -1px;
+}
+
+.pipelines-table-wrap .ant-table-wrapper {
+  min-width: 0;
+}

@@ -255,8 +255,85 @@
 
 ---
 
+## 八、经典版工作台（仪表盘）定位（已实现要点）
+
+> 原独立文档 `DASHBOARD_PRODUCT.md` 已合并至本节；具体 UI 以当前前端为准。
+
+- **职责**：经典版首页作为「指挥台」——**推荐下一步**（根据是否有就绪数据集、进行中训练、已完成模型等给出主操作与跳转）、**资源概览**（可点击进各模块）、**最近动态**（合并数据集 / 训练 / 流水线等近期记录）。
+- **工具收口**：「一键同步数据」等低频能力放在页脚或次要区域，避免抢占主 CTA。
+- **边界**：不替代「流水线历史」或 Agent 画布；可与「试试 Agent 版」等引导衔接 2.0 入口。
+
+---
+
+## 九、技术升级路线（微调与 Manager）
+
+> 原独立文档 `UPGRADE_PLAN.md` 已合并至本节。
+
+### 9.1 补全微调功能（最优先）
+
+#### 目标
+
+- 在现有「从零训练分类头」之外，增加 **SFT + LoRA 参数高效微调** 能力。
+- 与现有训练链路共用：同一套 Go 训练任务接口、同一套进度/日志协议、同一套模型落库与评估流程。
+- 改动量尽量小：仅新增一个 Python 脚本 + 后端按 `model_type` 路由。
+
+#### 实现要点
+
+| 层级 | 改动 |
+|------|------|
+| **Python** | 在 `python_scripts/training/` 下新增 `finetune.py`，使用 **TRL `SFTTrainer` + PEFT `LoraConfig`**，与 `train_text_clf.py` 保持相同 CLI 与 stdout 协议（`LOG:` / `PROGRESS:` / 最终 JSON）。 |
+| **Go 后端** | `internal/agents/training_agent.go`：根据任务表中的 `model_type` 选择脚本——`sft_finetune` → `finetune.py`，其余（如 `text_classification`、`random_forest`）→ `train_text_clf.py`。 |
+| **前端 / 流水线** | 创建训练任务或启动流水线时，在 `train_config` 中传入 `model_type: "sft_finetune"` 即可走微调脚本；无需改表结构。 |
+
+#### 脚本接口约定（与现有一致）
+
+- **入参**：`sys.argv[1]` = 数据集文件路径，`sys.argv[2]` = hyperparams 的 JSON 字符串（含 `job_id`、`base_model`、`epochs`、`learning_rate`、`batch_size` 等）。
+- **stdout 协议**：过程日志 `LOG:`；进度 `PROGRESS:{...}`；结束单行 JSON `success` / `error`。
+
+#### 依赖与触发
+
+- `python_scripts/requirements.txt`：`trl[peft]`、`peft`（可选 `bitsandbytes`）；底模由 `train_config.base_model` 等传入。
+- **触发**：`train_config.model_type: "sft_finetune"`；前端可增加「训练方式」选项对应 `text_classification` / `sft_finetune`。
+
+#### 验收
+
+- 任务可排队执行，进度与日志可见，结束后模型落库并可评估。
+
+### 9.2 2.0 Multi-Agent 升级（smolagents CodeAgent 作为 Manager）
+
+#### 目标
+
+- 用 **smolagents 的 CodeAgent** 作为顶层 Manager，将 **Data / Training / Evaluation** 三个 Agent 暴露为 **MCP Tools**。
+- 用户一句话描述目标，由 Manager 自动拆解、编排顺序与参数。
+
+#### 思路
+
+- 将「清洗」「训练」「评估」封装为 MCP Server 的 Tools；Python 侧用 `CodeAgent` / `ToolCallingAgent` 注册工具，由大模型（如 `Qwen/Qwen2.5-Coder-32B-Instruct`）决策调用顺序。
+- 需为 Go MCP 定义 Tool schema；Manager 经 MCP 客户端调用。
+
+#### 与 1.0 的关系
+
+- 手动流程与 Agent 画布固定流水线保留；「一句话 + Manager」为新增入口，数据与表结构共用。
+
+#### 阶段建议
+
+1. **Phase 1**：微调链路可用（`finetune.py` + `sft_finetune` 路由）。  
+2. **Phase 2**：Go 侧暴露标准 MCP Tools，Coordinator 可被 Tool 触发。  
+3. **Phase 3**：引入 smolagents Manager，端到端 demo。
+
+### 9.3 小结
+
+| 项目 | 内容 |
+|------|------|
+| **微调** | `finetune.py` + Go 按 `model_type` 路由；与 `train_text_clf.py` 协议一致。 |
+| **Multi-Agent** | 三 Agent → MCP Tools + CodeAgent Manager；分阶段落地。 |
+
+相关实现：`python_scripts/training/finetune.py`、`internal/agents/training_agent.go`。
+
+---
+
 实施时可与 2.0a/2.0b 结合：例如 2.0a 收尾时先做 **7.1 预设目标 + 7.2 Agent 状态可见**，再在 2.0b 中做 **7.3 主动建议 + 7.4 失败修复建议**，7.5～7.7 按需排期。这样在不推翻现有实现的前提下，逐步增强「Agent 感」。
 
 ---
 
-*文档版本：1.2 | 适用于项目 2.0 规划与评审（含双版本并存、版本切换、数据与能力互通、更 Agent 化建议）*
+*文档版本：1.3 | 合并了原 `DASHBOARD_PRODUCT.md`、`UPGRADE_PLAN.md` 中与规划相关的正文；适用于 2.0 规划、经典版工作台定位与技术升级路线*

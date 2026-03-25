@@ -109,7 +109,7 @@ func (h *DatasetHandler) UploadDataset(c *gin.Context) {
 	// Start cleaning in background for CSV files; JSON 等非 CSV 直接以原文件作为可训练路径并标记为 ready
 	if ext == ".csv" {
 		go func(id int) {
-			if err := h.dataAgent.CleanData(id); err != nil {
+			if err := h.dataAgent.CleanData(id, ""); err != nil {
 				utils.Error("Failed to clean dataset %d: %v", id, err)
 			}
 		}(dataset.ID)
@@ -198,7 +198,7 @@ func (h *DatasetHandler) ImportFromURL(c *gin.Context) {
 	}
 
 	go func() {
-		if err := h.dataAgent.CleanData(dataset.ID); err != nil {
+		if err := h.dataAgent.CleanData(dataset.ID, ""); err != nil {
 			utils.Error("Failed to clean dataset %d (from URL): %v", dataset.ID, err)
 		}
 	}()
@@ -346,7 +346,7 @@ func (h *DatasetHandler) RetryCleanDataset(c *gin.Context) {
 		return
 	}
 	go func() {
-		if err := h.dataAgent.CleanData(datasetID); err != nil {
+		if err := h.dataAgent.CleanData(datasetID, ""); err != nil {
 			utils.Error("Retry clean failed for dataset %d: %v", datasetID, err)
 		}
 	}()
