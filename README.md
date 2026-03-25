@@ -29,6 +29,12 @@
 
 说明：当前仓库用于展示的截图文件是占位图片链接；你把实际截图加入 `docs/images/` 后即可生效。
 
+<div align="center">
+  <img src="docs/images/01-workflow.png" width="420" alt="工作台/最近动态" />
+  <img src="docs/images/03-training-jobs.png" width="420" alt="训练任务管理" style="margin-left:12px;" />
+  <img src="docs/images/04-evaluation.png" width="420" alt="模型评估与报告" style="margin-top:12px;" />
+</div>
+
 ## 技术栈
 
 - **后端**: Go 1.21+ (Gin框架)

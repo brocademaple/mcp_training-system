@@ -31,9 +31,10 @@
       <section class="hero">
         <div class="container hero-inner">
           <div class="hero-copy">
-            <h1 class="hero-title">把「数据 → 清洗 → 训练 → 评估」变成一键流水线</h1>
+            <h1 class="hero-title">一键训练平台：多智能体协同（MCP）</h1>
             <p class="hero-desc">
-              系统同时支持经典版逐步操作与 Agent 版智能画布/流水线。
+              让「数据 → 清洗 → 训练 → 评估」由 Coordinator 按步骤编排完成，并把每一步的状态与产物落库追溯。
+              同一套数据与结果在经典版与 Agent 版之间互通。
               训练进度、评估结果与报告可追溯落库，便于复现与迭代。
             </p>
 
@@ -46,21 +47,32 @@
               <span class="badge" role="listitem">LIVE</span>
               <span class="badge badge-accent">GITHUB PAGES</span>
               <span class="badge">REPO</span>
-              <span class="badge badge-success">高可用训练链路</span>
-              <span class="badge badge-info">双版本互通</span>
+              <span class="badge badge-success">训练链路可追溯</span>
+              <span class="badge badge-info">经典 / Agent 双版本</span>
             </div>
           </div>
 
           <div class="hero-card" aria-label="overview card">
-            <div class="hero-card-title">你会在这里看到</div>
-            <ul class="hero-card-list">
-              <li>Agent 版：智能画布 + 步骤卡片（Data Agent / Training / Evaluation）</li>
-              <li>流水线：Coordinator 异步编排 clean → train → evaluate</li>
-              <li>经典版：仪表盘推荐下一步 + 任务/模型/评估管理</li>
-              <li>可追溯：pipeline_instances 记录会话与关联 ID</li>
-            </ul>
+            <div class="hero-card-title">产品总览（实际界面截图）</div>
+            <div class="hero-preview">
+              <img
+                class="hero-preview-img"
+                src="./images/01-workflow.png"
+                alt="工作台 / 最近动态（示例截图）"
+                loading="lazy"
+              />
+              <div class="hero-preview-mask" aria-hidden="true"></div>
+            </div>
+
+            <div class="hero-card-meta" aria-label="product tabs">
+              <a class="tab-pill" href="#features">能力</a>
+              <a class="tab-pill" href="#screenshots">截图</a>
+              <a class="tab-pill" href="#stack">技术栈</a>
+              <a class="tab-pill tab-pill-cta" href="../README.md">快速开始</a>
+            </div>
+
             <div class="hero-card-note">
-              说明：下方“截图”使用 <code>docs/images/</code> 的文件作为展示入口；你把实际截图放进去并按命名规则替换即可。
+              说明：截图在 <code>docs/images/</code> 下，页面按文件名直接渲染。你把实际截图替换同名 PNG 即可。
             </div>
           </div>
         </div>
@@ -116,7 +128,7 @@
       <section id="screenshots" class="section section-alt">
         <div class="container">
           <div class="section-head">
-            <h2 class="section-title">产品截图（图 1 ~ 图 5）</h2>
+            <h2 class="section-title">产品展示（图 1 ~ 图 6）</h2>
             <p class="section-desc">你把实际截图放到 `docs/images/` 并按文件名替换即可显示真实效果。</p>
           </div>
 

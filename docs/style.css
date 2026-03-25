@@ -156,7 +156,7 @@ body{
   border:1px solid rgba(255,255,255,.12);
   border-radius: 18px;
   padding:18px;
-  box-shadow: 0 12px 40px rgba(0,0,0,.18);
+  box-shadow: none;
 }
 .hero-card-title{font-weight:900; font-size:14px;}
 .hero-card-list{
@@ -170,6 +170,50 @@ body{
   color: rgba(230,237,247,.78);
   font-size:12px;
   line-height:1.6;
+}
+
+.hero-preview{
+  margin-top: 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.10);
+  overflow:hidden;
+  background: rgba(255,255,255,.03);
+}
+.hero-preview-img{
+  width: 100%;
+  display:block;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+}
+.hero-preview-mask{
+  height: 0;
+}
+
+.hero-card-meta{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  margin-top: 12px;
+}
+
+.tab-pill{
+  color: rgba(230,237,247,.80);
+  text-decoration:none;
+  font-weight: 900;
+  font-size: 13px;
+  padding: 9px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.04);
+}
+.tab-pill:hover{
+  color: rgba(230,237,247,.95);
+  background: rgba(255,255,255,.08);
+}
+.tab-pill-cta{
+  border-color: rgba(22,119,255,.35);
+  background: rgba(22,119,255,.16);
 }
 code{
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
@@ -239,7 +283,7 @@ code{
 .shot{
   background: rgba(255,255,255,.04);
   border:1px solid rgba(255,255,255,.10);
-  border-radius: 18px;
+  border-radius: 14px;
   overflow:hidden;
 }
 .shot-label{
