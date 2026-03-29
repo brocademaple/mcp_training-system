@@ -26,6 +26,11 @@ export const trainingService = {
     return api.get(`/training/jobs/${id}`);
   },
 
+  /** 原始过程日志（Redis 列表，与 GetJobStatus 中 log_lines 同源） */
+  getRawLogs: async (id: number): Promise<ApiResponse<{ logs: string[] }>> => {
+    return api.get(`/training/jobs/${id}/raw-logs`);
+  },
+
   // Restart training job (only for failed/completed/cancelled)
   restartJob: async (id: number): Promise<ApiResponse<{ job_id: number; status: string }>> => {
     return api.post(`/training/jobs/${id}/restart`);

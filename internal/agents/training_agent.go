@@ -2,7 +2,6 @@ package agents
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -113,8 +112,16 @@ func (a *TrainingAgent) Train(jobID int) error {
 		models.UpdateTrainingJobStatus(a.db, jobID, "failed", err.Error())
 		return err
 	}
-	var stderrBuf bytes.Buffer
-	cmd.Stderr = &stderrBuf
+
+	// Capture stderr in real-time
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		utils.Error("TrainingAgent: Failed to get stderr pipe: %v", err)
+		models.UpdateTrainingJobStatus(a.db, jobID, "failed", err.Error())
+		return err
+	}
+	var stderrLines []string
+	var stderrMu sync.Mutex
 
 	if err := cmd.Start(); err != nil {
 		utils.Error("TrainingAgent: Failed to start training: %v", err)
@@ -123,6 +130,18 @@ func (a *TrainingAgent) Train(jobID int) error {
 	}
 	a.running.Store(jobID, cmd)
 	defer a.running.Delete(jobID)
+
+	// Start goroutine to capture stderr in real-time
+	go func() {
+		stderrScanner := bufio.NewScanner(stderrPipe)
+		for stderrScanner.Scan() {
+			line := stderrScanner.Text()
+			fmt.Printf("[Job %d][STDERR] %s\n", jobID, line)
+			stderrMu.Lock()
+			stderrLines = append(stderrLines, line)
+			stderrMu.Unlock()
+		}
+	}()
 
 	utils.Info("TrainingAgent: Training process started for job %d", jobID)
 
@@ -133,6 +152,8 @@ func (a *TrainingAgent) Train(jobID int) error {
 
 	for scanner.Scan() {
 		line := scanner.Text()
+		// Print all Python output to Go console
+		fmt.Printf("[Job %d] %s\n", jobID, line)
 
 		// 过程日志：写入 Redis 列表供弹窗拉取，并推送 WebSocket 实时更新
 		if strings.HasPrefix(line, "LOG:") {
@@ -217,7 +238,10 @@ func (a *TrainingAgent) Train(jobID int) error {
 				errMsg = em
 			}
 		}
-		if stderr := strings.TrimSpace(stderrBuf.String()); stderr != "" && !strings.Contains(errMsg, stderr) {
+		stderrMu.Lock()
+		stderr := strings.Join(stderrLines, "\n")
+		stderrMu.Unlock()
+		if stderr != "" && !strings.Contains(errMsg, stderr) {
 			errMsg = errMsg + "; stderr: " + stderr
 		}
 		utils.Error("TrainingAgent: Training failed: %s", errMsg)

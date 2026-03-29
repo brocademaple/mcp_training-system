@@ -66,6 +66,12 @@ func main() {
 	if _, err := db.Exec(`ALTER TABLE pipeline_instances ADD COLUMN IF NOT EXISTS data_agent_prompt TEXT`); err != nil {
 		log.Printf("Warning: add data_agent_prompt column: %v", err)
 	}
+	if _, err := db.Exec(`ALTER TABLE pipeline_instances ADD COLUMN IF NOT EXISTS plan_id VARCHAR(255)`); err != nil {
+		log.Printf("Warning: add plan_id column: %v", err)
+	}
+	if _, err := db.Exec(`ALTER TABLE pipeline_instances ADD COLUMN IF NOT EXISTS plan_summary TEXT`); err != nil {
+		log.Printf("Warning: add plan_summary column: %v", err)
+	}
 
 	// Connect to Redis
 	redisClient, err := database.NewRedisClient(
@@ -100,6 +106,7 @@ func main() {
 	syncHandler := handlers.NewSyncHandler(db, ".", cfg.Storage.UploadDir)
 	trainingWSHandler := handlers.NewTrainingWSHandler(redisClient)
 	pipelineHandler := handlers.NewPipelineHandler(db, coordinator)
+	agentHandler := handlers.NewAgentHandler(db)
 	utils.Info("Handlers initialized")
 
 	// Setup Gin router
@@ -126,6 +133,7 @@ func main() {
 		api.POST("/training/jobs", trainingHandler.CreateJob)
 		api.GET("/training/jobs", trainingHandler.GetJobs)
 		api.GET("/training/jobs/:id/logs", trainingHandler.GetJobLogs)
+		api.GET("/training/jobs/:id/raw-logs", trainingHandler.GetRawLogs)
 		api.GET("/training/jobs/:id", trainingHandler.GetJobStatus)
 		api.POST("/training/jobs/:id/restart", trainingHandler.RestartJob)
 		api.POST("/training/jobs/:id/cancel", trainingHandler.CancelJob)
@@ -150,6 +158,7 @@ func main() {
 		api.POST("/sync-from-disk", syncHandler.SyncFromDisk)
 
 		// Pipeline routes (2.0 Agent版)
+		api.POST("/agent/plan", agentHandler.CreatePlan)
 		api.POST("/pipelines", pipelineHandler.CreatePipeline)
 		api.GET("/pipelines", pipelineHandler.ListPipelines)
 		api.GET("/pipelines/:id", pipelineHandler.GetPipelineStatus)

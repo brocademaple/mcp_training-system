@@ -10,6 +10,8 @@ export interface PipelineInstance {
   model_id?: number;
   eval_id?: number;
   error_msg?: string;
+  plan_id?: string;
+  plan_summary?: string;
   created_at: string;
   updated_at?: string;
 }

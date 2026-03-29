@@ -38,6 +38,69 @@ import type { TrainingJob, Dataset, Model } from '@/types';
 
 type StepStatus = 'wait' | 'process' | 'finish' | 'error';
 
+/** 将当前任务配置转成外行可读的「训练上下文」，供进度弹窗展示（Agent 编排也可引用同类摘要） */
+function buildLaymanTrainingContext(
+  job: TrainingJob,
+  datasetName: string | undefined
+): { title: string; bullets: string[] } {
+  const hp = job.hyperparams || {};
+  const epochs = Number(hp.epochs ?? job.total_epochs) || job.total_epochs || 0;
+  const batchSize = Number(hp.batch_size);
+  const lr = Number(hp.learning_rate);
+  const baseModel = typeof hp.base_model === 'string' && hp.base_model.trim() ? hp.base_model.trim() : '';
+
+  let taskDesc = '';
+  if (job.model_type === 'sft_finetune') {
+    taskDesc =
+      '本次采用「监督微调（SFT）+ 低秩适配（LoRA）」：在选定的基础大模型上，用你的数据做专项适应。只训练少量附加参数，通常比全量微调更省显存、速度更快，适合在通用模型上贴近你的领域或风格。';
+  } else {
+    taskDesc =
+      '本次是「文本分类」训练：模型学习「读一段文字 → 预测一个类别标签」（例如情感正/负）。在预训练语言模型上加分类头，用你的标注样本反复优化。';
+  }
+
+  const dsLine =
+    datasetName != null && datasetName !== ''
+      ? `训练数据来自数据集「${datasetName}」${job.dataset_id != null ? `（#${job.dataset_id}）` : ''}。`
+      : job.dataset_id != null
+        ? `训练数据来自系统中的数据集编号 #${job.dataset_id}。`
+        : '当前任务未关联可用数据集记录（例如原数据集已删除），仅可查看历史信息。';
+
+  const bullets: string[] = [taskDesc, dsLine];
+
+  if (baseModel) {
+    bullets.push(
+      `基础模型为「${baseModel}」——可理解为已经在大规模文本上预训练过的「底子」，本次训练是在这个底子上用你的数据继续拟合任务。`
+    );
+  }
+
+  if (epochs > 0) {
+    bullets.push(
+      `计划训练约 ${epochs} 个 epoch（轮次）：每一轮都会把整个训练集大致过一遍。轮次过少可能欠拟合，过多可能过拟合；常见起点为 2～5 轮，可按验证效果再调。`
+    );
+  }
+  if (Number.isFinite(batchSize) && batchSize > 0) {
+    bullets.push(
+      `每步约同时处理 ${batchSize} 条样本（批大小）。批越大，吞吐通常越高，但显存占用越大；若显存不足可适当减小。`
+    );
+  }
+  if (Number.isFinite(lr) && lr > 0) {
+    bullets.push(
+      `学习率约为 ${lr.toExponential(2)}，表示每次更新参数的步长。过大可能震荡或发散，过小则收敛慢；与批大小、模型规模通常要一起权衡。`
+    );
+  }
+
+  const maxSeq = hp.max_seq_length;
+  if (typeof maxSeq === 'number' && maxSeq > 0) {
+    bullets.push(`单条文本最长按约 ${maxSeq} 个 token 处理；更长内容会被截断，过短则padding 对齐。`);
+  }
+
+  bullets.push(
+    '上方「当前训练指标」里的 Loss 表示当前误差（一般希望逐步下降，偶有波动正常）；下方「训练过程输出」是脚本打印的关键步骤（加载数据、分词、开训等）。'
+  );
+
+  return { title: '训练上下文（通俗说明）', bullets };
+}
+
 const TrainingManagement: React.FC = () => {
   const navigate = useNavigate();
   const [jobs, setJobs] = useState<TrainingJob[]>([]);
@@ -48,6 +111,7 @@ const TrainingManagement: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'jobs' | 'models'>('jobs');
   const [models, setModels] = useState<Model[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
+  const logContainerRef = useRef<HTMLDivElement>(null);
   const [modelsRecovering, setModelsRecovering] = useState(false);
   const [form] = Form.useForm();
   const wsRefs = useRef<Record<number, WebSocket>>({});
@@ -102,6 +166,20 @@ const TrainingManagement: React.FC = () => {
     }, 2000);
     return () => clearInterval(timer);
   }, [progressModalJobId, jobs]);
+
+  const progressModalLogLen =
+    progressModalJobId != null
+      ? jobs.find((j) => j.id === progressModalJobId)?.log_lines?.length ?? 0
+      : 0;
+
+  // 日志区域随新行追加自动滚到底部（避免依赖整个 jobs 数组引用）
+  useEffect(() => {
+    const el = logContainerRef.current;
+    if (!el) return;
+    requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight;
+    });
+  }, [progressModalJobId, progressModalLogLen]);
 
   const fetchJobs = async (silent = false) => {
     if (!silent) setLoading(true);
@@ -956,10 +1034,48 @@ const TrainingManagement: React.FC = () => {
                   status: s.status,
                 }))}
               />
+              {(() => {
+                const dsName =
+                  job.dataset_id != null
+                    ? datasets.find((d) => d.id === job.dataset_id)?.name
+                    : undefined;
+                const ctx = buildLaymanTrainingContext(job, dsName);
+                return (
+                  <div
+                    style={{
+                      marginTop: 16,
+                      padding: 12,
+                      background: '#f6ffed',
+                      border: '1px solid #b7eb8f',
+                      borderRadius: 8,
+                    }}
+                  >
+                    <div style={{ fontWeight: 600, marginBottom: 8, color: '#237804', fontSize: 13 }}>
+                      {ctx.title}
+                    </div>
+                    <ul
+                      style={{
+                        margin: 0,
+                        paddingLeft: 18,
+                        fontSize: 13,
+                        color: 'rgba(0,0,0,0.85)',
+                        lineHeight: 1.75,
+                      }}
+                    >
+                      {ctx.bullets.map((t, i) => (
+                        <li key={i} style={{ marginBottom: 6 }}>
+                          {t}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              })()}
               {(job.log_lines?.length ?? 0) > 0 && (
                 <div style={{ marginTop: 16 }}>
                   <div style={{ fontWeight: 600, marginBottom: 8, color: '#333', fontSize: 13 }}>训练过程输出</div>
                   <div
+                    ref={logContainerRef}
                     style={{
                       maxHeight: 180,
                       overflow: 'auto',

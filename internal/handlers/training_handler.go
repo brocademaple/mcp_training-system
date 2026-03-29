@@ -295,3 +295,19 @@ func (h *TrainingHandler) DeleteJob(c *gin.Context) {
 	}
 	c.JSON(200, gin.H{"code": 200, "message": "success"})
 }
+
+// GetRawLogs returns raw training logs from Redis
+// GET /training/jobs/:id/raw-logs
+func (h *TrainingHandler) GetRawLogs(c *gin.Context) {
+	id := c.Param("id")
+	var jobID int
+	if _, err := fmt.Sscanf(id, "%d", &jobID); err != nil || jobID <= 0 {
+		c.JSON(400, gin.H{"code": 400, "message": "Invalid job id"})
+		return
+	}
+	logs, err := h.trainingAgent.GetRecentLogs(jobID)
+	if err != nil || logs == nil {
+		logs = []string{}
+	}
+	c.JSON(200, gin.H{"code": 200, "message": "success", "data": gin.H{"logs": logs}})
+}

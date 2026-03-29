@@ -45,12 +45,13 @@
 
 ## 文档索引
 
-规范、协作方式与全项目文档导航见 **[docs/SPEC_CODING.md](docs/SPEC_CODING.md)**（推荐 AI 协作者与人类开发者从此入口查阅 PRD、LEARNING、API、部署与 2.0 规划等）。
+规范、协作方式与全项目文档导航见 **[docs/SPEC_CODING.md](docs/SPEC_CODING.md)**（推荐 AI 协作者与人类开发者从此入口查阅 PRD、API、部署与 2.0 规划等）。  
+> 说明：`docs/LEARNING.md` 为**本地学习笔记**（默认不入库）；你可自行创建并维护。
 
 ## 快速开始（推荐：本机运行，训练使用本机 GPU）
 
 本机运行后端与 Python 脚本，**训练可使用本机显卡（如 RTX 3060/4060）**；Docker 只用来跑 PostgreSQL 和 Redis。  
-数据库补跑迁移（006～010 等）见 **[docs/LEARNING.md](docs/LEARNING.md)** 第五节。
+数据库补跑迁移（006～010 等）请直接对照目录 **`internal/database/migrations/`**（按文件名顺序执行）；也可参考 `docs/DEPLOYMENT.md`。
 
 ### 操作步骤与命令行（按顺序执行）
 
@@ -370,7 +371,7 @@ mcp-training-system/
 
 ### 技术文档
 - **文档总索引与协作约定**：`docs/SPEC_CODING.md`
-- **学习指南与数据库迁移**：`docs/LEARNING.md`
+- **本地学习笔记（可选，不入库）**：`docs/LEARNING.md`
 - 详细API文档：`docs/API.md`
 - 部署文档：`docs/DEPLOYMENT.md`
 - 前端文档：`frontend/README.md`

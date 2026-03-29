@@ -30,6 +30,11 @@ export interface TrainingJob {
     learning_rate: number;
     batch_size: number;
     epochs: number;
+    /** 文本分类 / 微调常用 */
+    base_model?: string;
+    max_seq_length?: number;
+    lora_r?: number;
+    [key: string]: unknown;
   };
   status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
   progress: number;

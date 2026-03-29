@@ -1693,6 +1693,9 @@ for i := 0; i < 3; i++ {  // 最多 3 个并发训练
 + [ ] Python 脚本能被 Go 正确调用
 + [ ] 数据库表结构符合设计（含 `pipeline_instances` 等 2.0 表）
 + [ ] API 响应格式统一（JSON）
++ [ ] **2.0 Agentic**：支持 `POST /api/v1/agent/plan` 返回结构化计划
++ [ ] **2.0 Agentic**：`POST /api/v1/pipelines` 支持 `plan_id/plan_payload`
++ [ ] **2.0 Agentic**：流水线执行页提供步骤解释与失败修复快捷动作
 
 ### 代码质量
 + [ ] 关键函数有注释

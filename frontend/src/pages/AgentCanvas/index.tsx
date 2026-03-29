@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, Button, Select, Steps, Timeline, Tag, Space, Row, Col, Statistic, Progress, Switch, Radio, Input, Modal, Form, Upload, message } from 'antd';
 import type { UploadFile } from 'antd/es/upload/interface';
-import { RobotOutlined, PlayCircleOutlined, CheckCircleOutlined, CloseCircleOutlined, SyncOutlined, PlusOutlined, UploadOutlined, LinkOutlined, ArrowRightOutlined, EditOutlined, RightOutlined, HomeOutlined, ThunderboltOutlined, ExperimentOutlined, DownOutlined, UpOutlined, MoonOutlined, SunOutlined } from '@ant-design/icons';
+import { RobotOutlined, PlayCircleOutlined, CheckCircleOutlined, CloseCircleOutlined, SyncOutlined, UploadOutlined, LinkOutlined, ArrowRightOutlined, EditOutlined, HomeOutlined, ThunderboltOutlined, ExperimentOutlined, DownOutlined, UpOutlined, MoonOutlined, SunOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import { datasetService } from '@/services/dataset';
 import { trainingService } from '@/services/training';
+import { agentService, type AgentPlan } from '@/services/agent';
 import { DEFAULT_BASE_MODEL } from '@/constants/baseModels';
 import type { TrainingJob } from '@/types';
 import './index.css';
@@ -118,6 +119,12 @@ const AgentCanvas: React.FC = () => {
   const [modelType, setModelType] = useState<string>('text');
   const [modelIntent, setModelIntent] = useState<string>('sentiment');
   const [intentNote, setIntentNote] = useState<string>('');
+  const [goalInput, setGoalInput] = useState<string>('');
+  const [goalPreset, setGoalPreset] = useState<'full_pipeline' | 'train_only' | 'evaluate_only' | ''>('');
+  const [planLoading, setPlanLoading] = useState(false);
+  const [planError, setPlanError] = useState<string>('');
+  const [generatedPlan, setGeneratedPlan] = useState<AgentPlan | null>(null);
+  const [trainMode, setTrainMode] = useState<'classic_clf' | 'sft_lora'>('classic_clf');
   const [materialSource, setMaterialSource] = useState<'upload' | 'agent' | null>(null);
   const [dataAgentOptions, setDataAgentOptions] = useState<DataAgentOptions>({});
 
@@ -233,6 +240,56 @@ const AgentCanvas: React.FC = () => {
     return parts.join('；');
   };
 
+  const getPresetGoalText = (preset: 'full_pipeline' | 'train_only' | 'evaluate_only' | '') => {
+    if (preset === 'full_pipeline') return '从数据准备到评估报告，一次跑完整条训练链路';
+    if (preset === 'train_only') return '基于已有训练数据，快速产出一个可用模型';
+    if (preset === 'evaluate_only') return '对已训练模型做评估并生成报告';
+    return '';
+  };
+
+  const handleGeneratePlan = async () => {
+    const goal = goalInput.trim() || getPresetGoalText(goalPreset);
+    if (!goal) {
+      message.warning('请先选择预设目标或输入一句训练目标');
+      return;
+    }
+    setPlanLoading(true);
+    setPlanError('');
+    try {
+      const plan = await agentService.createPlan({
+        goal,
+        model_type: modelType,
+        intent: modelIntent,
+        material_source: materialSource,
+        data_agent_prompt: getDataAgentPromptFragment(),
+        train_mode: trainMode,
+      });
+      setGeneratedPlan(plan);
+
+      // 将规则计划自动映射到当前表单，用户仍可手动调整
+      if (plan.inferred_intent) setModelIntent(plan.inferred_intent);
+      if (plan.train_mode === 'classic_clf' || plan.train_mode === 'sft_lora') setTrainMode(plan.train_mode);
+      if (plan.data_agent_prompt && materialSource === 'agent') {
+        setDataAgentOptions((o) => ({ ...o, customPrompt: plan.data_agent_prompt }));
+      }
+
+      const firstReady = plan.selected_dataset_candidates?.[0]?.id;
+      if (firstReady && !selectedDataset) setSelectedDataset(firstReady);
+      message.success('已生成执行计划');
+    } catch (e: any) {
+      const errMsg = e?.message || '计划生成失败';
+      setPlanError(errMsg);
+      message.error(errMsg);
+    } finally {
+      setPlanLoading(false);
+    }
+  };
+
+  const getStepRationale = (step: string) => {
+    if (!generatedPlan?.steps?.length) return '';
+    return generatedPlan.steps.find((s) => s.name === step)?.rationale || '';
+  };
+
   const fetchPipelineStatus = async (id: number) => {
     try {
       const res = await axios.get(`${API_BASE}/pipelines/${id}`);
@@ -240,10 +297,14 @@ const AgentCanvas: React.FC = () => {
     } catch (err) {}
   };
 
-  const handleStart = async () => {
-    if (!selectedDataset) return;
+  const handleStart = async (overrideTrainConfig?: Record<string, unknown>) => {
+    if (!selectedDataset) {
+      message.warning('请先选择数据集');
+      return;
+    }
     setLoading(true);
     try {
+      const planTrainConfig = generatedPlan?.train_config ?? {};
       const payload: Record<string, unknown> = {
         dataset_id: selectedDataset,
         train_config: {
@@ -252,12 +313,17 @@ const AgentCanvas: React.FC = () => {
           epochs: 3,
           learning_rate: 2e-5,
           batch_size: 16,
+          ...planTrainConfig,
+          ...(overrideTrainConfig || {}),
         },
       };
       if (materialSource === 'agent') {
         const fragment = getDataAgentPromptFragment();
-        if (fragment) payload.data_agent_prompt = fragment;
+        const promptFromPlan = generatedPlan?.data_agent_prompt;
+        if (fragment || promptFromPlan) payload.data_agent_prompt = fragment || promptFromPlan;
       }
+      if (generatedPlan?.plan_id) payload.plan_id = generatedPlan.plan_id;
+      if (generatedPlan) payload.plan_payload = generatedPlan;
       const res = await axios.post(`${API_BASE}/pipelines`, payload);
       setCurrentPipeline(res.data);
     } catch (err) {
@@ -463,12 +529,44 @@ const AgentCanvas: React.FC = () => {
               </p>
               <Card className="canvas-step-card canvas-step-single" title={<span><span className="canvas-step-badge">步骤 3</span> 训练计划与执行</span>}>
                 <h3 style={{ marginBottom: 8, fontWeight: 600, fontSize: 15 }}>计划摘要</h3>
-                <p style={{ color: 'rgba(0,0,0,0.55)', fontSize: 13, marginBottom: 16 }}>
-                  根据你的选择，我们将进行 <strong>{MODEL_TYPE_OPTIONS.find((o) => o.value === modelType)?.label ?? '文本'}</strong> + <strong>{INTENT_OPTIONS.find((o) => o.value === modelIntent)?.label ?? '分类'}</strong> 的训练。
-                  {intentNote && (
-                    <span> 你的补充：{intentNote.slice(0, 80)}{intentNote.length > 80 ? '…' : ''}</span>
-                  )}
-                </p>
+                {generatedPlan ? (
+                  <div className="canvas-plan-card">
+                    <p style={{ color: 'rgba(0,0,0,0.65)', fontSize: 13, marginBottom: 12 }}>
+                      <strong>目标：</strong>{generatedPlan.goal}
+                    </p>
+                    <Space wrap style={{ marginBottom: 8 }}>
+                      <Tag color="blue">意图：{generatedPlan.inferred_intent}</Tag>
+                      {generatedPlan.train_mode && <Tag color="purple">训练方式：{generatedPlan.train_mode === 'sft_lora' ? 'SFT+LoRA' : '经典分类'}</Tag>}
+                      <Tag color="geekblue">预计耗时：{generatedPlan.estimated_duration_minutes || '--'} 分钟</Tag>
+                      {generatedPlan.plan_id && <Tag color="processing">{generatedPlan.plan_id}</Tag>}
+                    </Space>
+                    {generatedPlan.task_spec && (
+                      <div style={{ fontSize: 12, color: 'rgba(0,0,0,0.6)', marginBottom: 8 }}>
+                        <div>
+                          <strong>问题族：</strong>{generatedPlan.task_spec.problem_family}；<strong>输出：</strong>{generatedPlan.task_spec.output_form}
+                        </div>
+                        <div>
+                          <strong>最小数据列：</strong>{generatedPlan.task_spec.required_columns.join(' + ')}
+                        </div>
+                        {generatedPlan.task_spec.notes && <div style={{ marginTop: 4 }}>{generatedPlan.task_spec.notes}</div>}
+                      </div>
+                    )}
+                    <ul className="canvas-plan-steps">
+                      {generatedPlan.steps.map((s) => (
+                        <li key={s.name}>
+                          <strong>{s.agent}</strong> · {s.name}：{s.rationale}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : (
+                  <p style={{ color: 'rgba(0,0,0,0.55)', fontSize: 13, marginBottom: 16 }}>
+                    根据你的选择，我们将进行 <strong>{MODEL_TYPE_OPTIONS.find((o) => o.value === modelType)?.label ?? '文本'}</strong> + <strong>{INTENT_OPTIONS.find((o) => o.value === modelIntent)?.label ?? '分类'}</strong> 的训练。
+                    {intentNote && (
+                      <span> 你的补充：{intentNote.slice(0, 80)}{intentNote.length > 80 ? '…' : ''}</span>
+                    )}
+                  </p>
+                )}
                 {materialSource === 'agent' && (
                   <p className="canvas-agent-plan-note">
                     你选择了由 Data Agent 从外部规划数据源；该能力完善后将自动执行。当前请先选择已有数据集以启动流水线。
@@ -500,16 +598,21 @@ const AgentCanvas: React.FC = () => {
                     <Button type="default" icon={<EditOutlined />} onClick={() => setCanvasStep(2)}>
                       返回修改
                     </Button>
-                    <Button
-                      type="primary"
-                      size="large"
-                      icon={<PlayCircleOutlined />}
-                      onClick={handleStart}
-                      loading={loading}
-                      disabled={!selectedDataset}
-                    >
-                      启动 Agent 流水线
-                    </Button>
+                    <Space>
+                      <Button type="default" onClick={handleGeneratePlan} loading={planLoading}>
+                        刷新计划
+                      </Button>
+                      <Button
+                        type="primary"
+                        size="large"
+                        icon={<PlayCircleOutlined />}
+                        onClick={() => handleStart()}
+                        loading={loading}
+                        disabled={!selectedDataset}
+                      >
+                        启动 Agent 流水线
+                      </Button>
+                    </Space>
                   </Space>
                 </Space>
               </Card>
@@ -523,6 +626,49 @@ const AgentCanvas: React.FC = () => {
                   </p>
                   <Card className="canvas-step-card" title={<span><span className="canvas-step-badge">步骤 1</span> 训练目标确认</span>}>
                     <p className="canvas-step-desc">先确认要训练的模型类型与任务目标，Agent 将据此规划流程。</p>
+                    <div className="canvas-goal-block">
+                      <div className="canvas-goal-title">目标优先入口</div>
+                      <Space wrap style={{ marginBottom: 10 }}>
+                        <Button type={goalPreset === 'full_pipeline' ? 'primary' : 'default'} onClick={() => { setGoalPreset('full_pipeline'); setGoalInput(getPresetGoalText('full_pipeline')); }}>
+                          从数据到评估
+                        </Button>
+                        <Button type={goalPreset === 'train_only' ? 'primary' : 'default'} onClick={() => { setGoalPreset('train_only'); setGoalInput(getPresetGoalText('train_only')); }}>
+                          仅训练
+                        </Button>
+                        <Button type={goalPreset === 'evaluate_only' ? 'primary' : 'default'} onClick={() => { setGoalPreset('evaluate_only'); setGoalInput(getPresetGoalText('evaluate_only')); }}>
+                          仅评估
+                        </Button>
+                      </Space>
+                      <Input.TextArea
+                        placeholder="例如：用电商评论训练一个情感分类模型，自动完成清洗、训练和评估"
+                        value={goalInput}
+                        onChange={(e) => setGoalInput(e.target.value)}
+                        rows={2}
+                        maxLength={300}
+                        showCount
+                      />
+                      <div style={{ marginTop: 10 }}>
+                        <div style={{ marginBottom: 6, fontWeight: 500 }}>训练方式（范式）</div>
+                        <Radio.Group
+                          value={trainMode}
+                          onChange={(e) => setTrainMode(e.target.value)}
+                          style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}
+                        >
+                          <Radio value="classic_clf">经典分类训练（分类头）</Radio>
+                          <Radio value="sft_lora">SFT + LoRA 微调（参数高效）</Radio>
+                        </Radio.Group>
+                        <div style={{ marginTop: 6, fontSize: 12, color: 'rgba(0,0,0,0.55)' }}>
+                          系统会把该选择转成可执行的训练脚本路由（`text_classification` / `sft_finetune`）。
+                        </div>
+                      </div>
+                      <div className="canvas-goal-actions">
+                        <Button type="default" onClick={handleGeneratePlan} loading={planLoading}>
+                          生成执行计划
+                        </Button>
+                        {generatedPlan?.plan_id && <Tag color="processing">计划ID: {generatedPlan.plan_id}</Tag>}
+                      </div>
+                      {planError && <div className="canvas-required-hint">{planError}</div>}
+                    </div>
                     <div style={{ marginBottom: 16 }}>
                       <div style={{ marginBottom: 8, fontWeight: 500 }}>训练的是什么模型？</div>
                       <Radio.Group
@@ -797,9 +943,9 @@ const AgentCanvas: React.FC = () => {
                   current={getStepIndex(currentPipeline.current_step)}
                   status={currentPipeline.status === 'failed' ? 'error' : undefined}
                 >
-                  <Steps.Step title="数据清洗" description="Data Agent 处理中" />
-                  <Steps.Step title="模型训练" description="Training Agent 执行中" />
-                  <Steps.Step title="模型评估" description="Evaluation Agent 分析中" />
+                  <Steps.Step title="数据清洗" description={getStepRationale('clean_data') || 'Data Agent 处理中'} />
+                  <Steps.Step title="模型训练" description={getStepRationale('train') || 'Training Agent 执行中'} />
+                  <Steps.Step title="模型评估" description={getStepRationale('evaluate') || 'Evaluation Agent 分析中'} />
                 </Steps>
               </Card>
             </Col>
@@ -813,14 +959,17 @@ const AgentCanvas: React.FC = () => {
                   <Timeline.Item color={getStepIndex(currentPipeline.current_step) >= 0 ? 'green' : 'gray'}>
                     <p>Data Agent: clean_data</p>
                     <Tag color="success">已完成</Tag>
+                    <p style={{ marginTop: 6, color: 'rgba(0,0,0,0.55)' }}>{getStepRationale('clean_data') || '清洗和标准化输入数据。'}</p>
                   </Timeline.Item>
                   <Timeline.Item color={getStepIndex(currentPipeline.current_step) >= 1 ? 'blue' : 'gray'}>
                     <p>Training Agent: train</p>
                     {currentPipeline.job_id && <Tag color="processing">Job #{currentPipeline.job_id}</Tag>}
+                    <p style={{ marginTop: 6, color: 'rgba(0,0,0,0.55)' }}>{getStepRationale('train') || '按计划配置执行训练。'}</p>
                   </Timeline.Item>
                   <Timeline.Item color={getStepIndex(currentPipeline.current_step) >= 2 ? 'blue' : 'gray'}>
                     <p>Evaluation Agent: evaluate</p>
                     {currentPipeline.model_id && <Tag color="processing">Model #{currentPipeline.model_id}</Tag>}
+                    <p style={{ marginTop: 6, color: 'rgba(0,0,0,0.55)' }}>{getStepRationale('evaluate') || '输出评估指标与报告。'}</p>
                   </Timeline.Item>
                 </Timeline>
               </Card>
@@ -845,6 +994,34 @@ const AgentCanvas: React.FC = () => {
                     <CloseCircleOutlined style={{ fontSize: 48, color: '#ff4d4f' }} />
                     <h2>执行失败</h2>
                     <p>{currentPipeline.error_msg}</p>
+                    <div className="canvas-fallback-actions">
+                      <Button
+                        onClick={() => {
+                          setSelectedDataset(currentPipeline.dataset_id);
+                          handleStart();
+                        }}
+                      >
+                        重新清洗后重跑
+                      </Button>
+                      <Button
+                        onClick={() => {
+                          setSelectedDataset(currentPipeline.dataset_id);
+                          const baseLr = Number((generatedPlan?.train_config?.learning_rate as number) || 2e-5);
+                          handleStart({ learning_rate: baseLr * 0.5, batch_size: 8 });
+                        }}
+                      >
+                        降低学习率重试
+                      </Button>
+                      <Button
+                        onClick={() => {
+                          setMaterialSource('agent');
+                          setCurrentPipeline(null);
+                          setCanvasStep(2);
+                        }}
+                      >
+                        切换数据来源策略
+                      </Button>
+                    </div>
                   </div>
                 )}
                 {currentPipeline.status === 'running' && (

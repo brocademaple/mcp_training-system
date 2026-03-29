@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"strconv"
 
@@ -25,6 +26,8 @@ type CreatePipelineRequest struct {
 	DatasetID       int                    `json:"dataset_id" binding:"required"`
 	TrainConfig     map[string]interface{} `json:"train_config"`
 	DataAgentPrompt string                 `json:"data_agent_prompt"` // 用户在前端设定的 Data Agent 规划偏好（规模/语言/领域等），写入 prompt 驱动 Data Agent
+	PlanID          string                 `json:"plan_id"`            // 可选：来自 /agent/plan 的计划 ID
+	PlanPayload     map[string]interface{} `json:"plan_payload"`       // 可选：执行时采用的计划 payload 摘要
 }
 
 func (h *PipelineHandler) CreatePipeline(c *gin.Context) {
@@ -38,7 +41,14 @@ func (h *PipelineHandler) CreatePipeline(c *gin.Context) {
 		req.TrainConfig = map[string]interface{}{"model_type": "random_forest"}
 	}
 
-	pipeline, err := h.coordinator.RunPipeline(req.DatasetID, req.TrainConfig, req.DataAgentPrompt)
+	planSummary := ""
+	if req.PlanPayload != nil {
+		if b, err := json.Marshal(req.PlanPayload); err == nil {
+			planSummary = string(b)
+		}
+	}
+
+	pipeline, err := h.coordinator.RunPipeline(req.DatasetID, req.TrainConfig, req.DataAgentPrompt, req.PlanID, planSummary)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -66,7 +76,7 @@ func (h *PipelineHandler) GetPipelineStatus(c *gin.Context) {
 
 func (h *PipelineHandler) ListPipelines(c *gin.Context) {
 	rows, err := h.db.Query(`
-		SELECT id, session_id, dataset_id, status, current_step, job_id, model_id, eval_id, error_msg, data_agent_prompt, created_at, updated_at
+		SELECT id, session_id, dataset_id, status, current_step, job_id, model_id, eval_id, error_msg, data_agent_prompt, plan_id, plan_summary, created_at, updated_at
 		FROM pipeline_instances ORDER BY created_at DESC LIMIT 100
 	`)
 	if err != nil {
@@ -81,10 +91,10 @@ func (h *PipelineHandler) ListPipelines(c *gin.Context) {
 		var id, datasetID int
 		var jobID, modelID, evalID sql.NullInt64
 		var sessionID, status, currentStep string
-		var errorMsg, dataAgentPrompt sql.NullString
+		var errorMsg, dataAgentPrompt, planID, planSummary sql.NullString
 		var createdAt, updatedAt interface{}
 
-		if err := rows.Scan(&id, &sessionID, &datasetID, &status, &currentStep, &jobID, &modelID, &evalID, &errorMsg, &dataAgentPrompt, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&id, &sessionID, &datasetID, &status, &currentStep, &jobID, &modelID, &evalID, &errorMsg, &dataAgentPrompt, &planID, &planSummary, &createdAt, &updatedAt); err != nil {
 			continue
 		}
 
@@ -96,6 +106,14 @@ func (h *PipelineHandler) ListPipelines(c *gin.Context) {
 		if dataAgentPrompt.Valid {
 			dataAgentPromptVal = dataAgentPrompt.String
 		}
+		planIDVal := ""
+		if planID.Valid {
+			planIDVal = planID.String
+		}
+		planSummaryVal := ""
+		if planSummary.Valid {
+			planSummaryVal = planSummary.String
+		}
 		p := map[string]interface{}{
 			"id":                id,
 			"session_id":       sessionID,
@@ -104,6 +122,8 @@ func (h *PipelineHandler) ListPipelines(c *gin.Context) {
 			"current_step":      currentStep,
 			"error_msg":        errorMsgVal,
 			"data_agent_prompt": dataAgentPromptVal,
+			"plan_id":          planIDVal,
+			"plan_summary":     planSummaryVal,
 			"created_at":       createdAt,
 			"updated_at":       updatedAt,
 		}
