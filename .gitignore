@@ -25,8 +25,12 @@ results/
 *.pth
 *.bin
 
-# Docs（论文/个人笔记与站内文档均在本地维护，远程仅保留根目录 README.md）
-docs/
+# Docs：仅提交 GitHub Pages（index、样式、截图）；其余 Markdown / thesis / 笔记仍不提交
+docs/*
+!docs/index.html
+!docs/style.css
+!docs/images/
+!docs/images/**
 
 # IDE
 .vscode/

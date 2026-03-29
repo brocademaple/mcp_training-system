@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <title>MCP Training System — 多智能体一键训练</title>
+    <link rel="stylesheet" href="./style.css" />
+    <script>
+      (function () {
+        try {
+          var k = "mcp-ts-theme";
+          var stored = localStorage.getItem(k);
+          var prefersLight = window.matchMedia("(prefers-color-scheme: light)").matches;
+          var t = stored === "light" || stored === "dark" ? stored : prefersLight ? "light" : "dark";
+          document.documentElement.setAttribute("data-theme", t);
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div class="bg-grid" aria-hidden="true"></div>
+
+    <header class="topbar">
+      <div class="container topbar-inner">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">MCP</div>
+          <div class="brand-text">
+            <div class="brand-title">MCP Training System</div>
+            <div class="brand-subtitle">多智能体编排 · 一键训练链路</div>
+          </div>
+        </div>
+        <nav class="topnav" aria-label="主导航">
+          <a class="topnav-link" href="#features">能力</a>
+          <a class="topnav-link" href="#screenshots">截图</a>
+          <a class="topnav-link" href="#stack">技术栈</a>
+          <a
+            class="topnav-link topnav-cta"
+            href="https://github.com/brocademaple/mcp_training-system/blob/main/README.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            >快速开始</a
+          >
+        </nav>
+        <button
+          type="button"
+          class="theme-toggle"
+          id="theme-toggle"
+          aria-label="切换浅色或深色模式"
+          title="切换显示模式"
+        >
+          <span class="icon-dark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 3v1M12 20v1M4.22 4.22l.7.7M18.36 18.36l.7.7M3 12h1M20 12h1M4.22 19.78l.7-.7M18.36 5.64l.7-.7" />
+              <circle cx="12" cy="12" r="4" />
+            </svg>
+          </span>
+          <span class="icon-light" aria-hidden="true" style="display: none">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+            </svg>
+          </span>
+        </button>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="container hero-inner">
+          <div class="hero-copy">
+            <p class="eyebrow reveal">产品级训练编排</p>
+            <h1 class="hero-title reveal" style="--reveal-delay: 0.06s">
+              一键跑通数据、训练与评估
+            </h1>
+            <p class="hero-desc reveal" style="--reveal-delay: 0.12s">
+              以 MCP 协调多智能体，将「上传 / 清洗 → 训练 → 评估」编排为可观测流水线。状态与产物落库，经典工作台与
+              Agent 画布双入口共用同一套数据，适合演示、迭代与毕设答辩展示。
+            </p>
+
+            <div class="hero-actions reveal" style="--reveal-delay: 0.18s">
+              <a class="btn btn-primary" href="#screenshots">查看界面截图</a>
+              <a
+                class="btn btn-ghost"
+                href="https://github.com/brocademaple/mcp_training-system"
+                target="_blank"
+                rel="noopener noreferrer"
+                >GitHub 仓库</a
+              >
+            </div>
+
+            <div class="badges reveal" style="--reveal-delay: 0.24s" role="list" aria-label="产品标签">
+              <span class="badge" role="listitem">可编排</span>
+              <span class="badge badge-accent" role="listitem">MCP</span>
+              <span class="badge badge-info" role="listitem">双版本</span>
+              <span class="badge badge-success" role="listitem">可追溯</span>
+              <span class="badge" role="listitem">PostgreSQL</span>
+            </div>
+          </div>
+
+          <div class="hero-card reveal" style="--reveal-delay: 0.14s" aria-label="产品主视觉">
+            <div class="hero-card-title">实际运行界面</div>
+            <div class="hero-preview">
+              <img
+                class="hero-preview-img"
+                src="./images/01-workflow.png"
+                alt="工作台与最近动态（产品截图）"
+                loading="eager"
+                fetchpriority="high"
+              />
+            </div>
+
+            <div class="hero-card-meta" aria-label="页面内导航">
+              <a class="tab-pill" href="#features">能力</a>
+              <a class="tab-pill" href="#screenshots">全部截图</a>
+              <a class="tab-pill" href="#stack">技术栈</a>
+              <a
+                class="tab-pill tab-pill-cta"
+                href="https://github.com/brocademaple/mcp_training-system/blob/main/README.md"
+                target="_blank"
+                rel="noopener noreferrer"
+                >部署说明</a
+              >
+            </div>
+
+            <div class="hero-card-note">
+              将截图置于 <code>docs/images/</code> 并沿用现有文件名即可替换展示，无需改 HTML。
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="features" class="section">
+        <div class="container">
+          <div class="section-head reveal">
+            <p class="section-kicker">Capabilities</p>
+            <h2 class="section-title">为整条训练链路而设计</h2>
+            <p class="section-desc">
+              从数据进入系统到报告产出，每一步都可查看状态、日志与结果——既适合日常实验，也适合对外展示产品完成度。
+            </p>
+          </div>
+
+          <div class="grid grid-3">
+            <article class="card reveal" style="--reveal-delay: 0s">
+              <div class="card-icon" aria-hidden="true">1</div>
+              <h3 class="card-title">数据集与清洗</h3>
+              <p class="card-desc">本地上传或 URL 导入，清洗流程可重复执行，输出就绪数据集供训练选用。</p>
+            </article>
+            <article class="card reveal" style="--reveal-delay: 0.06s">
+              <div class="card-icon" aria-hidden="true">2</div>
+              <h3 class="card-title">训练任务管理</h3>
+              <p class="card-desc">经典工作台查看进度、日志与生命周期操作，训练结束后模型入库可评估。</p>
+            </article>
+            <article class="card reveal" style="--reveal-delay: 0.12s">
+              <div class="card-icon" aria-hidden="true">3</div>
+              <h3 class="card-title">评估与报告</h3>
+              <p class="card-desc">指标与 HTML 报告可预览与下载，失败时保留原因字段便于排错。</p>
+            </article>
+            <article class="card reveal" style="--reveal-delay: 0s">
+              <div class="card-icon" aria-hidden="true">4</div>
+              <h3 class="card-title">Agent 智能画布</h3>
+              <p class="card-desc">先确认目标与数据，再触发流水线；步骤可视化，贴合「产品向导」体验。</p>
+            </article>
+            <article class="card reveal" style="--reveal-delay: 0.06s">
+              <div class="card-icon" aria-hidden="true">5</div>
+              <h3 class="card-title">一键流水线 2.0</h3>
+              <p class="card-desc">Coordinator 异步编排清洗、训练与评估，实例状态持久化，可刷新恢复进度。</p>
+            </article>
+            <article class="card reveal" style="--reveal-delay: 0.12s">
+              <div class="card-icon" aria-hidden="true">6</div>
+              <h3 class="card-title">双版本同一数据层</h3>
+              <p class="card-desc">Agent 与经典界面共享 PostgreSQL / Redis，切换视图不丢结果。</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="screenshots" class="section section-alt">
+        <div class="container">
+          <div class="section-head reveal">
+            <p class="section-kicker">Product tour</p>
+            <h2 class="section-title">六张截图，完整走一遍产品</h2>
+            <p class="section-desc">
+              以下六张图与首页主视觉一致，覆盖工作台、数据、训练、评估与 Agent
+              配置。替换同名 PNG 即可更新整站展示。
+            </p>
+          </div>
+
+          <div class="grid grid-2">
+            <div class="shot reveal" style="--reveal-delay: 0s">
+              <div class="shot-label">图 1 · 工作台 / 最近动态</div>
+              <img class="shot-img" src="./images/01-workflow.png" alt="工作台与最近动态" loading="lazy" />
+            </div>
+            <div class="shot reveal" style="--reveal-delay: 0.08s">
+              <div class="shot-label">图 2 · 数据集与清洗</div>
+              <img class="shot-img" src="./images/02-datasets.png" alt="数据集管理与清洗结果" loading="lazy" />
+            </div>
+            <div class="shot reveal" style="--reveal-delay: 0s">
+              <div class="shot-label">图 3 · 训练任务</div>
+              <img class="shot-img" src="./images/03-training-jobs.png" alt="训练任务管理" loading="lazy" />
+            </div>
+            <div class="shot reveal" style="--reveal-delay: 0.08s">
+              <div class="shot-label">图 4 · 评估与报告</div>
+              <img class="shot-img" src="./images/04-evaluation.png" alt="模型评估与报告" loading="lazy" />
+            </div>
+            <div class="shot reveal" style="--reveal-delay: 0s">
+              <div class="shot-label">图 5 · Agent 画布</div>
+              <img class="shot-img" src="./images/05-agent-canvas.png" alt="Agent 画布步骤" loading="lazy" />
+            </div>
+            <div class="shot reveal" style="--reveal-delay: 0.08s">
+              <div class="shot-label">图 6 · Data Agent 规划</div>
+              <img class="shot-img" src="./images/06-data-agent-plan.png" alt="Data Agent 规划选项" loading="lazy" />
+            </div>
+          </div>
+
+          <div class="tip reveal" style="--reveal-delay: 0.12s">
+            <div class="tip-title">截图命名（与仓库一致）</div>
+            <div class="tip-body">
+              放入 <code>docs/images/</code>：<code>01-workflow.png</code>、<code>02-datasets.png</code>、
+              <code>03-training-jobs.png</code>、<code>04-evaluation.png</code>、<code>05-agent-canvas.png</code>、
+              <code>06-data-agent-plan.png</code>。
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="stack" class="section">
+        <div class="container">
+          <div class="section-head reveal">
+            <p class="section-kicker">Stack</p>
+            <h2 class="section-title">成熟技术栈，易于部署与扩展</h2>
+            <p class="section-desc">Go 负责编排与 API，React 负责交互，Python 侧承载训练脚本与模型生态。</p>
+          </div>
+
+          <div class="chips reveal" style="--reveal-delay: 0.08s">
+            <span class="chip">Go · Gin</span>
+            <span class="chip">React · TypeScript</span>
+            <span class="chip">Ant Design</span>
+            <span class="chip">PostgreSQL</span>
+            <span class="chip">Redis</span>
+            <span class="chip">Python · PyTorch</span>
+            <span class="chip">Transformers</span>
+          </div>
+        </div>
+      </section>
+
+      <footer class="footer">
+        <div class="container footer-inner">
+          <div class="footer-left reveal">
+            <div class="footer-title">MCP Training System</div>
+            <div class="footer-desc">面向演示与交付的训练编排平台：可观测、可替换截图、可一键部署。</div>
+          </div>
+          <div class="footer-right reveal" style="--reveal-delay: 0.06s">
+            <a
+              class="footer-link"
+              href="https://github.com/brocademaple/mcp_training-system/blob/main/README.md"
+              target="_blank"
+              rel="noopener noreferrer"
+              >README</a
+            >
+            <a
+              class="footer-link"
+              href="https://github.com/brocademaple/mcp_training-system"
+              target="_blank"
+              rel="noopener noreferrer"
+              >源码</a
+            >
+            <a class="footer-link" href="#screenshots">截图</a>
+            <a class="footer-link" href="#features">能力</a>
+          </div>
+        </div>
+      </footer>
+    </main>
+
+    <script>
+      (function () {
+        var KEY = "mcp-ts-theme";
+
+        function getTheme() {
+          return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+        }
+
+        function setTheme(next) {
+          document.documentElement.setAttribute("data-theme", next);
+          try {
+            localStorage.setItem(KEY, next);
+          } catch (e) {}
+          syncIcons(next);
+        }
+
+        function syncIcons(theme) {
+          var dark = theme === "dark";
+          document.querySelectorAll(".theme-toggle").forEach(function (btn) {
+            var sun = btn.querySelector(".icon-dark");
+            var moon = btn.querySelector(".icon-light");
+            if (sun) sun.style.display = dark ? "inline" : "none";
+            if (moon) moon.style.display = dark ? "none" : "inline";
+          });
+        }
+
+        function toggle() {
+          setTheme(getTheme() === "dark" ? "light" : "dark");
+        }
+
+        document.getElementById("theme-toggle")?.addEventListener("click", toggle);
+
+        syncIcons(getTheme());
+
+        var revealEls = [].slice.call(document.querySelectorAll(".reveal"));
+        var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        function markAllVisible() {
+          revealEls.forEach(function (el) {
+            el.classList.add("is-visible");
+          });
+        }
+        if (reduceMotion || !("IntersectionObserver" in window)) {
+          markAllVisible();
+        } else {
+          var io = new IntersectionObserver(
+            function (entries) {
+              entries.forEach(function (en) {
+                if (en.isIntersecting) {
+                  en.target.classList.add("is-visible");
+                  io.unobserve(en.target);
+                }
+              });
+            },
+            { root: null, rootMargin: "0px 0px -8% 0px", threshold: 0.08 }
+          );
+          revealEls.forEach(function (el) {
+            io.observe(el);
+          });
+        }
+      })();
+    </script>
+  </body>
+</html>
