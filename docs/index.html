@@ -4,6 +4,24 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark light" />
+    <meta
+      name="description"
+      content="基于 MCP 的多智能体训练编排平台：数据清洗、训练、评估一键流水线，经典工作台与 Agent 画布双入口，状态可追溯。"
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="MCP Training System — 多智能体一键训练" />
+    <meta
+      property="og:description"
+      content="数据 → 清洗 → 训练 → 评估可观测编排；Coordinator + 多 Agent；PostgreSQL / Redis 落库。"
+    />
+    <meta property="og:url" content="https://brocademaple.github.io/mcp_training-system/" />
+    <meta property="og:image" content="https://brocademaple.github.io/mcp_training-system/images/01-workflow.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="MCP Training System" />
+    <meta
+      name="twitter:description"
+      content="多智能体 MCP 编排，一键训练链路，双版本数据互通。"
+    />
     <title>MCP Training System — 多智能体一键训练</title>
     <link rel="stylesheet" href="./style.css" />
     <script>
@@ -21,7 +39,7 @@
   <body>
     <div class="bg-grid" aria-hidden="true"></div>
 
-    <header class="topbar">
+    <header class="topbar" id="topbar">
       <div class="container topbar-inner">
         <div class="brand">
           <div class="brand-mark" aria-hidden="true">MCP</div>
@@ -31,6 +49,7 @@
           </div>
         </div>
         <nav class="topnav" aria-label="主导航">
+          <a class="topnav-link" href="#flow">流程</a>
           <a class="topnav-link" href="#features">能力</a>
           <a class="topnav-link" href="#screenshots">截图</a>
           <a class="topnav-link" href="#stack">技术栈</a>
@@ -66,6 +85,7 @@
 
     <main>
       <section class="hero">
+        <div class="hero-glow" aria-hidden="true"></div>
         <div class="container hero-inner">
           <div class="hero-copy">
             <p class="eyebrow reveal">产品级训练编排</p>
@@ -110,6 +130,7 @@
             </div>
 
             <div class="hero-card-meta" aria-label="页面内导航">
+              <a class="tab-pill" href="#flow">流程</a>
               <a class="tab-pill" href="#features">能力</a>
               <a class="tab-pill" href="#screenshots">全部截图</a>
               <a class="tab-pill" href="#stack">技术栈</a>
@@ -120,10 +141,6 @@
                 rel="noopener noreferrer"
                 >部署说明</a
               >
-            </div>
-
-            <div class="hero-card-note">
-              将截图置于 <code>docs/images/</code> 并沿用现有文件名即可替换展示，无需改 HTML。
             </div>
           </div>
         </div>
@@ -174,50 +191,178 @@
         </div>
       </section>
 
+      <section id="flow" class="section section-flow">
+        <div class="container">
+          <div class="section-head reveal">
+            <p class="section-kicker">Flow</p>
+            <h2 class="section-title">产品逻辑：从数据到报告</h2>
+            <p class="section-desc">
+              下面这条主链路与上方「能力」模块、下方截图编号一一对应；Agent
+              一键流水线是在同一数据层上的另一条编排路径。
+            </p>
+          </div>
+
+          <div class="flow-steps reveal" aria-label="用户主链路">
+            <div class="flow-step">
+              <div class="flow-step-num">1</div>
+              <div class="flow-step-body">
+                <h3 class="flow-step-title">总览与入口</h3>
+                <p class="flow-step-desc">在工作台查看最近动态与任务入口，进入数据或训练模块。</p>
+                <p class="flow-step-ref">对应截图：<a href="#shot-1">图 1</a></p>
+              </div>
+            </div>
+            <div class="flow-connector" aria-hidden="true"></div>
+            <div class="flow-step">
+              <div class="flow-step-num">2</div>
+              <div class="flow-step-body">
+                <h3 class="flow-step-title">数据接入与清洗</h3>
+                <p class="flow-step-desc">上传或导入数据集，执行清洗，得到可用于训练的就绪数据。</p>
+                <p class="flow-step-ref">对应截图：<a href="#shot-2">图 2</a></p>
+              </div>
+            </div>
+            <div class="flow-connector" aria-hidden="true"></div>
+            <div class="flow-step">
+              <div class="flow-step-num">3</div>
+              <div class="flow-step-body">
+                <h3 class="flow-step-title">训练执行</h3>
+                <p class="flow-step-desc">创建并监控训练任务，查看日志与进度，完成后模型入库。</p>
+                <p class="flow-step-ref">对应截图：<a href="#shot-3">图 3</a></p>
+              </div>
+            </div>
+            <div class="flow-connector" aria-hidden="true"></div>
+            <div class="flow-step">
+              <div class="flow-step-num">4</div>
+              <div class="flow-step-body">
+                <h3 class="flow-step-title">评估与报告</h3>
+                <p class="flow-step-desc">发起评估，查看指标与 HTML 报告，失败时可追溯原因字段。</p>
+                <p class="flow-step-ref">对应截图：<a href="#shot-4">图 4</a></p>
+              </div>
+            </div>
+          </div>
+
+          <p class="flow-agent-path reveal" style="--reveal-delay: 0.06s">
+            <strong>Agent 路径（一键流水线）</strong>：在画布中确认目标与数据后触发编排，可视化步骤与 Data Agent
+            规划见 <a href="#shot-5">图 5</a>、<a href="#shot-6">图 6</a>；后端由 Coordinator 异步推进，状态写入
+            <code>pipeline_instances</code>，刷新页面仍可恢复进度。
+          </p>
+
+          <h3 class="flow-subtitle reveal" style="--reveal-delay: 0.08s">MCP 编排（系统视角）</h3>
+          <p class="flow-lead reveal" style="--reveal-delay: 0.1s">
+            后端 <strong>Coordinator</strong> 通过 MCP 协议调度 <strong>Data / Training / Evaluation</strong> 等能力：按「清洗 →
+            训练 → 评估」顺序推进，并把当前步骤、关联任务 ID、错误信息持久化，便于观测与排错。
+          </p>
+
+          <div class="role-cards reveal" style="--reveal-delay: 0.12s">
+            <div class="role-card">
+              <div class="role-card-mark" aria-hidden="true">C</div>
+              <div class="role-card-title">Coordinator</div>
+              <p class="role-card-desc">编排步骤、驱动状态机、写入流水线实例。</p>
+            </div>
+            <div class="role-card">
+              <div class="role-card-mark" aria-hidden="true">D</div>
+              <div class="role-card-title">Data Agent</div>
+              <p class="role-card-desc">数据准备与清洗相关工具与策略。</p>
+            </div>
+            <div class="role-card">
+              <div class="role-card-mark" aria-hidden="true">T</div>
+              <div class="role-card-title">Training Agent</div>
+              <p class="role-card-desc">触发训练任务并对接 Python 训练脚本。</p>
+            </div>
+            <div class="role-card">
+              <div class="role-card-mark" aria-hidden="true">E</div>
+              <div class="role-card-title">Evaluation Agent</div>
+              <p class="role-card-desc">评估指标与报告生成。</p>
+            </div>
+          </div>
+
+          <h3 class="flow-subtitle reveal" style="--reveal-delay: 0.06s">双入口，同一数据层</h3>
+          <div class="entry-compare reveal" style="--reveal-delay: 0.08s">
+            <div class="entry-col">
+              <div class="entry-col-title">经典工作台</div>
+              <p class="entry-col-desc">按菜单逐步操作：数据集、训练、评估分模块管理，适合细粒度控制与排错。</p>
+            </div>
+            <div class="entry-col">
+              <div class="entry-col-title">Agent 画布</div>
+              <p class="entry-col-desc">向导式步骤与一键流水线，强调「少点击跑通闭环」，与经典版读写同一批表。</p>
+            </div>
+          </div>
+          <p class="flow-footnote reveal" style="--reveal-delay: 0.1s">
+            两套 UI 共用 <strong>PostgreSQL</strong> 与 <strong>Redis</strong>：切换入口不会丢失已产生的数据集、模型与评估记录。
+          </p>
+        </div>
+      </section>
+
       <section id="screenshots" class="section section-alt">
         <div class="container">
           <div class="section-head reveal">
             <p class="section-kicker">Product tour</p>
             <h2 class="section-title">六张截图，完整走一遍产品</h2>
             <p class="section-desc">
-              以下六张图与首页主视觉一致，覆盖工作台、数据、训练、评估与 Agent
-              配置。替换同名 PNG 即可更新整站展示。
+              下列截图与上方「流程」编号对齐；主视觉与图 1 同为工作台总览。替换
+              <code>docs/images/</code> 下同名 PNG 即可更新整站。
             </p>
           </div>
 
+          <nav class="shot-nav reveal" aria-label="跳转到各张截图">
+            <a class="shot-nav-link" href="#shot-1">图 1</a>
+            <a class="shot-nav-link" href="#shot-2">图 2</a>
+            <a class="shot-nav-link" href="#shot-3">图 3</a>
+            <a class="shot-nav-link" href="#shot-4">图 4</a>
+            <a class="shot-nav-link" href="#shot-5">图 5</a>
+            <a class="shot-nav-link" href="#shot-6">图 6</a>
+          </nav>
+
           <div class="grid grid-2">
-            <div class="shot reveal" style="--reveal-delay: 0s">
-              <div class="shot-label">图 1 · 工作台 / 最近动态</div>
+            <div id="shot-1" class="shot shot-anchor reveal" style="--reveal-delay: 0s">
+              <div class="shot-label">
+                <span class="shot-label-main">图 1 · 工作台 / 最近动态</span>
+                <span class="shot-label-flow">对应流程：① 总览与入口</span>
+              </div>
               <img class="shot-img" src="./images/01-workflow.png" alt="工作台与最近动态" loading="lazy" />
             </div>
-            <div class="shot reveal" style="--reveal-delay: 0.08s">
-              <div class="shot-label">图 2 · 数据集与清洗</div>
+            <div id="shot-2" class="shot shot-anchor reveal" style="--reveal-delay: 0.08s">
+              <div class="shot-label">
+                <span class="shot-label-main">图 2 · 数据集与清洗</span>
+                <span class="shot-label-flow">对应流程：② 数据接入与清洗</span>
+              </div>
               <img class="shot-img" src="./images/02-datasets.png" alt="数据集管理与清洗结果" loading="lazy" />
             </div>
-            <div class="shot reveal" style="--reveal-delay: 0s">
-              <div class="shot-label">图 3 · 训练任务</div>
+            <div id="shot-3" class="shot shot-anchor reveal" style="--reveal-delay: 0s">
+              <div class="shot-label">
+                <span class="shot-label-main">图 3 · 训练任务</span>
+                <span class="shot-label-flow">对应流程：③ 训练执行</span>
+              </div>
               <img class="shot-img" src="./images/03-training-jobs.png" alt="训练任务管理" loading="lazy" />
             </div>
-            <div class="shot reveal" style="--reveal-delay: 0.08s">
-              <div class="shot-label">图 4 · 评估与报告</div>
+            <div id="shot-4" class="shot shot-anchor reveal" style="--reveal-delay: 0.08s">
+              <div class="shot-label">
+                <span class="shot-label-main">图 4 · 评估与报告</span>
+                <span class="shot-label-flow">对应流程：④ 评估与报告</span>
+              </div>
               <img class="shot-img" src="./images/04-evaluation.png" alt="模型评估与报告" loading="lazy" />
             </div>
-            <div class="shot reveal" style="--reveal-delay: 0s">
-              <div class="shot-label">图 5 · Agent 画布</div>
+            <div id="shot-5" class="shot shot-anchor reveal" style="--reveal-delay: 0s">
+              <div class="shot-label">
+                <span class="shot-label-main">图 5 · Agent 画布</span>
+                <span class="shot-label-flow">对应流程：Agent 一键流水线 · 步骤与编排</span>
+              </div>
               <img class="shot-img" src="./images/05-agent-canvas.png" alt="Agent 画布步骤" loading="lazy" />
             </div>
-            <div class="shot reveal" style="--reveal-delay: 0.08s">
-              <div class="shot-label">图 6 · Data Agent 规划</div>
+            <div id="shot-6" class="shot shot-anchor reveal" style="--reveal-delay: 0.08s">
+              <div class="shot-label">
+                <span class="shot-label-main">图 6 · Data Agent 规划</span>
+                <span class="shot-label-flow">对应流程：Agent 路径 · 数据侧规划选项</span>
+              </div>
               <img class="shot-img" src="./images/06-data-agent-plan.png" alt="Data Agent 规划选项" loading="lazy" />
             </div>
           </div>
 
           <div class="tip reveal" style="--reveal-delay: 0.12s">
-            <div class="tip-title">截图命名（与仓库一致）</div>
+            <div class="tip-title">维护与命名</div>
             <div class="tip-body">
-              放入 <code>docs/images/</code>：<code>01-workflow.png</code>、<code>02-datasets.png</code>、
-              <code>03-training-jobs.png</code>、<code>04-evaluation.png</code>、<code>05-agent-canvas.png</code>、
-              <code>06-data-agent-plan.png</code>。
+              将 PNG 放入仓库 <code>docs/images/</code> 并保持下列文件名即可更新本站展示，无需修改 HTML：<br />
+              <code>01-workflow.png</code>、<code>02-datasets.png</code>、<code>03-training-jobs.png</code>、
+              <code>04-evaluation.png</code>、<code>05-agent-canvas.png</code>、<code>06-data-agent-plan.png</code>。
             </div>
           </div>
         </div>
@@ -264,6 +409,7 @@
               rel="noopener noreferrer"
               >源码</a
             >
+            <a class="footer-link" href="#flow">流程</a>
             <a class="footer-link" href="#screenshots">截图</a>
             <a class="footer-link" href="#features">能力</a>
           </div>
@@ -304,6 +450,14 @@
         document.getElementById("theme-toggle")?.addEventListener("click", toggle);
 
         syncIcons(getTheme());
+
+        var topbar = document.getElementById("topbar");
+        function onScrollTopbar() {
+          if (!topbar) return;
+          topbar.classList.toggle("is-scrolled", window.scrollY > 10);
+        }
+        onScrollTopbar();
+        window.addEventListener("scroll", onScrollTopbar, { passive: true });
 
         var revealEls = [].slice.call(document.querySelectorAll(".reveal"));
         var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
