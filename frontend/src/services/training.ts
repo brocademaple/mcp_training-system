@@ -1,5 +1,5 @@
 import api from './api';
-import type { ApiResponse, TrainingJob } from '@/types';
+import type { ApiResponse, RunSpec, TrainingJob } from '@/types';
 
 export const trainingService = {
   // Create training job
@@ -11,7 +11,11 @@ export const trainingService = {
       learning_rate: number;
       batch_size: number;
       epochs: number;
+      base_model?: string;
+      [key: string]: unknown;
     };
+    /** 可选：提供时服务端据此校验并派生 model_type */
+    run_spec?: RunSpec | Record<string, unknown>;
   }): Promise<ApiResponse> => {
     return api.post('/training/jobs', params);
   },

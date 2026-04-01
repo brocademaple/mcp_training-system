@@ -1,30 +1,51 @@
-import React, { useEffect, useState } from 'react';
-import { Card, Row, Col, Statistic, Button, message, Typography } from 'antd';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Card, Row, Col, Statistic, Button, message, Typography, Alert, List, Space } from 'antd';
 import {
   DatabaseOutlined,
   ExperimentOutlined,
   ClockCircleOutlined,
   SyncOutlined,
-  RocketOutlined,
   PlusOutlined,
   BarChartOutlined,
   RightOutlined,
+  RobotOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { datasetService } from '@/services/dataset';
 import { trainingService } from '@/services/training';
+import { evaluationService } from '@/services/evaluation';
 import { syncService } from '@/services/sync';
-import { pipelineService, type PipelineInstance } from '@/services/pipeline';
-import type { Dataset } from '@/types';
-import type { TrainingJob } from '@/types';
+import { modelService } from '@/services/model';
+import type { Dataset, TrainingJob, Evaluation, Model } from '@/types';
+import PageHero from '@/components/PageHero';
 
-type NextStepType = 'upload' | 'train' | 'progress' | 'evaluate' | 'agent' | 'pipelines';
+/** 测试集：usage === 'test'；其余（含未标 usage 的旧数据）视为训练侧 */
+function isTestDataset(d: Dataset): boolean {
+  return d.usage === 'test';
+}
+
+function isTrainingDataset(d: Dataset): boolean {
+  return !isTestDataset(d);
+}
+
+type TaskRecommendation = {
+  id: string;
+  priority: number;
+  title: string;
+  desc: string;
+  primary: string;
+  path: string;
+  icon: React.ReactNode;
+  /** 为 true 时点击走 Agent 切换逻辑（path 为 '/'） */
+  isAgentEntry?: boolean;
+};
 
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [jobs, setJobs] = useState<TrainingJob[]>([]);
-  const [pipelines, setPipelines] = useState<PipelineInstance[]>([]);
+  const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
+  const [models, setModels] = useState<Model[]>([]);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
@@ -33,13 +54,15 @@ const Dashboard: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    const hasPending = jobs.some((j) => j.status === 'queued' || j.status === 'running');
-    if (!hasPending) return;
+    const trainPending = jobs.some((j) => j.status === 'queued' || j.status === 'running');
+    const evalPending = evaluations.some((e) => e.status === 'running');
+    if (!trainPending && !evalPending) return;
     const timer = setInterval(() => {
-      fetchJobs();
+      void fetchJobs();
+      void fetchEvaluations();
     }, 4000);
     return () => clearInterval(timer);
-  }, [jobs.length]);
+  }, [jobs, evaluations]);
 
   const fetchJobs = async () => {
     try {
@@ -48,10 +71,17 @@ const Dashboard: React.FC = () => {
     } catch (_) {}
   };
 
-  const fetchPipelines = async () => {
+  const fetchEvaluations = async () => {
     try {
-      const list = await pipelineService.list();
-      setPipelines(Array.isArray(list) ? list : []);
+      const res = await evaluationService.getEvaluations();
+      if (res.code === 200 && res.data?.evaluations) setEvaluations(res.data.evaluations);
+    } catch (_) {}
+  };
+
+  const fetchModels = async () => {
+    try {
+      const res = await modelService.getModels();
+      if (res.code === 200 && res.data?.models) setModels(res.data.models);
     } catch (_) {}
   };
 
@@ -72,7 +102,8 @@ const Dashboard: React.FC = () => {
   const fetchAll = () => {
     fetchDatasets();
     fetchJobs();
-    fetchPipelines();
+    fetchEvaluations();
+    void fetchModels();
   };
 
   const handleSyncFromDisk = async () => {
@@ -93,73 +124,165 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  const readyCount = datasets.filter((d) => d.status === 'ready').length;
-  const processingCount = datasets.filter((d) => d.status === 'processing').length;
+  const trainReadyCount = datasets.filter((d) => isTrainingDataset(d) && d.status === 'ready').length;
+  const testReadyCount = datasets.filter((d) => isTestDataset(d) && d.status === 'ready').length;
   const hasRunningJob = jobs.some((j) => j.status === 'queued' || j.status === 'running');
+  const hasRunningEval = evaluations.some((e) => e.status === 'running');
   const completedJobs = jobs.filter((j) => j.status === 'completed');
-  const runningJobCount = jobs.filter((j) => j.status === 'queued' || j.status === 'running').length;
+  const trainRunningCount = jobs.filter((j) => j.status === 'running').length;
+  const trainQueuedCount = jobs.filter((j) => j.status === 'queued').length;
   const completedJobCount = completedJobs.length;
 
-  // 推荐下一步（与 docs/PLANNING_2.0.md 第八节工作台定位一致）
-  const getNextStep = (): { type: NextStepType; title: string; desc: string; primary: string; path: string } => {
-    if (readyCount === 0 && processingCount === 0)
-      return {
-        type: 'upload',
-        title: '还没有可训练的数据集',
-        desc: '先上传或从 URL 导入一份数据，系统会自动清洗后用于训练。',
-        primary: '去上传 / 导入数据',
-        path: '/datasets',
-      };
-    if (hasRunningJob)
-      return {
-        type: 'progress',
-        title: '有训练任务正在运行',
-        desc: '在模型训练页可查看实时进度与日志。',
-        primary: '查看训练进度',
-        path: '/training',
-      };
-    if (readyCount > 0 && completedJobs.length === 0)
-      return {
-        type: 'train',
-        title: '数据已就绪，可以开始训练',
-        desc: `当前有 ${readyCount} 个就绪数据集，创建训练任务即可产出模型。`,
-        primary: '创建训练任务',
-        path: '/training',
-      };
-    if (completedJobs.length > 0)
-      return {
-        type: 'evaluate',
-        title: '已有训练完成的模型',
-        desc: '为模型创建评估任务，使用测试集得到准确率、F1 等指标。',
-        primary: '去创建评估',
-        path: '/evaluation',
-      };
-    if (pipelines.length > 0)
-      return {
-        type: 'pipelines',
-        title: '查看流水线历史',
-        desc: 'Agent 版一键流水线的执行记录与状态。',
-        primary: '流水线历史',
-        path: '/pipelines',
-      };
-    return {
-      type: 'agent',
-      title: '试试 Agent 版一键流水线',
-      desc: '选择数据集后由系统自动完成清洗 → 训练 → 评估，无需逐步操作。',
-      primary: '切换到 Agent 版',
-      path: '/',
-    };
-  };
+  const evalRunningCount = evaluations.filter((e) => e.status === 'running').length;
+  const evalCompletedCount = evaluations.filter((e) => e.status === 'completed').length;
+  const evalFailedOrCancelled = evaluations.filter((e) => e.status === 'failed' || e.status === 'cancelled').length;
 
-  const nextStep = getNextStep();
   const goToAgent = () => {
     localStorage.setItem('app-version', 'agent');
     window.location.href = '/';
   };
 
-  // 最近动态：合并数据集、任务、流水线，按时间排序
+  /** 多条可并存：模型列表 + 已完成任务共同判断「是否具备评估条件」；训练/测试集分开展示推荐 */
+  const taskRecommendations = useMemo((): TaskRecommendation[] => {
+    const recs: TaskRecommendation[] = [];
+    const hasRunningJobInner = jobs.some((j) => j.status === 'queued' || j.status === 'running');
+    const hasRunningEvalInner = evaluations.some((e) => e.status === 'running');
+    const completedInner = jobs.filter((j) => j.status === 'completed');
+    const hasUsableModel = models.length > 0 || completedInner.length > 0;
+    const trainReadyList = datasets.filter((d) => isTrainingDataset(d) && d.status === 'ready');
+    const testReadyList = datasets.filter((d) => isTestDataset(d) && d.status === 'ready');
+    const processingInner = datasets.filter((d) => d.status === 'processing').length;
+    const uploadingInner = datasets.filter((d) => d.status === 'uploading').length;
+
+    if (datasets.length === 0) {
+      recs.push({
+        id: 'upload-empty',
+        priority: 0,
+        title: '还没有任何数据集',
+        desc: '先上传或从 URL / 在线源导入数据；CSV 会自动清洗，就绪后即可训练与评估。',
+        primary: '上传 / 导入数据集',
+        path: '/datasets',
+        icon: <DatabaseOutlined style={{ fontSize: 22, color: '#1890ff' }} />,
+      });
+    } else {
+      if (!hasRunningJobInner && trainReadyList.length > 0) {
+        const twoDaysMs = 48 * 3600000;
+        const recentTrain = trainReadyList.filter(
+          (d) => Date.now() - new Date(d.created_at).getTime() < twoDaysMs
+        );
+        recs.push({
+          id: 'train',
+          priority: hasUsableModel && testReadyList.length > 0 ? 3 : 2,
+          title: '就绪训练集可创建训练任务',
+          desc: `当前有 ${trainReadyList.length} 个训练集已清洗完成、可用于训练。${
+            recentTrain.length > 0
+              ? `其中 ${recentTrain.length} 个为近 48 小时内新增或就绪，可优先安排训练。`
+              : ''
+          }`,
+          primary: '创建训练任务',
+          path: '/training',
+          icon: <PlusOutlined style={{ fontSize: 22, color: '#52c41a' }} />,
+        });
+      }
+
+      if (!hasRunningEvalInner && hasUsableModel) {
+        if (testReadyList.length > 0) {
+          recs.push({
+            id: 'evaluate',
+            priority: 1,
+            title: '已有可评估模型，可创建评估任务',
+            desc:
+              models.length > 0
+                ? `库中有 ${models.length} 个模型记录，且有 ${testReadyList.length} 个就绪测试集，创建评估可得到准确率、F1 等指标。`
+                : `检测到已有训练完成的任务，若模型列表为空可先到「模型训练」确认产物或使用「从磁盘恢复」。当前有 ${testReadyList.length} 个就绪测试集可用于评估。`,
+            primary: '创建评估任务',
+            path: '/evaluation',
+            icon: <BarChartOutlined style={{ fontSize: 22, color: '#722ed1' }} />,
+          });
+        } else {
+          recs.push({
+            id: 'need-test-set',
+            priority: 2,
+            title: '已有模型，建议准备测试集',
+            desc: '评估需要测试集：可上传测试数据，或在「数据集」中从训练集按比例划分测试集。',
+            primary: '管理数据集 / 测试集',
+            path: '/datasets',
+            icon: <DatabaseOutlined style={{ fontSize: 22, color: '#1890ff' }} />,
+          });
+        }
+      }
+
+      if (!hasRunningJobInner && testReadyList.length > 0 && !hasUsableModel) {
+        recs.push({
+          id: 'test-only',
+          priority: 2,
+          title: '已有就绪测试集，可先训练再评估',
+          desc: `有 ${testReadyList.length} 个测试集已就绪。完成训练产出模型后，即可创建评估任务。`,
+          primary: '创建训练任务',
+          path: '/training',
+          icon: <ExperimentOutlined style={{ fontSize: 22, color: '#52c41a' }} />,
+        });
+      }
+
+      if (uploadingInner > 0 || processingInner > 0) {
+        const pipeParts: string[] = [];
+        if (uploadingInner > 0) pipeParts.push(`${uploadingInner} 个待清洗`);
+        if (processingInner > 0) pipeParts.push(`${processingInner} 个清洗中`);
+        recs.push({
+          id: 'pipeline',
+          priority: 4,
+          title: '有数据集正在上传或清洗',
+          desc: `${pipeParts.join('，')}。完成后可训练或配置评估。`,
+          primary: '查看数据集进度',
+          path: '/datasets',
+          icon: <ClockCircleOutlined style={{ fontSize: 22, color: '#faad14' }} />,
+        });
+      }
+
+      const idleNoReady =
+        trainReadyList.length === 0 &&
+        testReadyList.length === 0 &&
+        processingInner === 0 &&
+        uploadingInner === 0;
+      if (idleNoReady) {
+        recs.push({
+          id: 'stuck-data',
+          priority: 5,
+          title: '暂无可直接用于训练或评估的就绪数据',
+          desc: '全部数据集可能处于失败或未处理状态，请在「数据集」中查看原因、重试清洗或重新上传。',
+          primary: '去数据集页处理',
+          path: '/datasets',
+          icon: <DatabaseOutlined style={{ fontSize: 22, color: '#999' }} />,
+        });
+      }
+    }
+
+    recs.push({
+      id: 'agent',
+      priority: 10,
+      title: '一键编排：Agent 版',
+      desc: '在 Agent 画布用自然语言描述目标，由系统自动串联数据、训练与评估步骤。',
+      primary: '切换到 Agent 版',
+      path: '/',
+      icon: <RobotOutlined style={{ fontSize: 22, color: '#eb2f96' }} />,
+      isAgentEntry: true,
+    });
+
+    recs.sort((a, b) => a.priority - b.priority);
+    return recs.slice(0, 8);
+  }, [datasets, jobs, evaluations, models]);
+
+  const handleRecNav = (rec: TaskRecommendation) => {
+    if (rec.isAgentEntry) {
+      goToAgent();
+      return;
+    }
+    navigate(rec.path);
+  };
+
+  // 最近动态：合并数据集、训练任务与评估任务，按时间排序
   type ActivityItem = {
-    type: 'dataset' | 'job' | 'pipeline';
+    type: 'dataset' | 'job' | 'evaluation';
     id: number;
     title: string;
     time: string;
@@ -187,95 +310,109 @@ const Dashboard: React.FC = () => {
       status: j.status,
     });
   });
-  pipelines.slice(0, 3).forEach((p) => {
+  evaluations.slice(0, 5).forEach((ev) => {
     activities.push({
-      type: 'pipeline',
-      id: p.id,
-      title: `流水线 #${p.id}`,
-      time: p.created_at || '',
-      path: '/pipelines',
-      status: p.status,
+      type: 'evaluation',
+      id: ev.id,
+      title: ev.name?.trim() || `评估 #${ev.id}`,
+      time: ev.created_at,
+      path: '/evaluation',
+      status: ev.status,
     });
   });
   activities.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
   const recentActivities = activities.slice(0, 8);
 
-  /** 最近动态叙述文案：数据集/流水线用叙述；训练任务在下方单独用「名称 + 小字状态」展示 */
+  /** 最近动态叙述文案：数据集用叙述；训练任务在下方单独用「名称 + 小字状态」展示 */
   const getActivityLabel = (a: ActivityItem): string => {
     if (a.type === 'dataset') return `上传了 ${a.title || '数据集'} 数据集`;
-    if (a.type === 'pipeline') {
-      if (a.status === 'running') return `流水线 #${a.id} 运行中……`;
-      if (a.status === 'completed') return `流水线 #${a.id} 已完成……`;
-      if (a.status === 'failed') return `流水线 #${a.id} 失败`;
-      return `流水线 #${a.id}`;
-    }
     return a.title || '';
   };
 
   /** 训练任务状态文案与颜色（小字展示） */
   const getJobStatusText = (status?: string): { text: string; color: string } => {
-    if (status === 'running' || status === 'queued') return { text: '进行中', color: '#1890ff' };
+    if (status === 'running') return { text: '执行中', color: '#1890ff' };
+    if (status === 'queued') return { text: '排队中', color: '#fa8c16' };
     if (status === 'completed') return { text: '已完成', color: '#52c41a' };
     if (status === 'failed') return { text: '失败', color: '#ff4d4f' };
+    if (status === 'cancelled') return { text: '已取消', color: 'rgba(0,0,0,0.45)' };
     return { text: status || '—', color: 'rgba(0,0,0,0.45)' };
   };
 
-  const handleNav = (path: string) => {
-    if (nextStep.type === 'agent' && path === '/') {
-      goToAgent();
-      return;
-    }
-    navigate(path);
+  const getEvalActivityStatusText = (status?: string): { text: string; color: string } => {
+    if (status === 'running') return { text: '评估中', color: '#1890ff' };
+    if (status === 'completed') return { text: '已完成', color: '#52c41a' };
+    if (status === 'failed') return { text: '失败', color: '#ff4d4f' };
+    if (status === 'cancelled') return { text: '已取消', color: 'rgba(0,0,0,0.45)' };
+    return { text: status || '—', color: 'rgba(0,0,0,0.45)' };
   };
 
   return (
     <div>
-      <div style={{ marginBottom: 24 }}>
-        <Typography.Title level={4} style={{ margin: 0 }}>
-          工作台
-        </Typography.Title>
-        <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-          根据当前数据与任务状态，推荐下一步操作
-        </Typography.Text>
-      </div>
+      <PageHero
+        title="工作台"
+        subtitle="汇总数据集、训练与评估任务，并按当前资源状态列出可并行关注的推荐操作。训练与评估在多任务时会排队，单机建议一次仅跑一项以充分利用算力。"
+      />
 
-      {/* 推荐下一步：主卡片 */}
-      <Card
-        style={{ marginBottom: 24 }}
-        bodyStyle={{ padding: 20 }}
-      >
-        <Row align="middle" gutter={16}>
-          <Col flex="none">
-            {nextStep.type === 'upload' && <DatabaseOutlined style={{ fontSize: 32, color: '#1890ff' }} />}
-            {nextStep.type === 'train' && <PlusOutlined style={{ fontSize: 32, color: '#52c41a' }} />}
-            {nextStep.type === 'progress' && <ClockCircleOutlined style={{ fontSize: 32, color: '#faad14' }} />}
-            {nextStep.type === 'evaluate' && <BarChartOutlined style={{ fontSize: 32, color: '#722ed1' }} />}
-            {nextStep.type === 'pipelines' && <RocketOutlined style={{ fontSize: 32, color: '#13c2c2' }} />}
-            {nextStep.type === 'agent' && <RocketOutlined style={{ fontSize: 32, color: '#eb2f96' }} />}
-          </Col>
-          <Col flex="1">
-            <Typography.Title level={5} style={{ margin: '0 0 4px 0' }}>
-              {nextStep.title}
-            </Typography.Title>
-            <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-              {nextStep.desc}
-            </Typography.Text>
-          </Col>
-          <Col flex="none">
-            <Button
-              type="primary"
-              icon={<RightOutlined />}
-              onClick={() => handleNav(nextStep.path)}
+      {(hasRunningJob || hasRunningEval) && (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message="有训练或评估任务正在占用算力"
+          description={
+            <Space size="middle" wrap>
+              <span>新提交的任务将进入队列；可在对应页面查看进度与排队情况。</span>
+              {hasRunningJob && (
+                <Button type="link" size="small" style={{ padding: 0 }} onClick={() => navigate('/training')}>
+                  查看训练任务
+                </Button>
+              )}
+              {hasRunningEval && (
+                <Button type="link" size="small" style={{ padding: 0 }} onClick={() => navigate('/evaluation')}>
+                  查看评估任务
+                </Button>
+              )}
+            </Space>
+          }
+        />
+      )}
+
+      <Card title="推荐操作" style={{ marginBottom: 24 }} bodyStyle={{ paddingTop: 8 }}>
+        <List
+          itemLayout="horizontal"
+          dataSource={taskRecommendations}
+          renderItem={(rec) => (
+            <List.Item
+              style={{ flexWrap: 'wrap', gap: 12, padding: '12px 0' }}
+              actions={[
+                <Button
+                  key="go"
+                  type={rec.priority <= 3 && rec.id !== 'agent' ? 'primary' : 'default'}
+                  icon={<RightOutlined />}
+                  onClick={() => handleRecNav(rec)}
+                >
+                  {rec.primary}
+                </Button>,
+              ]}
             >
-              {nextStep.primary}
-            </Button>
-          </Col>
-        </Row>
+              <List.Item.Meta
+                avatar={rec.icon}
+                title={<Typography.Text strong>{rec.title}</Typography.Text>}
+                description={
+                  <Typography.Paragraph type="secondary" style={{ marginBottom: 0, fontSize: 13 }}>
+                    {rec.desc}
+                  </Typography.Paragraph>
+                }
+              />
+            </List.Item>
+          )}
+        />
       </Card>
 
-      {/* 资源概览：可点击进入对应模块（flex 等高） */}
-      <Row gutter={16} style={{ marginBottom: 24 }} align="stretch">
-        <Col span={8} style={{ display: 'flex' }}>
+      {/* 资源概览：数据集 / 训练 / 评估；训练与评估区分「执行中」与「排队中」以体现单机队列 */}
+      <Row gutter={[16, 16]} style={{ marginBottom: 24 }} align="stretch">
+        <Col xs={24} md={8} style={{ display: 'flex' }}>
           <Card hoverable onClick={() => navigate('/datasets')} style={{ cursor: 'pointer', flex: 1, display: 'flex', flexDirection: 'column' }} bodyStyle={{ flex: 1 }}>
             <Statistic
               title="数据集"
@@ -283,31 +420,57 @@ const Dashboard: React.FC = () => {
               prefix={<DatabaseOutlined />}
               suffix="个"
             />
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              <span style={{ color: '#52c41a', fontWeight: 500 }}>{readyCount}</span> 个就绪可训练
+            <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', lineHeight: 1.6 }}>
+              <span style={{ color: '#52c41a', fontWeight: 500 }}>{trainReadyCount}</span> 个训练集就绪
+              <br />
+              <span style={{ color: '#722ed1', fontWeight: 500 }}>{testReadyCount}</span> 个测试集就绪
             </Typography.Text>
           </Card>
         </Col>
-        <Col span={8} style={{ display: 'flex' }}>
+        <Col xs={24} md={8} style={{ display: 'flex' }}>
           <Card hoverable onClick={() => navigate('/training')} style={{ cursor: 'pointer', flex: 1, display: 'flex', flexDirection: 'column' }} bodyStyle={{ flex: 1 }}>
             <Statistic
               title="训练任务"
               value={jobs.length}
               prefix={<ExperimentOutlined />}
+              suffix="条"
             />
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              <span style={{ color: '#1890ff', fontWeight: 500 }}>{runningJobCount}</span> 个进行中，
+            <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', lineHeight: 1.6 }}>
+              <span style={{ color: '#1890ff', fontWeight: 500 }}>{trainRunningCount}</span> 个执行中
+              {trainQueuedCount > 0 && (
+                <>
+                  ，<span style={{ color: '#fa8c16', fontWeight: 500 }}>{trainQueuedCount}</span> 个排队中
+                </>
+              )}
+              <br />
               <span style={{ color: '#52c41a', fontWeight: 500 }}>{completedJobCount}</span> 个已完成
+            </Typography.Text>
+            <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 6, lineHeight: 1.45 }}>
+              后台通常一次只跑一条训练；其余保持「排队中」直至当前任务结束。
             </Typography.Text>
           </Card>
         </Col>
-        <Col span={8} style={{ display: 'flex' }}>
-          <Card hoverable onClick={() => navigate('/pipelines')} style={{ cursor: 'pointer', flex: 1, display: 'flex', flexDirection: 'column' }} bodyStyle={{ flex: 1 }}>
+        <Col xs={24} md={8} style={{ display: 'flex' }}>
+          <Card hoverable onClick={() => navigate('/evaluation')} style={{ cursor: 'pointer', flex: 1, display: 'flex', flexDirection: 'column' }} bodyStyle={{ flex: 1 }}>
             <Statistic
-              title="流水线记录"
-              value={pipelines.length}
-              prefix={<RocketOutlined />}
+              title="评估任务"
+              value={evaluations.length}
+              prefix={<BarChartOutlined />}
+              suffix="条"
             />
+            <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', lineHeight: 1.6 }}>
+              <span style={{ color: '#1890ff', fontWeight: 500 }}>{evalRunningCount}</span> 个评估中
+              <br />
+              <span style={{ color: '#52c41a', fontWeight: 500 }}>{evalCompletedCount}</span> 个已完成
+              {evalFailedOrCancelled > 0 && (
+                <>
+                  ，<span style={{ color: '#ff4d4f', fontWeight: 500 }}>{evalFailedOrCancelled}</span> 个失败/取消
+                </>
+              )}
+            </Typography.Text>
+            <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 6, lineHeight: 1.45 }}>
+              评估同样占用算力；连续创建多项将依次执行，建议与训练错开或等待上一项完成。
+            </Typography.Text>
           </Card>
         </Col>
       </Row>
@@ -315,7 +478,7 @@ const Dashboard: React.FC = () => {
       {/* 最近动态 */}
       <Card title="最近动态" loading={loading} style={{ marginBottom: 16 }}>
         {recentActivities.length === 0 ? (
-          <Typography.Text type="secondary">暂无数据，去上传数据集或创建训练任务吧</Typography.Text>
+          <Typography.Text type="secondary">暂无数据，去上传数据集或创建训练 / 评估任务吧</Typography.Text>
         ) : (
           <div style={{ maxHeight: 'min(38vh, 280px)', overflowY: 'auto' }}>
           <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
@@ -335,12 +498,19 @@ const Dashboard: React.FC = () => {
                 <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   {a.type === 'dataset' && <DatabaseOutlined style={{ color: '#1890ff' }} />}
                   {a.type === 'job' && <ExperimentOutlined style={{ color: '#52c41a' }} />}
-                  {a.type === 'pipeline' && <RocketOutlined style={{ color: '#13c2c2' }} />}
+                  {a.type === 'evaluation' && <BarChartOutlined style={{ color: '#722ed1' }} />}
                   {a.type === 'job' ? (
                     <>
                       <span>{a.title || `训练任务 #${a.id}`}</span>
                       <span style={{ fontSize: 12, color: getJobStatusText(a.status).color }}>
                         {getJobStatusText(a.status).text}
+                      </span>
+                    </>
+                  ) : a.type === 'evaluation' ? (
+                    <>
+                      <span>{a.title || `评估 #${a.id}`}</span>
+                      <span style={{ fontSize: 12, color: getEvalActivityStatusText(a.status).color }}>
+                        {getEvalActivityStatusText(a.status).text}
                       </span>
                     </>
                   ) : (

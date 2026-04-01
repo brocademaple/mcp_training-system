@@ -1,102 +1,13 @@
 /* 与经典模式一致：在 app-container 内占满视口高度，主内容区内部滚动 */
-/* 必须显式 row：全局 .app-container > * 会设 flex-direction:column，否则侧栏与主区纵向堆叠、主区高度为 0 呈白屏 */
 .agent-canvas {
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
   height: 100%;
   max-height: 100%;
   overflow: hidden;
   background: #f5f5f5;
-}
-
-/* 左侧边栏：仅主题 + 版本切换，与经典版风格一致，控件固定于左下角 */
-.canvas-sider {
-  width: 72px;
-  flex-shrink: 0;
-  height: 100%;
-  max-height: 100%;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  background: #fff;
-  border-right: 1px solid #f0f0f0;
-  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.06);
-}
-
-.canvas-sider-inner {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 20px;
-  padding: 0 0 24px 0;
-  margin-top: auto;
-  box-sizing: border-box;
-}
-
-.canvas-sider-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  font-size: 20px;
-  color: rgba(0, 0, 0, 0.65);
-  cursor: pointer;
-  border-radius: 8px;
-  transition: background 0.2s, color 0.2s;
-}
-
-.canvas-sider-icon:hover {
-  background: rgba(0, 0, 0, 0.04);
-  color: #1890ff;
-}
-
-.canvas-sider-theme-wrap {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-}
-
-.canvas-sider-version-wrap {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-}
-
-.canvas-sider-version-switch {
-  margin: 0;
-}
-
-.canvas-sider-version-switch.ant-switch {
-  min-height: 24px;
-  height: 24px;
-}
-
-.canvas-sider-version-switch.ant-switch .ant-switch-handle {
-  top: 2px;
-}
-
-.canvas-sider-version-switch.ant-switch.ant-switch-sm .ant-switch-inner {
-  font-size: 11px;
-  line-height: 20px;
-}
-
-.canvas-sider-hint {
-  font-size: 11px;
-  color: rgba(0, 0, 0, 0.45);
-  text-align: center;
-  line-height: 1.2;
-}
-
-.canvas-sider-version-hint {
-  font-size: 11px;
-  color: rgba(0, 0, 0, 0.45);
-  text-align: center;
-  line-height: 1.2;
 }
 
 .canvas-main {
@@ -113,7 +24,63 @@
   margin-bottom: 32px;
   display: flex;
   justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.canvas-header-actions {
+  display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex: 0 1 auto;
+  min-width: 0;
+  justify-content: flex-end;
+}
+
+/* 主入口按钮：写清三种流程，略缩字号以免顶栏过宽 */
+.canvas-header-start-flow-btn.ant-btn-lg {
+  font-size: 13px;
+  line-height: 1.35;
+  padding-inline: 14px;
+  height: auto;
+  min-height: 40px;
+  white-space: normal;
+  text-align: center;
+  max-width: min(320px, 92vw);
+}
+
+.canvas-header-flow-nav {
+  flex: 0 1 auto;
+  min-width: 0;
+  justify-content: flex-end;
+}
+
+.canvas-header-classic-link {
+  padding: 0 8px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.canvas-header-theme-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  font-size: 18px;
+  color: rgba(0, 0, 0, 0.65);
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+
+.canvas-header-theme-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: #1890ff;
 }
 
 /* 切换到经典版按钮：与经典模式默认按钮风格一致 */
@@ -136,6 +103,12 @@
   display: flex;
   align-items: center;
   color: rgba(0, 0, 0, 0.88);
+  min-width: 0;
+  flex: 1 1 240px;
+}
+
+.canvas-title > div:last-child {
+  min-width: 0;
 }
 
 .canvas-title h1 {
@@ -151,15 +124,183 @@
   font-size: 14px;
 }
 
-/* 入口区：引导 + 任务列表/零状态 + CTA，与步骤区动效衔接；收窄宽度留白 */
+/* 入口区：三栏看板（数据集 / 训练 / 评估）+ 与步骤区动效衔接 */
 .canvas-entry-block {
-  max-width: 900px;
+  width: 100%;
+  max-width: 1180px;
   margin: 0 auto 24px;
+  box-sizing: border-box;
   background: #fff;
   border: 1px solid #f0f0f0;
   border-radius: 8px;
-  padding: 24px 28px;
+  padding: 24px clamp(16px, 3vw, 28px);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  min-width: 0;
+}
+
+.canvas-entry-inner {
+  margin: 0;
+  min-width: 0;
+  width: 100%;
+}
+
+.canvas-entry-grid {
+  display: grid;
+  /* minmax(0,1fr) 避免列被内容撑开导致整行溢出视口（高缩放 / 窄屏） */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  align-items: stretch;
+  min-width: 0;
+  width: 100%;
+}
+
+@media (max-width: 1100px) {
+  .canvas-entry-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .canvas-entry-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.canvas-entry-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  background: #fafafa;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+}
+
+.canvas-entry-panel-shut {
+  padding: 12px 14px;
+}
+
+.canvas-entry-panel-expanded {
+  padding: 14px 16px 16px;
+}
+
+.canvas-entry-panel-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 36px;
+  min-width: 0;
+}
+
+.canvas-entry-panel-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.canvas-entry-panel-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.canvas-entry-panel-count {
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.55);
+  text-align: right;
+  white-space: nowrap;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.canvas-entry-panel-toggle {
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.canvas-entry-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.canvas-entry-panel-icon {
+  font-size: 18px;
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.canvas-entry-panel-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.88);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-entry-panel-hint {
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.55);
+  margin: 0 0 12px 0;
+  line-height: 1.5;
+}
+
+.canvas-entry-panel-list {
+  flex: 1;
+  min-height: 120px;
+  max-height: 220px;
+  min-width: 0;
+  margin-bottom: 12px !important;
+}
+
+.canvas-entry-panel-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: auto;
+  min-width: 0;
+}
+
+.canvas-entry-panel-actions .ant-btn-link {
+  white-space: normal;
+  height: auto;
+  line-height: 1.45;
+  padding-left: 0;
+  padding-right: 0;
+  text-align: center;
+}
+
+.canvas-entry-panel-actions .canvas-entry-cta,
+.canvas-entry-panel-actions .ant-btn-lg {
+  width: 100%;
+  min-width: 0;
+}
+
+.canvas-entry-empty-row {
+  justify-content: center;
+}
+
+.canvas-entry-empty-row .canvas-entry-job-name {
+  text-align: center;
+  color: rgba(0, 0, 0, 0.45);
+  white-space: normal;
+}
+
+.canvas-entry-collapsed-lists {
+  margin-top: 12px;
+}
+
+.canvas-entry-collapsed-col-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.55);
+  margin-bottom: 8px;
 }
 
 .canvas-entry-block-collapsed {
@@ -190,10 +331,6 @@
 .canvas-entry-job-list-collapsed {
   margin-top: 12px;
   max-height: 200px;
-}
-
-.canvas-entry-inner {
-  margin: 0;
 }
 
 .canvas-entry-hint {
@@ -237,6 +374,8 @@
   padding: 0;
   margin: 0 0 16px 0;
   max-height: 240px;
+  min-width: 0;
+  overflow-x: hidden;
   overflow-y: auto;
   border: 1px solid #f0f0f0;
   border-radius: 6px;
@@ -266,20 +405,35 @@
 
 .canvas-entry-job-status {
   flex-shrink: 0;
-  margin: 0 12px;
+  margin: 0 8px;
   font-size: 12px;
+  max-width: 4.5em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .canvas-entry-job-time {
-  flex-shrink: 0;
-  font-size: 12px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 11em;
+  font-size: 11px;
   color: rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
 }
 
 .canvas-entry-cta {
-  min-width: 200px;
-  height: 44px;
-  font-size: 15px;
+  min-width: 0;
+  width: 100%;
+  height: auto;
+  min-height: 44px;
+  font-size: 13px;
+  line-height: 1.4;
+  white-space: normal;
+  padding-block: 10px;
 }
 
 .canvas-entry-cta-prominent {
@@ -300,8 +454,12 @@
 
 /* 步骤区：左右滑入动效衔接，不上下滑动页面 */
 .canvas-steps-reveal {
-  max-width: 900px;
+  width: 100%;
+  max-width: 1180px;
   margin: 0 auto;
+  box-sizing: border-box;
+  padding: 0 clamp(0px, 2vw, 8px);
+  min-width: 0;
   overflow: hidden;
   opacity: 0;
   transform: translateX(24px);
@@ -316,8 +474,10 @@
 .canvas-setup {
   min-height: 50vh;
   width: 100%;
-  max-width: 900px;
+  max-width: 1180px;
+  min-width: 0;
   margin: 0 auto;
+  box-sizing: border-box;
 }
 
 .canvas-setup.canvas-flow {
@@ -576,6 +736,57 @@
   animation: fadeIn 0.5s;
 }
 
+.canvas-board .ant-card-head-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.canvas-board .ant-descriptions-item-label {
+  color: rgba(0, 0, 0, 0.58);
+}
+
+.canvas-board .ant-alert {
+  border-radius: 8px;
+}
+
+/* Flat premium style */
+.canvas-flat-board .ant-card {
+  border-radius: 10px;
+  border: 1px solid #eceff3;
+  box-shadow: none;
+}
+
+.canvas-flat-board .ant-input,
+.canvas-flat-board .ant-input-number,
+.canvas-flat-board .ant-select-selector,
+.canvas-flat-board .ant-input-affix-wrapper,
+.canvas-flat-board .ant-input-number-input-wrap {
+  border-radius: 8px !important;
+  box-shadow: none !important;
+}
+
+.canvas-flat-board .ant-input:focus,
+.canvas-flat-board .ant-input-focused,
+.canvas-flat-board .ant-select-focused .ant-select-selector,
+.canvas-flat-board .ant-input-affix-wrapper-focused {
+  border-color: #1677ff !important;
+  box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.08) !important;
+}
+
+.flat-option-tag {
+  border-radius: 14px;
+  padding: 3px 10px;
+  font-size: 12px;
+}
+
+.planner-preview-flat .ant-descriptions-item-label {
+  width: 140px;
+}
+
+.compact-run-card .ant-card-body {
+  padding-top: 6px;
+}
+
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(20px); }
   to { opacity: 1; transform: translateY(0); }
@@ -625,6 +836,44 @@
 .agent-canvas[data-theme='dark'] .canvas-entry-collapsed-text {
   color: rgba(255, 255, 255, 0.65);
 }
+.agent-canvas[data-theme='dark'] .canvas-header-classic-link {
+  color: rgba(255, 255, 255, 0.45);
+}
+.agent-canvas[data-theme='dark'] .canvas-header-classic-link:hover {
+  color: #69b1ff;
+}
+.agent-canvas[data-theme='dark'] .canvas-header-theme-btn {
+  color: rgba(255, 255, 255, 0.65);
+}
+.agent-canvas[data-theme='dark'] .canvas-header-theme-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #69b1ff;
+}
+.agent-canvas[data-theme='dark'] .canvas-entry-panel {
+  background: #141414;
+  border-color: #434343;
+}
+.agent-canvas[data-theme='dark'] .canvas-entry-panel-icon {
+  color: rgba(255, 255, 255, 0.55);
+}
+.agent-canvas[data-theme='dark'] .canvas-entry-panel-title {
+  color: rgba(255, 255, 255, 0.92);
+}
+.agent-canvas[data-theme='dark'] .canvas-entry-panel-count {
+  color: rgba(255, 255, 255, 0.55);
+}
+.agent-canvas[data-theme='dark'] .canvas-entry-panel-toggle {
+  color: rgba(255, 255, 255, 0.45);
+}
+.agent-canvas[data-theme='dark'] .canvas-entry-panel-hint {
+  color: rgba(255, 255, 255, 0.55);
+}
+.agent-canvas[data-theme='dark'] .canvas-entry-collapsed-col-title {
+  color: rgba(255, 255, 255, 0.55);
+}
+.agent-canvas[data-theme='dark'] .canvas-entry-empty-row .canvas-entry-job-name {
+  color: rgba(255, 255, 255, 0.45);
+}
 .agent-canvas[data-theme='dark'] .canvas-back-to-classic-btn {
   background: #1f1f1f !important;
   color: rgba(255, 255, 255, 0.85) !important;
@@ -672,31 +921,6 @@
   color: rgba(255, 255, 255, 0.4);
 }
 
-/* 深色模式：左侧边栏 */
-.agent-canvas[data-theme='dark'] .canvas-sider {
-  background: #1f1f1f;
-  border-color: #434343;
-  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.2);
-}
-
-.agent-canvas[data-theme='dark'] .canvas-sider-icon {
-  color: rgba(255, 255, 255, 0.65);
-}
-
-.agent-canvas[data-theme='dark'] .canvas-sider-icon:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #1890ff;
-}
-
-.agent-canvas[data-theme='dark'] .canvas-sider-hint,
-.agent-canvas[data-theme='dark'] .canvas-sider-version-hint {
-  color: rgba(255, 255, 255, 0.45);
-}
-
-.agent-canvas[data-theme='dark'] .canvas-sider-version-switch.ant-switch:not(.ant-switch-checked) .ant-switch-inner {
-  color: rgba(255, 255, 255, 0.85);
-}
-
 .canvas-goal-block {
   border: 1px solid #f0f0f0;
   border-radius: 8px;
@@ -715,6 +939,155 @@
   display: flex;
   gap: 8px;
   align-items: center;
+}
+
+.canvas-flow-pick {
+  max-width: 920px;
+  margin: 0 auto;
+}
+
+.canvas-flow-pick-card {
+  margin-bottom: 24px;
+}
+
+.canvas-agent-flow-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.canvas-agent-flow-option {
+  display: block;
+  text-align: left;
+  padding: 14px 14px 12px;
+  border: 1px solid #d9d9d9;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+  font: inherit;
+  color: inherit;
+}
+
+.canvas-agent-flow-option:hover {
+  border-color: #1890ff;
+  box-shadow: 0 2px 8px rgba(24, 144, 255, 0.12);
+}
+
+.canvas-agent-flow-option-selected {
+  border-color: #1890ff;
+  background: #e6f4ff;
+  box-shadow: 0 0 0 1px rgba(24, 144, 255, 0.35);
+}
+
+.canvas-agent-flow-option-title {
+  font-weight: 600;
+  font-size: 15px;
+  margin-bottom: 4px;
+}
+
+.canvas-agent-flow-option-sub {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.55);
+  margin-bottom: 8px;
+}
+
+.canvas-agent-flow-option-agents {
+  font-size: 12px;
+  color: #1890ff;
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+
+.canvas-agent-flow-option-detail {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.65);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.canvas-flow-pick-actions {
+  display: flex;
+  justify-content: center;
+  padding-top: 4px;
+}
+
+.canvas-flow-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  background: rgba(24, 144, 255, 0.06);
+  border: 1px solid rgba(24, 144, 255, 0.25);
+  border-radius: 8px;
+}
+
+.canvas-flow-banner-agents {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.65);
+  flex: 1;
+  min-width: 160px;
+}
+
+.agent-canvas[data-theme='dark'] .canvas-agent-flow-option {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: #434343;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.agent-canvas[data-theme='dark'] .canvas-agent-flow-option:hover {
+  border-color: #177ddc;
+}
+
+.agent-canvas[data-theme='dark'] .canvas-agent-flow-option-selected {
+  background: rgba(24, 144, 255, 0.15);
+  border-color: #177ddc;
+}
+
+.agent-canvas[data-theme='dark'] .canvas-agent-flow-option-sub,
+.agent-canvas[data-theme='dark'] .canvas-agent-flow-option-detail {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.agent-canvas[data-theme='dark'] .canvas-flow-banner {
+  background: rgba(24, 144, 255, 0.12);
+  border-color: rgba(24, 144, 255, 0.35);
+}
+
+.agent-canvas[data-theme='dark'] .canvas-flow-banner-agents {
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.canvas-step1-parallel {
+  margin-bottom: 4px;
+}
+
+.canvas-path-card {
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  padding: 14px;
+  background: #fafafa;
+  height: 100%;
+  min-height: 280px;
+  box-sizing: border-box;
+}
+
+.canvas-path-card-manual {
+  background: #f6fffb;
+  border-color: #d9f7be;
+}
+
+.canvas-path-card-label {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: rgba(0, 0, 0, 0.45);
+  text-transform: uppercase;
+  margin-bottom: 6px;
 }
 
 .canvas-plan-card {
@@ -748,7 +1121,156 @@
   border-color: #434343;
 }
 
+.agent-canvas[data-theme='dark'] .canvas-path-card {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: #434343;
+}
+
+.agent-canvas[data-theme='dark'] .canvas-path-card-manual {
+  background: rgba(82, 196, 26, 0.12);
+  border-color: rgba(82, 196, 26, 0.35);
+}
+
+.agent-canvas[data-theme='dark'] .canvas-path-card-label {
+  color: rgba(255, 255, 255, 0.45);
+}
+
 .agent-canvas[data-theme='dark'] .canvas-plan-card {
   background: rgba(24, 144, 255, 0.12);
   border-color: rgba(24, 144, 255, 0.35);
+}
+
+/* Agent 内嵌「数据与上传」弹窗：视觉与经典版整页区分 */
+.agent-dataset-hub-modal .ant-modal-content {
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.12);
+}
+
+.agent-dataset-hub-modal .ant-modal-body {
+  background: linear-gradient(180deg, rgba(24, 144, 255, 0.06) 0%, transparent 100px);
+}
+
+.dataset-management-root--agent-modal .dataset-management-card--agent-modal {
+  border: 1px solid rgba(24, 144, 255, 0.22);
+  box-shadow: none;
+}
+
+.canvas-entry-detail-modal .ant-modal-content {
+  border-radius: 12px;
+}
+
+/* Prototype-like conversational layout */
+.agent-proto-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.agent-proto-side-card.ant-card,
+.agent-proto-main-card.ant-card {
+  border-radius: 12px;
+  border: 1px solid #e8edf3;
+  box-shadow: none;
+  background: #fcfdff;
+}
+
+.agent-proto-session-item {
+  cursor: pointer;
+  padding: 12px 12px 10px 14px;
+  border: 1px solid #edf1f5;
+  border-radius: 10px;
+  margin-bottom: 10px;
+  background: #ffffff;
+  transition: all 0.2s ease;
+  overflow: hidden;
+  min-height: 74px;
+}
+
+.agent-proto-session-item:hover {
+  border-color: #b7d7ff;
+  background: #f4f9ff;
+}
+
+.agent-proto-session-item-active {
+  border-color: #91caff;
+  background: #e6f4ff;
+}
+
+.agent-proto-session-accent {
+  position: absolute;
+  left: -10px;
+  top: -10px;
+  bottom: -10px;
+  width: 4px;
+  border-radius: 4px;
+}
+
+.agent-proto-session-delete {
+  position: absolute !important;
+  right: 2px;
+  top: -2px;
+  color: rgba(0, 0, 0, 0.38);
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+}
+
+.agent-proto-session-delete:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: rgba(0, 0, 0, 0.58);
+}
+
+.agent-proto-progress-track {
+  height: 6px;
+  background: #eef2f7;
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 6px;
+}
+
+.agent-proto-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #69b1ff 0%, #1677ff 100%);
+}
+
+.agent-proto-chat-stream {
+  min-height: 420px;
+  max-height: 520px;
+  overflow-y: auto;
+  margin-bottom: 12px;
+  padding-right: 4px;
+}
+
+.agent-proto-chat-row {
+  border: none !important;
+  padding: 8px 0 !important;
+  display: flex !important;
+  width: 100%;
+}
+
+.agent-proto-chat-row-agent {
+  justify-content: flex-start !important;
+}
+
+.agent-proto-chat-row-user {
+  justify-content: flex-end !important;
+}
+
+.agent-proto-bubble {
+  width: fit-content;
+  max-width: 78%;
+  border: 1px solid #edf1f5;
+  border-radius: 12px;
+  padding: 10px;
+}
+
+.agent-proto-bubble-agent {
+  background: #f8fafc;
+}
+
+.agent-proto-bubble-user {
+  background: #eaf4ff;
+  border-color: #cfe6ff;
 }

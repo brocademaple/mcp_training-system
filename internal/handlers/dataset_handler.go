@@ -438,8 +438,9 @@ func (h *DatasetHandler) SplitDataset(c *gin.Context) {
 		columnCount = int(dataset.ColumnCount.Int64)
 	}
 	_, _ = h.db.Exec(`
-		UPDATE datasets SET cleaned_file_path = $1, row_count = $2, column_count = $3, status = 'ready', updated_at = NOW() WHERE id = $4
-	`, result.TestPath, result.TestCount, columnCount, testDS.ID)
+		UPDATE datasets SET cleaned_file_path = $1, row_count = $2, column_count = $3, status = 'ready',
+			derived_from_dataset_id = $5, updated_at = NOW() WHERE id = $4
+	`, result.TestPath, result.TestCount, columnCount, testDS.ID, datasetID)
 
 	c.JSON(200, gin.H{
 		"code":    200,

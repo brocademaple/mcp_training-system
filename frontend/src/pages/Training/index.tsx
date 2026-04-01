@@ -17,7 +17,12 @@ import {
   Popconfirm,
   Tabs,
   Typography,
+  Collapse,
+  Checkbox,
+  Popover,
+  Divider,
 } from 'antd';
+import type { ColumnsType } from 'antd/es/table';
 import {
   PlusOutlined,
   ReloadOutlined,
@@ -28,13 +33,16 @@ import {
   StopOutlined,
   DownloadOutlined,
   FolderOpenOutlined,
+  SettingOutlined,
 } from '@ant-design/icons';
 import { trainingService } from '@/services/training';
+import { registryService, type RegistryBundle } from '@/services/registry';
 import { datasetService } from '@/services/dataset';
 import { modelService } from '@/services/model';
 import { BASE_MODELS_TEXT, DEFAULT_BASE_MODEL } from '@/constants/baseModels';
 import { useNavigate } from 'react-router-dom';
 import type { TrainingJob, Dataset, Model } from '@/types';
+import PageHero from '@/components/PageHero';
 
 type StepStatus = 'wait' | 'process' | 'finish' | 'error';
 
@@ -101,6 +109,70 @@ function buildLaymanTrainingContext(
   return { title: '训练上下文（通俗说明）', bullets };
 }
 
+/** 训练任务表可配置列（操作列始终显示，不参与勾选） */
+const JOB_TABLE_COL_STORAGE_KEY = 'mcp-training-job-table-columns-v1';
+
+type TrainingJobColumnKey =
+  | 'index'
+  | 'name'
+  | 'model_type'
+  | 'model'
+  | 'dataset_id'
+  | 'status'
+  | 'progress'
+  | 'progress_detail'
+  | 'created_at'
+  | 'actions';
+
+const TRAINING_JOB_COLUMN_LABELS: Record<TrainingJobColumnKey, string> = {
+  index: '序号',
+  name: '训练名称',
+  model_type: '模型类型',
+  model: '模型（产出物）',
+  dataset_id: '数据集',
+  status: '状态',
+  progress: '进度',
+  progress_detail: '进度详情',
+  created_at: '创建时间',
+  actions: '操作',
+};
+
+const TRAINING_JOB_COLUMNS_TOGGLEABLE: TrainingJobColumnKey[] = [
+  'index',
+  'name',
+  'model_type',
+  'model',
+  'dataset_id',
+  'status',
+  'progress',
+  'progress_detail',
+  'created_at',
+];
+
+function defaultTrainingJobColumnVisibility(): Record<TrainingJobColumnKey, boolean> {
+  const v = {} as Record<TrainingJobColumnKey, boolean>;
+  TRAINING_JOB_COLUMNS_TOGGLEABLE.forEach((k) => {
+    v[k] = true;
+  });
+  v.actions = true;
+  return v;
+}
+
+function loadTrainingJobColumnVisibility(): Record<TrainingJobColumnKey, boolean> {
+  const base = defaultTrainingJobColumnVisibility();
+  try {
+    const raw = localStorage.getItem(JOB_TABLE_COL_STORAGE_KEY);
+    if (!raw) return base;
+    const parsed = JSON.parse(raw) as Record<string, boolean>;
+    TRAINING_JOB_COLUMNS_TOGGLEABLE.forEach((k) => {
+      if (typeof parsed[k] === 'boolean') base[k] = parsed[k];
+    });
+  } catch {
+    /* ignore */
+  }
+  return base;
+}
+
 const TrainingManagement: React.FC = () => {
   const navigate = useNavigate();
   const [jobs, setJobs] = useState<TrainingJob[]>([]);
@@ -114,11 +186,27 @@ const TrainingManagement: React.FC = () => {
   const logContainerRef = useRef<HTMLDivElement>(null);
   const [modelsRecovering, setModelsRecovering] = useState(false);
   const [form] = Form.useForm();
+  const taskFamilyWatch = Form.useWatch('task_family', form);
+  const useRunspecWatch = Form.useWatch('use_runspec', form);
   const wsRefs = useRef<Record<number, WebSocket>>({});
+  const [regBundle, setRegBundle] = useState<RegistryBundle | null>(null);
+  const [jobColumnVisibility, setJobColumnVisibility] = useState(loadTrainingJobColumnVisibility);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(JOB_TABLE_COL_STORAGE_KEY, JSON.stringify(jobColumnVisibility));
+    } catch {
+      /* ignore */
+    }
+  }, [jobColumnVisibility]);
 
   useEffect(() => {
     fetchDatasets();
     fetchJobs();
+  }, []);
+
+  useEffect(() => {
+    registryService.getBundle().then(setRegBundle).catch(() => setRegBundle(null));
   }, []);
 
   // 即时更新：存在「排队中」或「训练中」时每 4 秒静默拉取一次列表，便于看到状态变为失败/完成
@@ -275,16 +363,45 @@ const TrainingManagement: React.FC = () => {
 
   const handleCreateJob = async (values: any) => {
     try {
+      const hyperparams: Record<string, unknown> = {
+        base_model: values.base_model ?? DEFAULT_BASE_MODEL,
+        learning_rate: values.learning_rate,
+        batch_size: values.batch_size,
+        epochs: values.epochs,
+      };
+      let runSpec: Record<string, unknown> | undefined;
+      if (values.use_runspec && regBundle) {
+        runSpec = {
+          project_name: values.name?.trim() || 'training-job',
+          base_model: String(values.base_model ?? DEFAULT_BASE_MODEL),
+          semantic_task: {
+            family: values.task_family,
+            name: values.task_name,
+          },
+          training_method: {
+            name: values.training_method,
+            params: {},
+          },
+          domain: { name: values.domain_name },
+          metrics: [],
+          runtime: {
+            epochs: values.epochs,
+            batch_size: values.batch_size,
+            learning_rate: values.learning_rate,
+          },
+        };
+      }
       await trainingService.createJob({
         name: values.name?.trim() || undefined,
         dataset_id: values.dataset_id,
         model_type: values.model_type,
-        hyperparams: {
-          base_model: values.base_model ?? DEFAULT_BASE_MODEL,
-          learning_rate: values.learning_rate,
-          batch_size: values.batch_size,
-          epochs: values.epochs,
+        hyperparams: hyperparams as {
+          learning_rate: number;
+          batch_size: number;
+          epochs: number;
+          base_model?: string;
         },
+        run_spec: runSpec,
       });
       message.success('训练任务创建成功');
       setCreateModalVisible(false);
@@ -622,7 +739,7 @@ const TrainingManagement: React.FC = () => {
       dataIndex: 'progress',
       key: 'progress',
       width: 140,
-      render: (progress: number, record: TrainingJob) => (
+      render: (progress: number) => (
         <Progress percent={progress} size="small" />
       ),
     },
@@ -672,7 +789,7 @@ const TrainingManagement: React.FC = () => {
       title: '操作',
       key: 'actions',
       width: 160,
-      fixed: 'right',
+      fixed: 'right' as const,
       render: (_: unknown, record: TrainingJob) => {
         const canRestart = ['failed', 'completed', 'cancelled'].includes(record.status);
         const isRunning = record.status === 'running';
@@ -784,6 +901,45 @@ const TrainingManagement: React.FC = () => {
     },
   ];
 
+  const displayedJobColumns = columns.filter((col) => {
+    const k = col.key as TrainingJobColumnKey;
+    if (k === 'actions') return true;
+    if (!(k in TRAINING_JOB_COLUMN_LABELS)) return true;
+    return jobColumnVisibility[k] !== false;
+  }) as ColumnsType<TrainingJob>;
+
+  const jobColumnSettingContent = (
+    <div style={{ width: 240 }}>
+      <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 10 }}>
+        勾选要显示的列；「操作」始终显示。设置会保存在本机浏览器。
+      </Typography.Text>
+      <Checkbox.Group
+        style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
+        value={TRAINING_JOB_COLUMNS_TOGGLEABLE.filter((k) => jobColumnVisibility[k])}
+        onChange={(checkedValues) => {
+          const set = new Set(checkedValues as TrainingJobColumnKey[]);
+          setJobColumnVisibility((prev) => {
+            const next = { ...prev, actions: true };
+            TRAINING_JOB_COLUMNS_TOGGLEABLE.forEach((k) => {
+              next[k] = set.has(k);
+            });
+            return next;
+          });
+        }}
+      >
+        {TRAINING_JOB_COLUMNS_TOGGLEABLE.map((k) => (
+          <Checkbox key={k} value={k}>
+            {TRAINING_JOB_COLUMN_LABELS[k]}
+          </Checkbox>
+        ))}
+      </Checkbox.Group>
+      <Divider style={{ margin: '12px 0 8px' }} />
+      <Button type="link" size="small" style={{ padding: 0 }} onClick={() => setJobColumnVisibility(defaultTrainingJobColumnVisibility())}>
+        恢复默认（全部显示）
+      </Button>
+    </div>
+  );
+
   const modelColumns = [
     {
       title: 'ID',
@@ -887,10 +1043,23 @@ const TrainingManagement: React.FC = () => {
 
   return (
     <div>
+      <PageHero
+        title="训练任务"
+        subtitle="统一管理训练任务与模型产物，支持任务创建、状态跟踪与模型下载。"
+      />
       <Tabs activeKey={activeTab} onChange={(k) => setActiveTab(k as 'jobs' | 'models')}>
         <Tabs.TabPane tab="训练任务" key="jobs">
           <Card
-            title="训练任务管理"
+            title={
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <span>训练任务管理</span>
+                <Popover content={jobColumnSettingContent} title="列表列显示" trigger="click" placement="bottomLeft">
+                  <Button icon={<SettingOutlined />} size="small">
+                    列设置
+                  </Button>
+                </Popover>
+              </span>
+            }
             extra={
               <div>
                 <Button
@@ -914,7 +1083,7 @@ const TrainingManagement: React.FC = () => {
             }
           >
             <Table
-              columns={columns}
+              columns={displayedJobColumns}
               dataSource={jobs}
               rowKey="id"
               loading={loading}
@@ -1090,7 +1259,7 @@ const TrainingManagement: React.FC = () => {
                       wordBreak: 'break-all',
                     }}
                   >
-                    {job.log_lines.map((line, i) => (
+                    {(job.log_lines ?? []).map((line, i) => (
                       <div key={i}>{line}</div>
                     ))}
                   </div>
@@ -1136,6 +1305,11 @@ const TrainingManagement: React.FC = () => {
             learning_rate: 0.00002,
             batch_size: 16,
             epochs: 3,
+            use_runspec: false,
+            task_family: 'Classification',
+            task_name: 'SentimentClassification',
+            training_method: 'SFT',
+            domain_name: 'General',
           }}
         >
           <Form.Item
@@ -1174,9 +1348,63 @@ const TrainingManagement: React.FC = () => {
             rules={[{ required: true, message: '请选择模型类型' }]}
           >
             <Select>
-              <Select.Option value="text_classification">文本分类</Select.Option>
+              <Select.Option value="text_classification">文本分类（BERT 分类头）</Select.Option>
+              <Select.Option value="sft_finetune">SFT + LoRA（生成/指令微调）</Select.Option>
             </Select>
           </Form.Item>
+
+          <Form.Item name="use_runspec" valuePropName="checked" label="使用 RunSpec（语义任务 + 方法 + 领域）">
+            <Checkbox>启用后由后端按注册表校验并派生实际训练路由</Checkbox>
+          </Form.Item>
+
+          {useRunspecWatch && regBundle ? (
+            <Collapse
+              items={[
+                {
+                  key: 'rs',
+                  label: '语义任务与训练方法',
+                  children: (
+                    <>
+                      <Form.Item name="task_family" label="一级任务族" rules={[{ required: true }]}>
+                        <Select
+                          options={regBundle.task_registry.families.map((f) => ({
+                            label: `${f.label_zh} (${f.id})`,
+                            value: f.id,
+                          }))}
+                        />
+                      </Form.Item>
+                      <Form.Item name="task_name" label="二级子任务" rules={[{ required: true }]}>
+                        <Select
+                          options={(regBundle.task_registry.families.find((x) => x.id === taskFamilyWatch)?.tasks ?? []).map(
+                            (t) => ({
+                              label: t.id,
+                              value: t.id,
+                            })
+                          )}
+                        />
+                      </Form.Item>
+                      <Form.Item name="training_method" label="训练方法" rules={[{ required: true }]}>
+                        <Select
+                          options={regBundle.method_registry.methods.map((m) => ({
+                            label: `${m.label_zh} (${m.id})`,
+                            value: m.id,
+                          }))}
+                        />
+                      </Form.Item>
+                      <Form.Item name="domain_name" label="领域" rules={[{ required: true }]}>
+                        <Select
+                          options={regBundle.domain_registry.domains.map((d) => ({
+                            label: `${d.label_zh} (${d.id})`,
+                            value: d.id,
+                          }))}
+                        />
+                      </Form.Item>
+                    </>
+                  ),
+                },
+              ]}
+            />
+          ) : null}
 
           <Form.Item
             name="base_model"

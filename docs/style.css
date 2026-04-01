@@ -157,6 +157,10 @@ body {
   letter-spacing: 0.02em;
 }
 
+.brand-mark .brand-svg {
+  display: block;
+}
+
 .brand-title {
   font-weight: 800;
   font-size: 15px;
@@ -421,6 +425,7 @@ body {
 }
 
 .hero-preview {
+  position: relative;
   margin-top: 14px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
@@ -428,6 +433,14 @@ body {
   overflow: hidden;
   background: var(--surface-2);
   box-shadow: var(--shadow-shot-light);
+}
+
+.hero-preview::before {
+  content: "";
+  display: block;
+  height: 3px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2), var(--cyan));
+  opacity: 0.55;
 }
 
 [data-theme="light"] .hero-preview {
@@ -742,6 +755,141 @@ code {
   line-height: 1.65;
 }
 
+/* —— 形象化 SVG 示意图 —— */
+.hero-pipeline {
+  margin-top: 8px;
+  margin-bottom: 4px;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.hero-pipeline-svg {
+  width: 100%;
+  max-width: 560px;
+  height: auto;
+  display: block;
+}
+
+.hero-pipeline-caption {
+  margin: 10px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  letter-spacing: 0.02em;
+}
+
+.section-figure {
+  margin: 0 0 36px;
+  padding: 16px 18px 14px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+
+.section-figure-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.section-figure-cap {
+  margin: 12px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.flow-schematic {
+  margin: 0 0 32px;
+  padding: 14px 16px 12px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  overflow-x: auto;
+}
+
+.flow-schematic-svg {
+  width: min(100%, 720px);
+  min-width: 520px;
+  height: auto;
+  display: block;
+  margin: 0 auto;
+}
+
+.flow-schematic-cap {
+  margin: 12px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.mcp-hub-wrap {
+  margin: -8px 0 20px;
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.mcp-hub-svg {
+  width: 100%;
+  max-width: 400px;
+  height: auto;
+  display: block;
+  opacity: 0.95;
+}
+
+.entry-col-visual {
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  background: var(--surface-2);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+}
+
+.entry-col-visual svg {
+  display: block;
+}
+
+.stack-layers {
+  margin: 0 0 28px;
+  padding: 16px 18px 14px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+
+.stack-layers-svg {
+  width: 100%;
+  max-width: 560px;
+  height: auto;
+  display: block;
+  margin: 0 auto;
+}
+
+.stack-layers-cap {
+  margin: 12px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+  color: var(--text-tertiary);
+}
+
+.shot::before {
+  content: "";
+  display: block;
+  height: 3px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2), var(--cyan));
+  opacity: 0.55;
+}
+
 @media (max-width: 920px) {
   .role-cards {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -799,6 +947,10 @@ code {
   font-size: 14px;
   color: var(--accent);
   margin-bottom: 14px;
+}
+
+.card-icon-svg svg {
+  display: block;
 }
 
 .card-title {
@@ -1005,5 +1157,9 @@ code {
   }
   .section {
     padding: 48px 0;
+  }
+  .flow-schematic-svg {
+    min-width: 0;
+    width: 100%;
   }
 }

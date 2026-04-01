@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -14,6 +15,7 @@ type Config struct {
 	Redis    RedisConfig
 	Storage  StorageConfig
 	Python   PythonConfig
+	Agent    AgentConfig
 }
 
 // ServerConfig holds server configuration
@@ -53,6 +55,16 @@ type PythonConfig struct {
 	ScriptsDir string
 }
 
+// AgentConfig Agent 画布：意图解析（规则 / 阿里云通义 DashScope）
+type AgentConfig struct {
+	// IntentResolverProvider: rules（默认，关键词规则）| aliyun（仅 DashScope）| hybrid（DashScope 失败则回退规则）
+	IntentResolverProvider string
+	AliyunDashScopeAPIKey  string
+	AliyunIntentModel      string
+	// AliyunDashScopeBaseURL 默认 https://dashscope.aliyuncs.com/compatible-mode/v1
+	AliyunDashScopeBaseURL string
+}
+
 // LoadConfig loads configuration from environment variables
 func LoadConfig() (*Config, error) {
 	// Load .env file if exists (ignore error if not found)
@@ -89,9 +101,24 @@ func LoadConfig() (*Config, error) {
 			PythonPath: getEnv("PYTHON_PATH", "python3"),
 			ScriptsDir: getEnv("PYTHON_SCRIPTS_DIR", "./python_scripts"),
 		},
+		Agent: AgentConfig{
+			IntentResolverProvider: stringsTrimLower(getEnv("INTENT_RESOLVER_PROVIDER", "rules")),
+			AliyunDashScopeAPIKey:  getEnv("ALIYUN_DASHSCOPE_API_KEY", ""),
+			AliyunIntentModel:      getEnv("ALIYUN_INTENT_MODEL", "qwen-turbo"),
+			AliyunDashScopeBaseURL: stringsTrimRightSlash(getEnv("ALIYUN_DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")),
+		},
 	}
 
 	return config, nil
+}
+
+func stringsTrimLower(s string) string {
+	s = strings.TrimSpace(strings.ToLower(s))
+	return s
+}
+
+func stringsTrimRightSlash(s string) string {
+	return strings.TrimSuffix(strings.TrimSpace(s), "/")
 }
 
 // getEnv gets environment variable with default value

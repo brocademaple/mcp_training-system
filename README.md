@@ -14,7 +14,33 @@
 - **经典版工作台**：仪表盘/数据集/训练/评估互通，适合逐步操作与可控排错。
 - **训练与评估闭环**：训练任务进度、日志、评估指标、报告预览/下载贯穿全流程。
 - **双版本数据互通**：同一套 PostgreSQL / Redis，Agent 与经典版生成的结果可互相查看。
-- **可扩展的模型训练**：支持分类头训练与后续 SFT+LoRA 微调（通过 `model_type` 路由）。
+- **可扩展的模型训练**：支持分类头训练与 SFT/LoRA/QLoRA/DPO 等（`model_type` 与 **RunSpec** 双轨兼容）。
+- **三层解耦（语义任务 / 训练方法 / 领域）**：注册表见仓库根目录 `task_registry/`、`method_registry/`、`domain_registry/`；API `GET /api/v1/registry` 供前端加载；训练任务可写 `run_spec` JSON（见 `examples/`）。
+- **Agent 意图识别（规则引擎）**：一句话描述经 `intent_registry/intent_patterns.yaml` 匹配默认任务类型与领域；扩展规则见 `docs/SPEC_CODING.md`「四之一」一节。
+
+## 系统设计概要（调用流）
+
+```mermaid
+flowchart TB
+  User[User]
+  Classic[经典版 UI]
+  AgentUI[Agent 画布]
+  API[Gin API]
+  Reg[Registry YAML]
+  Orch[Coordinator FSM]
+  DataA[Data Agent]
+  TrainA[Training Agent]
+  EvalA[Evaluation Agent]
+  User --> Classic
+  User --> AgentUI
+  Classic --> API
+  AgentUI --> API
+  API --> Reg
+  API --> Orch
+  Orch --> DataA
+  Orch --> TrainA
+  Orch --> EvalA
+```
 
 ## 产品截图
 
@@ -51,7 +77,9 @@
 ## 快速开始（推荐：本机运行，训练使用本机 GPU）
 
 本机运行后端与 Python 脚本，**训练可使用本机显卡（如 RTX 3060/4060）**；Docker 只用来跑 PostgreSQL 和 Redis。  
-数据库补跑迁移（006～010 等）请直接对照目录 **`internal/database/migrations/`**（按文件名顺序执行）；也可参考 `docs/DEPLOYMENT.md`。
+数据库补跑迁移（006～013 等）请直接对照目录 **`internal/database/migrations/`**（按文件名顺序执行）；也可参考 `docs/DEPLOYMENT.md`。
+
+**示例 RunSpec 与样例数据**：[`examples/README.md`](examples/README.md)。
 
 ### 操作步骤与命令行（按顺序执行）
 

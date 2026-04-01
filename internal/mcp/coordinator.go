@@ -4,10 +4,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"mcp-training-system/internal/agents"
 	"mcp-training-system/internal/models"
+	"mcp-training-system/internal/orchestrator"
+	"mcp-training-system/internal/services"
 	"mcp-training-system/internal/utils"
 )
 
@@ -117,83 +120,103 @@ func (c *Coordinator) handleEvaluationAgentMessage(msg *MCPMessage) error {
 	}
 }
 
-// RunPipeline executes a complete pipeline: clean -> train -> evaluate.
-// dataAgentPrompt 为用户在前端设定的 Data Agent 规划偏好（规模/语言/领域等），会写入库并传给 Data Agent，供后续「自行规划」数据获取时使用。
-func (c *Coordinator) RunPipeline(datasetID int, trainConfig map[string]interface{}, dataAgentPrompt, planID, planSummary string) (*models.PipelineInstance, error) {
+// RunPipeline executes a pipeline: 默认 clean -> train -> evaluate；agentFlow=train_only 时在训练完成后结束，不跑评估。
+// pipelineRunSpec 可选：整条流水线的 RunSpec JSON；dataAgentPrompt 为用户在前端设定的 Data Agent 规划偏好。
+func (c *Coordinator) RunPipeline(datasetID int, trainConfig map[string]interface{}, dataAgentPrompt, planID, planSummary string, pipelineRunSpec []byte, agentFlow string) (*models.PipelineInstance, error) {
 	sessionID := uuid.New().String()
 	utils.Info("MCP Coordinator: Starting pipeline for dataset %d, session: %s", datasetID, sessionID)
 
-	// Create pipeline instance（含 data_agent_prompt，用于驱动 Data Agent）
 	var pipelineID int
+	var runSpecArg interface{}
+	if len(pipelineRunSpec) > 0 {
+		runSpecArg = pipelineRunSpec
+	}
 	err := c.db.QueryRow(`
-		INSERT INTO pipeline_instances (session_id, dataset_id, status, current_step, data_agent_prompt, plan_id, plan_summary)
-		VALUES ($1, $2, 'running', 'clean_data', NULLIF(TRIM($3), ''), NULLIF(TRIM($4), ''), NULLIF(TRIM($5), ''))
+		INSERT INTO pipeline_instances (session_id, dataset_id, status, current_step, orchestration_state, data_agent_prompt, plan_id, plan_summary, run_spec)
+		VALUES ($1, $2, 'running', 'clean_data', $6, NULLIF(TRIM($3), ''), NULLIF(TRIM($4), ''), NULLIF(TRIM($5), ''), $7)
 		RETURNING id
-	`, sessionID, datasetID, dataAgentPrompt, planID, planSummary).Scan(&pipelineID)
+	`, sessionID, datasetID, dataAgentPrompt, planID, planSummary, orchestrator.StateTaskIdentified, runSpecArg).Scan(&pipelineID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create pipeline instance: %v", err)
 	}
 
-	go c.executePipelineAsync(pipelineID, sessionID, datasetID, trainConfig, dataAgentPrompt)
+	go c.executePipelineAsync(pipelineID, sessionID, datasetID, trainConfig, dataAgentPrompt, agentFlow)
 
 	pipeline := &models.PipelineInstance{
-		ID:          pipelineID,
-		SessionID:   sessionID,
-		DatasetID:   datasetID,
-		Status:      "running",
-		CurrentStep: "clean_data",
-		DataAgentPrompt: dataAgentPrompt,
-		PlanID:      planID,
-		PlanSummary: planSummary,
+		ID:                 pipelineID,
+		SessionID:          sessionID,
+		DatasetID:          datasetID,
+		Status:             "running",
+		CurrentStep:        "clean_data",
+		OrchestrationState: orchestrator.StateTaskIdentified,
+		DataAgentPrompt:    dataAgentPrompt,
+		PlanID:             planID,
+		PlanSummary:        planSummary,
+		RunSpec:            pipelineRunSpec,
 	}
 	return pipeline, nil
 }
 
-func (c *Coordinator) executePipelineAsync(pipelineID int, sessionID string, datasetID int, trainConfig map[string]interface{}, dataAgentPrompt string) {
+func (c *Coordinator) executePipelineAsync(pipelineID int, sessionID string, datasetID int, trainConfig map[string]interface{}, dataAgentPrompt string, agentFlow string) {
+	flow := strings.ToLower(strings.TrimSpace(agentFlow))
 	defer func() {
 		if r := recover(); r != nil {
 			utils.Error("Pipeline %d panic: %v", pipelineID, r)
-			c.updatePipelineStatus(pipelineID, "failed", "", fmt.Sprintf("panic: %v", r))
+			c.updatePipelineFailed(pipelineID, "clean_data", fmt.Sprintf("panic: %v", r), orchestrator.FailTaskParse)
 		}
 	}()
+
+	c.setOrchestrationState(pipelineID, orchestrator.StateMethodSelected, "")
 
 	// Step 1: Clean data（将 data_agent_prompt 传入 payload，供 Data Agent 当前/后续使用）
 	extraClean := make(map[string]interface{})
 	if dataAgentPrompt != "" {
 		extraClean["data_agent_prompt"] = dataAgentPrompt
 	}
+	c.setOrchestrationState(pipelineID, orchestrator.StateDomainResolved, "")
 	if err := c.executeStep(pipelineID, sessionID, "clean_data", datasetID, extraClean); err != nil {
-		c.updatePipelineStatus(pipelineID, "failed", "clean_data", err.Error())
+		c.updatePipelineFailed(pipelineID, "clean_data", err.Error(), orchestrator.FailDataSchema)
 		return
 	}
+	c.setOrchestrationState(pipelineID, orchestrator.StateDataValidated, "")
 
 	// Step 2: Create and train
 	c.updatePipelineStep(pipelineID, "train")
 	jobID, err := c.createTrainingJob(datasetID, trainConfig)
 	if err != nil {
-		c.updatePipelineStatus(pipelineID, "failed", "train", err.Error())
+		c.updatePipelineFailed(pipelineID, "train", err.Error(), orchestrator.FailTraining)
 		return
 	}
 	c.updatePipelineJobID(pipelineID, jobID)
 
+	c.setOrchestrationState(pipelineID, orchestrator.StateTrainingRunning, "")
 	if err := c.executeStep(pipelineID, sessionID, "train", jobID, nil); err != nil {
-		c.updatePipelineStatus(pipelineID, "failed", "train", err.Error())
+		c.updatePipelineFailed(pipelineID, "train", err.Error(), orchestrator.FailTraining)
 		return
 	}
+	c.setOrchestrationState(pipelineID, orchestrator.StateTrainingFinished, "")
 
 	// Get model_id from models table (训练完成后由 TrainingAgent 写入)
 	var modelID int
 	err = c.db.QueryRow("SELECT id FROM models WHERE job_id = $1 ORDER BY id DESC LIMIT 1", jobID).Scan(&modelID)
 	if err != nil {
-		c.updatePipelineStatus(pipelineID, "failed", "train", "no model created")
+		c.updatePipelineFailed(pipelineID, "train", "no model created", orchestrator.FailTraining)
 		return
 	}
 	c.updatePipelineModelID(pipelineID, modelID)
 
+	if flow == "train_only" {
+		c.setOrchestrationState(pipelineID, orchestrator.StateCompleted, "")
+		c.updatePipelineStatus(pipelineID, "completed", "train", "")
+		utils.Info("Pipeline %d completed successfully (train_only, skip evaluate)", pipelineID)
+		return
+	}
+
 	// Step 3: Evaluate
 	c.updatePipelineStep(pipelineID, "evaluate")
+	c.setOrchestrationState(pipelineID, orchestrator.StateEvaluating, "")
 	if err := c.executeStep(pipelineID, sessionID, "evaluate", modelID, map[string]interface{}{"test_dataset_id": 0}); err != nil {
-		c.updatePipelineStatus(pipelineID, "failed", "evaluate", err.Error())
+		c.updatePipelineFailed(pipelineID, "evaluate", err.Error(), orchestrator.FailEvaluation)
 		return
 	}
 
@@ -204,6 +227,7 @@ func (c *Coordinator) executePipelineAsync(pipelineID int, sessionID string, dat
 		c.updatePipelineEvalID(pipelineID, evalID)
 	}
 
+	c.setOrchestrationState(pipelineID, orchestrator.StateCompleted, "")
 	c.updatePipelineStatus(pipelineID, "completed", "evaluate", "")
 	utils.Info("Pipeline %d completed successfully", pipelineID)
 }
@@ -246,14 +270,31 @@ func (c *Coordinator) createTrainingJob(datasetID int, config map[string]interfa
 	if mt, ok := config["model_type"].(string); ok && mt != "" {
 		modelType = mt
 	}
-	// 从 config 构建 hyperparams，供训练脚本使用（含 base_model、epochs 等）
+	var runSpecJSON []byte
+	if raw, ok := config["run_spec"]; ok && raw != nil {
+		switch t := raw.(type) {
+		case map[string]interface{}:
+			runSpecJSON, _ = json.Marshal(t)
+		case string:
+			runSpecJSON = []byte(t)
+		case *models.RunSpec:
+			runSpecJSON, _ = json.Marshal(t)
+		}
+	}
 	hyperparams := make(map[string]interface{})
 	if config != nil {
 		for k, v := range config {
-			if k == "model_type" {
+			if k == "model_type" || k == "run_spec" {
 				continue
 			}
 			hyperparams[k] = v
+		}
+	}
+	if len(runSpecJSON) > 0 {
+		if rs, err := models.ParseRunSpec(runSpecJSON); err == nil {
+			services.MergeMethodDefaults(rs)
+			modelType = models.ExecutionModelType(rs)
+			hyperparams = models.MergeRunSpecIntoHyperparams(hyperparams, rs)
 		}
 	}
 	if hyperparams["epochs"] == nil {
@@ -272,11 +313,15 @@ func (c *Coordinator) createTrainingJob(datasetID int, config map[string]interfa
 	}
 
 	var jobID int
+	var rsArg interface{}
+	if len(runSpecJSON) > 0 {
+		rsArg = runSpecJSON
+	}
 	err := c.db.QueryRow(`
-		INSERT INTO training_jobs (user_id, dataset_id, name, model_type, hyperparams, status, total_epochs)
-		VALUES (1, $1, $2, $3, $4, 'queued', $5)
+		INSERT INTO training_jobs (user_id, dataset_id, name, model_type, hyperparams, run_spec, status, total_epochs)
+		VALUES (1, $1, $2, $3, $4, $5, 'queued', $6)
 		RETURNING id
-	`, datasetID, fmt.Sprintf("流水线-数据集%d", datasetID), modelType, hyperparamsJSON, totalEpochs).Scan(&jobID)
+	`, datasetID, fmt.Sprintf("流水线-数据集%d", datasetID), modelType, hyperparamsJSON, rsArg, totalEpochs).Scan(&jobID)
 	return jobID, err
 }
 
@@ -288,6 +333,23 @@ func (c *Coordinator) updatePipelineStatus(pipelineID int, status, step, errMsg 
 	c.db.Exec("UPDATE pipeline_instances SET status = $1, current_step = $2, error_msg = $3, updated_at = NOW() WHERE id = $4",
 		status, step, errMsg, pipelineID)
 }
+
+func (c *Coordinator) setOrchestrationState(pipelineID int, state string, failureCode string) {
+	var fc interface{}
+	if failureCode != "" {
+		fc = failureCode
+	}
+	_, _ = c.db.Exec(`UPDATE pipeline_instances SET orchestration_state = $1, failure_code = $2, updated_at = NOW() WHERE id = $3`,
+		state, fc, pipelineID)
+}
+
+func (c *Coordinator) updatePipelineFailed(pipelineID int, step, errMsg, failCode string) {
+	_, _ = c.db.Exec(`
+		UPDATE pipeline_instances SET status = 'failed', current_step = $1, error_msg = $2,
+			orchestration_state = $3, failure_code = $3, updated_at = NOW() WHERE id = $4
+	`, step, errMsg, failCode, pipelineID)
+}
+
 
 func (c *Coordinator) updatePipelineJobID(pipelineID, jobID int) {
 	c.db.Exec("UPDATE pipeline_instances SET job_id = $1, updated_at = NOW() WHERE id = $2", jobID, pipelineID)
@@ -304,12 +366,26 @@ func (c *Coordinator) updatePipelineEvalID(pipelineID, evalID int) {
 // GetPipelineStatus retrieves pipeline status
 func (c *Coordinator) GetPipelineStatus(pipelineID int) (*models.PipelineInstance, error) {
 	var p models.PipelineInstance
+	var orch, fail sql.NullString
+	var runSpecBytes []byte
 	err := c.db.QueryRow(`
-		SELECT id, session_id, dataset_id, status, current_step, job_id, model_id, eval_id, error_msg, data_agent_prompt, plan_id, plan_summary, created_at, updated_at
+		SELECT id, session_id, dataset_id, status, current_step, orchestration_state, failure_code, run_spec,
+			job_id, model_id, eval_id, error_msg, data_agent_prompt, plan_id, plan_summary, created_at, updated_at
 		FROM pipeline_instances WHERE id = $1
-	`, pipelineID).Scan(&p.ID, &p.SessionID, &p.DatasetID, &p.Status, &p.CurrentStep, &p.JobID, &p.ModelID, &p.EvalID, &p.ErrorMsg, &p.DataAgentPrompt, &p.PlanID, &p.PlanSummary, &p.CreatedAt, &p.UpdatedAt)
+	`, pipelineID).Scan(&p.ID, &p.SessionID, &p.DatasetID, &p.Status, &p.CurrentStep, &orch, &fail, &runSpecBytes, &p.JobID, &p.ModelID, &p.EvalID, &p.ErrorMsg, &p.DataAgentPrompt, &p.PlanID, &p.PlanSummary, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		return nil, err
+	}
+	if orch.Valid {
+		p.OrchestrationState = orch.String
+	} else {
+		p.OrchestrationState = orchestrator.MapLegacyStepToOrchestration(p.Status, p.CurrentStep)
+	}
+	if fail.Valid {
+		p.FailureCode = fail.String
+	}
+	if len(runSpecBytes) > 0 {
+		p.RunSpec = runSpecBytes
 	}
 	return &p, nil
 }

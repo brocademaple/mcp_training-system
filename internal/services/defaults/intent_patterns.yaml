@@ -1,0 +1,40 @@
+# 嵌入默认（与仓库根 intent_registry/intent_patterns.yaml 同步）
+version: 1
+patterns:
+  - id: sentiment_basic
+    intent: sentiment
+    weight: 3
+    keywords: ["情感", "正负", "褒贬", "满意度", "sentiment"]
+  - id: ner_basic
+    intent: ner
+    weight: 3
+    keywords: ["实体", "NER", "命名实体", "人名", "地名"]
+  - id: summary_gen
+    intent: summary
+    weight: 3
+    keywords: ["摘要", "生成", "续写", "summarization"]
+  - id: extraction_info
+    intent: extraction
+    weight: 2
+    keywords: ["抽取", "关系抽取", "事件抽取", "信息抽取"]
+  - id: rewriting_text
+    intent: rewriting
+    weight: 3
+    keywords: ["改写", "复述", "润色", "纠错", "paraphrase", "rewrite"]
+  - id: matching_ranking
+    intent: matching
+    weight: 3
+    keywords: ["匹配", "排序", "相似度", "rerank", "NLI", "STS"]
+  - id: infilling_reasoning
+    intent: infilling
+    weight: 3
+    keywords: ["填空", "补全", "推理", "cloze", "选择题"]
+  - id: alignment_dpo
+    intent: alignment
+    weight: 3
+    keywords: ["偏好", "对齐", "DPO", "RLHF"]
+domain_hints:
+  - domain: Finance
+    weight: 2
+    keywords: ["金融", "股票", "财报", "银行"]
+low_confidence_threshold: 2

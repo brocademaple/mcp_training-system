@@ -3,17 +3,20 @@ package handlers
 import (
 	"database/sql"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
+	"mcp-training-system/internal/config"
 	"mcp-training-system/internal/services"
 )
 
 type AgentHandler struct {
-	db *sql.DB
+	db       *sql.DB
+	agentCfg *config.AgentConfig
 }
 
-func NewAgentHandler(db *sql.DB) *AgentHandler {
-	return &AgentHandler{db: db}
+func NewAgentHandler(db *sql.DB, agentCfg *config.AgentConfig) *AgentHandler {
+	return &AgentHandler{db: db, agentCfg: agentCfg}
 }
 
 type PlanAPIRequest struct {
@@ -59,10 +62,24 @@ func (h *AgentHandler) CreatePlan(c *gin.Context) {
 		DataAgentPrompt:   req.DataAgentPrompt,
 		TrainMode:         req.TrainMode,
 		DatasetCandidates: candidates,
-	})
+	}, h.agentCfg)
 
 	c.JSON(http.StatusOK, gin.H{
 		"plan": plan,
 	})
 }
 
+type resolveIntentRequest struct {
+	Goal string `json:"goal"`
+}
+
+// ResolveIntent POST /agent/resolve-intent — 规则引擎推断任务类型、训练方式与领域建议。
+func (h *AgentHandler) ResolveIntent(c *gin.Context) {
+	var req resolveIntentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	r := services.ResolveIntentUnified(strings.TrimSpace(req.Goal), h.agentCfg)
+	c.JSON(http.StatusOK, gin.H{"result": r})
+}

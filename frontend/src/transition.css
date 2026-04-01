@@ -18,17 +18,14 @@ body,
   box-sizing: border-box;
 }
 
-/* React Router 6：匹配路由根节点占满视口；默认 column 给纵向页面根。Agent 画布为横向侧栏+主区，单独覆盖为 row */
+/* React Router 6：匹配路由根节点占满视口；默认 column 给纵向页面根 */
 .app-container > * {
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-}
-
-.app-container > .agent-canvas {
-  flex-direction: row;
 }
 
 /* 经典版 Ant Layout 同样为左侧栏 + 主内容横向排列 */

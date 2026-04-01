@@ -1,5 +1,4 @@
 import axios from 'axios';
-import type { ApiResponse, Dataset, TrainingJob, Evaluation } from '@/types';
 
 const api = axios.create({
   baseURL: '/api/v1',

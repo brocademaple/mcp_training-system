@@ -1,0 +1,23 @@
+project_name: sentiment-lora-finance-demo
+base_model: bert-base-uncased
+semantic_task:
+  family: Classification
+  name: SentimentClassification
+training_method:
+  name: LoRA
+  params:
+    r: 8
+    alpha: 16
+    dropout: 0.05
+domain:
+  name: Finance
+metrics:
+  - accuracy
+  - macro_f1
+runtime:
+  epochs: 3
+  batch_size: 8
+  learning_rate: 0.0002
+  max_length: 512
+artifacts:
+  output_dir: outputs/sentiment-lora-finance

@@ -7,7 +7,6 @@ import TrainingManagement from '@/pages/Training';
 import ModelManagement from '@/pages/Model';
 import EvaluationManagement from '@/pages/Evaluation';
 import AgentCanvas from '@/pages/AgentCanvas';
-import PipelinesPage from '@/pages/Pipelines';
 import './transition.css';
 
 const App: React.FC = () => {
@@ -37,13 +36,10 @@ const App: React.FC = () => {
           {versionMode === 'agent' ? (
             <>
               <Route path="/" element={<AgentCanvas />} />
-              <Route path="/pipeline" element={<Navigate to="/pipelines" replace />} />
               <Route path="/datasets" element={<Layout />}>
                 <Route index element={<DatasetManagement />} />
               </Route>
-              <Route path="/pipelines" element={<Layout />}>
-                <Route index element={<PipelinesPage />} />
-              </Route>
+              <Route path="*" element={<Navigate to="/" replace />} />
             </>
           ) : (
             <Route path="/" element={<Layout />}>
@@ -52,8 +48,6 @@ const App: React.FC = () => {
               <Route path="training" element={<TrainingManagement />} />
               <Route path="models" element={<ModelManagement />} />
               <Route path="evaluation" element={<EvaluationManagement />} />
-              <Route path="pipeline" element={<Navigate to="/pipelines" replace />} />
-              <Route path="pipelines" element={<PipelinesPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
           )}

@@ -1,0 +1,18 @@
+methods:
+  - id: SFT
+    label_zh: 监督微调
+    peft: false
+  - id: LoRA
+    label_zh: LoRA
+    peft: true
+    default_params:
+      r: 8
+      alpha: 16
+      dropout: 0.05
+  - id: QLoRA
+    label_zh: QLoRA
+    peft: true
+  - id: DPO
+    label_zh: DPO
+    peft: true
+    alignment_only: true

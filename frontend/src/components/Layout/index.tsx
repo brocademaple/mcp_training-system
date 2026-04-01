@@ -5,7 +5,6 @@ import {
   DashboardOutlined,
   DatabaseOutlined,
   ExperimentOutlined,
-  CloudServerOutlined,
   BarChartOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
@@ -14,7 +13,6 @@ import {
   DoubleLeftOutlined,
   RightOutlined,
   RobotOutlined,
-  RocketOutlined,
 } from '@ant-design/icons';
 import './index.css';
 
@@ -46,7 +44,7 @@ const Layout: React.FC = () => {
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
     return (localStorage.getItem(STORAGE_THEME_KEY) as ThemeMode) || 'light';
   });
-  const [versionMode, setVersionMode] = useState<VersionMode>(() => {
+  const [versionMode] = useState<VersionMode>(() => {
     return (localStorage.getItem(STORAGE_VERSION_KEY) as VersionMode) || 'classic';
   });
 
@@ -62,7 +60,7 @@ const Layout: React.FC = () => {
     const startW = siderWidth;
     const onMove = (e2: MouseEvent) => {
       const dx = e2.clientX - startX;
-      setSiderWidth((w) => Math.min(MAX_SIDER_WIDTH, Math.max(MIN_SIDER_WIDTH, startW + dx)));
+      setSiderWidth(() => Math.min(MAX_SIDER_WIDTH, Math.max(MIN_SIDER_WIDTH, startW + dx)));
     };
     const onUp = () => {
       document.removeEventListener('mousemove', onMove);
@@ -92,14 +90,12 @@ const Layout: React.FC = () => {
     ? [
         { key: '/', icon: <RobotOutlined />, label: '首页' },
         { key: '/datasets', icon: <DatabaseOutlined />, label: '数据集管理' },
-        { key: '/pipelines', icon: <RocketOutlined />, label: '流水线历史' },
       ]
     : [
-        { key: '/', icon: <DashboardOutlined />, label: '仪表盘' },
+        { key: '/', icon: <DashboardOutlined />, label: '工作台' },
         { key: '/datasets', icon: <DatabaseOutlined />, label: '数据集管理' },
         { key: '/training', icon: <ExperimentOutlined />, label: '模型训练' },
         { key: '/evaluation', icon: <BarChartOutlined />, label: '模型评估' },
-        { key: '/pipelines', icon: <RocketOutlined />, label: '流水线历史' },
       ];
 
   return (
@@ -177,7 +173,7 @@ const Layout: React.FC = () => {
                   onChange={(checked) => {
                     const newMode = checked ? 'agent' : 'classic';
                     localStorage.setItem('app-version', newMode);
-                    // 切换模式后跳转到首页，避免停留在当前路径（如 /pipelines）导致重复报错
+                    // 切换模式后跳转到首页，避免停留在仅另一版本存在的路径
                     window.location.href = '/';
                   }}
                   checkedChildren="Agent"

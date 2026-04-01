@@ -1,0 +1,40 @@
+.page-hero {
+  margin-bottom: 16px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.page-hero-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.page-hero-icon {
+  font-size: 22px;
+  color: #1890ff;
+  line-height: 1;
+  margin-top: 2px;
+}
+
+.page-hero-text {
+  min-width: 0;
+}
+
+.page-hero-subtitle {
+  display: block;
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.page-hero-extra {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}

@@ -1,0 +1,38 @@
+methods:
+  - id: FullFineTuning
+    label_zh: 全参数微调
+    peft: false
+  - id: SFT
+    label_zh: 监督微调
+    peft: false
+  - id: LoRA
+    label_zh: LoRA
+    peft: true
+    default_params:
+      r: 8
+      alpha: 16
+      dropout: 0.05
+  - id: QLoRA
+    label_zh: QLoRA
+    peft: true
+    default_params:
+      r: 8
+      alpha: 16
+      bits: 4
+  - id: Adapter
+    label_zh: Adapter
+    peft: true
+  - id: PrefixTuning
+    label_zh: 前缀微调
+    peft: true
+  - id: DPO
+    label_zh: DPO
+    peft: true
+    alignment_only: true
+  - id: PPO
+    label_zh: PPO/RLHF
+    peft: true
+    alignment_only: true
+  - id: MultiTaskSFT
+    label_zh: 多任务联合 SFT
+    peft: false

@@ -15,6 +15,7 @@ type TrainingJob struct {
 	Name         string                 `json:"name"`
 	ModelType    string                 `json:"model_type"`
 	Hyperparams  map[string]interface{} `json:"hyperparams"`
+	RunSpec      json.RawMessage        `json:"run_spec,omitempty"` // 统一 RunSpec JSON；旧任务可能为空，由 EffectiveRunSpec 推导
 	Status       string                 `json:"status"`
 	Progress     int                    `json:"progress"`
 	CurrentEpoch int                    `json:"current_epoch"`
@@ -34,9 +35,14 @@ func (j *TrainingJob) Create(db *sql.DB) error {
 		return err
 	}
 
+	var runSpecArg interface{}
+	if len(j.RunSpec) > 0 {
+		runSpecArg = j.RunSpec
+	}
+
 	query := `
-		INSERT INTO training_jobs (user_id, dataset_id, name, model_type, hyperparams, status, total_epochs)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO training_jobs (user_id, dataset_id, name, model_type, hyperparams, run_spec, status, total_epochs)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id, created_at, updated_at
 	`
 	err = db.QueryRow(
@@ -46,6 +52,7 @@ func (j *TrainingJob) Create(db *sql.DB) error {
 		j.Name,
 		j.ModelType,
 		hyperparamsJSON,
+		runSpecArg,
 		j.Status,
 		j.TotalEpochs,
 	).Scan(&j.ID, &j.CreatedAt, &j.UpdatedAt)
@@ -67,8 +74,9 @@ func GetTrainingJobByID(db *sql.DB, id int) (*TrainingJob, error) {
 	var errMsg sql.NullString
 	var dID sql.NullInt64
 
+	var runSpecBytes []byte
 	query := `
-		SELECT id, user_id, dataset_id, name, model_type, hyperparams, status, progress,
+		SELECT id, user_id, dataset_id, name, model_type, hyperparams, run_spec, status, progress,
 		       current_epoch, total_epochs, error_message, created_at, started_at,
 		       completed_at, updated_at
 		FROM training_jobs WHERE id = $1
@@ -80,6 +88,7 @@ func GetTrainingJobByID(db *sql.DB, id int) (*TrainingJob, error) {
 		&job.Name,
 		&job.ModelType,
 		&hyperparamsJSON,
+		&runSpecBytes,
 		&job.Status,
 		&job.Progress,
 		&job.CurrentEpoch,
@@ -105,8 +114,22 @@ func GetTrainingJobByID(db *sql.DB, id int) (*TrainingJob, error) {
 	if err := json.Unmarshal(hyperparamsJSON, &job.Hyperparams); err != nil {
 		return nil, err
 	}
+	if len(runSpecBytes) > 0 {
+		job.RunSpec = json.RawMessage(runSpecBytes)
+	}
 
 	return job, nil
+}
+
+// EffectiveRunSpec 返回已存 run_spec 或从旧字段推导（不修改数据库）。
+func (j *TrainingJob) EffectiveRunSpec() *RunSpec {
+	if len(j.RunSpec) > 0 {
+		rs, err := ParseRunSpec(j.RunSpec)
+		if err == nil {
+			return rs
+		}
+	}
+	return DeriveRunSpecFromLegacy(j.ModelType, j.Hyperparams, j.Name)
 }
 
 // UpdateStatus updates the status of a training job
@@ -174,7 +197,7 @@ func DeleteTrainingJob(db *sql.DB, id int) error {
 // GetTrainingJobsByUserID returns all training jobs for a user, newest first
 func GetTrainingJobsByUserID(db *sql.DB, userID int) ([]*TrainingJob, error) {
 	query := `
-		SELECT id, user_id, dataset_id, name, model_type, hyperparams, status, progress,
+		SELECT id, user_id, dataset_id, name, model_type, hyperparams, run_spec, status, progress,
 		       current_epoch, total_epochs, error_message, created_at, started_at,
 		       completed_at, updated_at
 		FROM training_jobs
@@ -193,6 +216,7 @@ func GetTrainingJobsByUserID(db *sql.DB, userID int) ([]*TrainingJob, error) {
 		var hyperparamsJSON []byte
 		var errMsg sql.NullString
 		var dID sql.NullInt64
+		var runSpecBytes []byte
 		err := rows.Scan(
 			&job.ID,
 			&job.UserID,
@@ -200,6 +224,7 @@ func GetTrainingJobsByUserID(db *sql.DB, userID int) ([]*TrainingJob, error) {
 			&job.Name,
 			&job.ModelType,
 			&hyperparamsJSON,
+			&runSpecBytes,
 			&job.Status,
 			&job.Progress,
 			&job.CurrentEpoch,
@@ -223,7 +248,16 @@ func GetTrainingJobsByUserID(db *sql.DB, userID int) ([]*TrainingJob, error) {
 		if err := json.Unmarshal(hyperparamsJSON, &job.Hyperparams); err != nil {
 			return nil, err
 		}
+		if len(runSpecBytes) > 0 {
+			job.RunSpec = json.RawMessage(runSpecBytes)
+		}
 		jobs = append(jobs, job)
 	}
 	return jobs, rows.Err()
+}
+
+// UpdateTrainingJobRunSpec 持久化 run_spec（用于回填旧任务）。
+func UpdateTrainingJobRunSpec(db *sql.DB, id int, runSpecJSON []byte) error {
+	_, err := db.Exec(`UPDATE training_jobs SET run_spec = $1::jsonb, updated_at = NOW() WHERE id = $2`, runSpecJSON, id)
+	return err
 }

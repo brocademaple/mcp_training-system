@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"mcp-training-system/internal/agents"
@@ -11,6 +12,8 @@ import (
 	"mcp-training-system/internal/handlers"
 	"mcp-training-system/internal/mcp"
 	"mcp-training-system/internal/middleware"
+	"mcp-training-system/internal/registry"
+	"mcp-training-system/internal/services"
 	"mcp-training-system/internal/utils"
 )
 
@@ -72,6 +75,48 @@ func main() {
 	if _, err := db.Exec(`ALTER TABLE pipeline_instances ADD COLUMN IF NOT EXISTS plan_summary TEXT`); err != nil {
 		log.Printf("Warning: add plan_summary column: %v", err)
 	}
+	if _, err := db.Exec(`ALTER TABLE training_jobs ADD COLUMN IF NOT EXISTS run_spec JSONB`); err != nil {
+		log.Printf("Warning: add training_jobs.run_spec: %v", err)
+	}
+	if _, err := db.Exec(`ALTER TABLE pipeline_instances ADD COLUMN IF NOT EXISTS orchestration_state VARCHAR(64)`); err != nil {
+		log.Printf("Warning: add orchestration_state: %v", err)
+	}
+	if _, err := db.Exec(`ALTER TABLE pipeline_instances ADD COLUMN IF NOT EXISTS failure_code VARCHAR(64)`); err != nil {
+		log.Printf("Warning: add failure_code: %v", err)
+	}
+	if _, err := db.Exec(`ALTER TABLE pipeline_instances ADD COLUMN IF NOT EXISTS run_spec JSONB`); err != nil {
+		log.Printf("Warning: add pipeline_instances.run_spec: %v", err)
+	}
+	// 013：datasets.derived_from_dataset_id（与 internal/database/migrations/013_add_dataset_derived_from.sql 一致）
+	if _, err := db.Exec(`ALTER TABLE datasets ADD COLUMN IF NOT EXISTS derived_from_dataset_id INTEGER REFERENCES datasets (id) ON DELETE SET NULL`); err != nil {
+		log.Printf("Warning: add datasets.derived_from_dataset_id: %v", err)
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_datasets_derived_from ON datasets (derived_from_dataset_id) WHERE derived_from_dataset_id IS NOT NULL`); err != nil {
+		log.Printf("Warning: add idx_datasets_derived_from: %v", err)
+	}
+
+	if _, err := registry.LoadFromDir("."); err != nil {
+		log.Printf("Warning: registry load: %v", err)
+	} else {
+		utils.Info("Task/method/domain registries loaded")
+	}
+	if err := services.LoadIntentPatterns("."); err != nil {
+		log.Printf("Warning: intent patterns load: %v", err)
+	} else {
+		utils.Info("Intent patterns loaded")
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Agent.IntentResolverProvider)) {
+	case "aliyun":
+		if strings.TrimSpace(cfg.Agent.AliyunDashScopeAPIKey) != "" {
+			utils.Info("Intent resolver: aliyun (DashScope model %s)", cfg.Agent.AliyunIntentModel)
+		} else {
+			utils.Info("Intent resolver: aliyun requested but no API key; will use rules at runtime")
+		}
+	case "hybrid":
+		utils.Info("Intent resolver: hybrid (DashScope with rules fallback)")
+	default:
+		utils.Info("Intent resolver: rules (keyword patterns)")
+	}
 
 	// Connect to Redis
 	redisClient, err := database.NewRedisClient(
@@ -106,7 +151,8 @@ func main() {
 	syncHandler := handlers.NewSyncHandler(db, ".", cfg.Storage.UploadDir)
 	trainingWSHandler := handlers.NewTrainingWSHandler(redisClient)
 	pipelineHandler := handlers.NewPipelineHandler(db, coordinator)
-	agentHandler := handlers.NewAgentHandler(db)
+	agentHandler := handlers.NewAgentHandler(db, &cfg.Agent)
+	registryHandler := handlers.NewRegistryHandler()
 	utils.Info("Handlers initialized")
 
 	// Setup Gin router
@@ -159,6 +205,8 @@ func main() {
 
 		// Pipeline routes (2.0 Agent版)
 		api.POST("/agent/plan", agentHandler.CreatePlan)
+		api.POST("/agent/resolve-intent", agentHandler.ResolveIntent)
+		api.GET("/registry", registryHandler.GetBundle)
 		api.POST("/pipelines", pipelineHandler.CreatePipeline)
 		api.GET("/pipelines", pipelineHandler.ListPipelines)
 		api.GET("/pipelines/:id", pipelineHandler.GetPipelineStatus)

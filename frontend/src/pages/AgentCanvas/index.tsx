@@ -1,1123 +1,1985 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Card, Button, Select, Steps, Timeline, Tag, Space, Row, Col, Statistic, Progress, Switch, Radio, Input, Modal, Form, Upload, message } from 'antd';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  Alert,
+  Button,
+  Card,
+  Col,
+  Descriptions,
+  Divider,
+  Drawer,
+  Form,
+  Input,
+  InputNumber,
+  List,
+  Modal,
+  Row,
+  Select,
+  Space,
+  Statistic,
+  Steps,
+  Table,
+  Tag,
+  Timeline,
+  Tabs,
+  Typography,
+  message,
+} from 'antd';
+import { Upload } from 'antd';
 import type { UploadFile } from 'antd/es/upload/interface';
-import { RobotOutlined, PlayCircleOutlined, CheckCircleOutlined, CloseCircleOutlined, SyncOutlined, UploadOutlined, LinkOutlined, ArrowRightOutlined, EditOutlined, HomeOutlined, ThunderboltOutlined, ExperimentOutlined, DownOutlined, UpOutlined, MoonOutlined, SunOutlined } from '@ant-design/icons';
+import {
+  ArrowRightOutlined,
+  CheckCircleOutlined,
+  DatabaseOutlined,
+  EditOutlined,
+  EyeOutlined,
+  LinkOutlined,
+  PaperClipOutlined,
+  PlusOutlined,
+  PlayCircleOutlined,
+  RobotOutlined,
+  SyncOutlined,
+  UploadOutlined,
+  DeleteOutlined,
+} from '@ant-design/icons';
 import axios from 'axios';
+import { agentService } from '@/services/agent';
 import { datasetService } from '@/services/dataset';
-import { trainingService } from '@/services/training';
-import { agentService, type AgentPlan } from '@/services/agent';
 import { DEFAULT_BASE_MODEL } from '@/constants/baseModels';
-import type { TrainingJob } from '@/types';
+import type { Dataset, RunCurrentState, RunSpec } from '@/types';
+import PageHero from '@/components/PageHero';
+import { SAMPLE_AGENT_CONVERSATION, SAMPLE_MCP_EVENTS, SAMPLE_SCENARIOS, type AgentChatMessage, type McpEvent } from './sampleData';
 import './index.css';
 
-const API_BASE = 'http://localhost:8080/api/v1';
+const API_BASE = '/api/v1';
 
-/** 模型类型：先确认是文本还是多模态 */
-const MODEL_TYPE_OPTIONS = [
-  { value: 'text', label: '文本模型', desc: '仅文本输入，如分类、抽取、生成等' },
-  { value: 'multimodal', label: '多模态模型', desc: '图文、音视频等多模态输入与理解' },
-];
+type FlowState = RunCurrentState;
 
-/** 任务类型（训练目标），依赖模型类型：文本任务仅在选择「文本模型」后可选，多模态任务仅在选择「多模态模型」后可选 */
-const INTENT_OPTIONS: { value: string; label: string; desc: string; forModel: 'text' | 'multimodal' | 'both' }[] = [
-  { value: 'sentiment', label: '情感分类', desc: '如评论正负面、满意度等', forModel: 'text' },
-  { value: 'topic', label: '主题/新闻分类', desc: '如新闻类别、主题标签', forModel: 'text' },
-  { value: 'binary', label: '文本二分类', desc: '是/否、A/B 等两类', forModel: 'text' },
-  { value: 'multiclass', label: '多分类', desc: '多个互斥类别', forModel: 'text' },
-  { value: 'intent', label: '意图识别', desc: '用户意图、对话意图等', forModel: 'text' },
-  { value: 'ner', label: '命名实体识别', desc: '人名、地名、机构等实体抽取', forModel: 'text' },
-  { value: 'summary', label: '摘要/生成', desc: '文本摘要、续写、生成', forModel: 'text' },
-  { value: 'image_text_match', label: '图文匹配', desc: '图像与文本匹配、检索', forModel: 'multimodal' },
-  { value: 'vqa', label: '视觉问答', desc: '根据图像回答问题', forModel: 'multimodal' },
-  { value: 'other', label: '其他', desc: '在下方补充说明', forModel: 'both' },
-];
+type TaskDraft = {
+  semantic_task_type: string;
+  domain: string;
+  modality: 'text' | 'image_text';
+  output_structure: string;
+  recommended_metrics: string[];
+  candidate_methods: string[];
+  task_schema_id: string;
+};
 
-/** 根据已选模型类型过滤可选任务类型 */
-const getIntentOptionsForModel = (type: string) =>
-  !type ? [] : INTENT_OPTIONS.filter((o) => o.forModel === type || o.forModel === 'both');
+type ChatSessionItem = {
+  id: string;
+  title: string;
+  subtitle: string;
+  progress?: number;
+};
 
-/** Data Agent 规划选项（用于驱动 Data Agent 的 prompt） */
-export interface DataAgentOptions {
-  scale?: 'more' | 'medium' | 'less';
-  language?: 'zh' | 'en' | 'mixed' | 'any';
-  domain?: string;
-  recency?: 'latest' | 'any';
-  quality?: 'high' | 'allow_noise' | 'any';
-  sourcePreference?: 'authoritative' | 'opensource' | 'any';
-  customPrompt?: string;
-}
+type FlowMode = 'full' | 'train_only' | 'eval_only';
 
-const DATA_AGENT_SCALE = [
-  { value: 'more', label: '尽量多' },
-  { value: 'medium', label: '适中' },
-  { value: 'less', label: '最少' },
-];
-const DATA_AGENT_LANGUAGE = [
-  { value: 'zh', label: '中文' },
-  { value: 'en', label: '英文' },
-  { value: 'mixed', label: '中英混合' },
-  { value: 'any', label: '不限制' },
-];
-const DATA_AGENT_DOMAIN = [
-  { value: 'general', label: '通用' },
-  { value: 'finance', label: '金融' },
-  { value: 'medical', label: '医疗' },
-  { value: 'education', label: '教育' },
-  { value: 'ecommerce', label: '电商' },
-  { value: 'social', label: '社交' },
-  { value: 'other', label: '其他' },
-];
-const DATA_AGENT_RECENCY = [
-  { value: 'latest', label: '最新优先' },
-  { value: 'any', label: '不限制' },
-];
-const DATA_AGENT_QUALITY = [
-  { value: 'high', label: '高质量标注优先' },
-  { value: 'allow_noise', label: '允许一定噪声' },
-  { value: 'any', label: '不限制' },
-];
-const DATA_AGENT_SOURCE = [
-  { value: 'authoritative', label: '权威/学术来源优先' },
-  { value: 'opensource', label: '开源数据集优先' },
-  { value: 'any', label: '不限制' },
-];
+const DOMAIN_TAGS = ['通用', '金融', '医疗', '法律', '电商', '教育'];
+const TASK_TAGS = ['分类', 'NER', '摘要', '匹配排序', '偏好对齐'];
+const MODALITY_TAGS = ['文本', '图文'];
+const TASK_TYPE_OPTIONS = ['classification', 'ner', 'summarization', 'rerank', 'preference_alignment'];
+const DOMAIN_OPTIONS = ['general', 'finance', 'medical', 'legal', 'ecommerce', 'education'];
+const MODALITY_OPTIONS = ['text', 'image_text'];
 
-interface Dataset {
-  id: number;
-  name: string;
-  status: string;
-}
+const schemaHintByTask = (taskType?: string): string => {
+  const t = (taskType || '').toLowerCase();
+  if (t.includes('ner')) return 'tokens + ner_tags（BIO）';
+  if (t.includes('summar')) return 'source + summary';
+  if (t.includes('rerank') || t.includes('match')) return 'query + candidate + relevance';
+  return 'text + label';
+};
 
-interface Pipeline {
-  id: number;
-  session_id: string;
-  dataset_id: number;
-  status: string;
-  current_step: string;
-  job_id?: number;
-  model_id?: number;
-  error_msg?: string;
-  created_at: string;
-}
+const schemaHeadersByTask = (taskType?: string): string[] => {
+  const t = (taskType || '').toLowerCase();
+  if (t.includes('ner')) return ['tokens', 'ner_tags'];
+  if (t.includes('summar')) return ['source', 'summary'];
+  if (t.includes('rerank') || t.includes('match')) return ['query', 'candidate', 'relevance'];
+  return ['text', 'label'];
+};
+
+const DOMAIN_CN_MAP: Record<string, string> = {
+  general: '通用领域',
+  finance: '金融领域',
+  medical: '医疗领域',
+  legal: '法律领域',
+  ecommerce: '电商领域',
+  education: '教育领域',
+};
+
+const TASK_CN_MAP: Record<string, string> = {
+  sentiment: '情感分类',
+  classification: '分类任务',
+  ner: '命名实体识别',
+  summarization: '文本摘要',
+  rerank: '匹配排序',
+  preference_alignment: '偏好对齐',
+};
+
+const MODALITY_CN_MAP: Record<string, string> = {
+  text: '文本',
+  image_text: '图文',
+};
+
+const METHOD_CN_MAP: Record<string, string> = {
+  sft: '监督微调',
+  lora: '低秩适配微调',
+  qlora: '量化低秩适配',
+  classic_clf: '经典分类训练',
+  sft_lora: 'SFT + LoRA 微调',
+};
+
+const METRIC_CN_MAP: Record<string, string> = {
+  accuracy: '准确率',
+  macro_f1: '宏平均 F1',
+  entity_f1: '实体级 F1',
+  token_f1: 'Token 级 F1',
+};
+
+const mapDomainHintToTag = (hint?: string): string => {
+  const h = (hint || '').toLowerCase();
+  if (h.includes('fin')) return '金融';
+  if (h.includes('med')) return '医疗';
+  if (h.includes('legal') || h.includes('law')) return '法律';
+  if (h.includes('edu')) return '教育';
+  if (h.includes('ecom') || h.includes('retail')) return '电商';
+  if (h.includes('general')) return '通用';
+  return '';
+};
+
+const inferTaskTagFromText = (text: string): string => {
+  const t = text.toLowerCase();
+  if (t.includes('摘要') || t.includes('summar')) return '摘要';
+  if (t.includes('ner') || t.includes('实体')) return 'NER';
+  if (t.includes('匹配') || t.includes('排序') || t.includes('rerank')) return '匹配排序';
+  if (t.includes('偏好') || t.includes('对齐')) return '偏好对齐';
+  return '分类';
+};
+
+const bilingual = (raw?: string, dict?: Record<string, string>): string => {
+  const key = (raw || '').trim();
+  if (!key) return '-';
+  const cn = dict?.[key.toLowerCase()];
+  return cn ? `${key} / ${cn}` : key;
+};
+
+const bilingualList = (items?: string[], dict?: Record<string, string>): string => {
+  if (!items?.length) return '-';
+  return items.map((x) => bilingual(x, dict)).join('，');
+};
+
+const STEP_STATE_RULES: Record<number, FlowState[]> = {
+  0: ['draft', 'intent_submitted', 'task_parsed'],
+  1: ['task_parsed'],
+  2: ['task_confirmed', 'data_selecting', 'data_validating'],
+  3: ['data_ready', 'plan_generating', 'plan_previewed'],
+  4: ['plan_frozen', 'training_queued', 'training_running', 'training_succeeded'],
+  5: ['evaluating', 'done'],
+};
+
+const stepByState = (s: FlowState): number => {
+  if (['draft', 'intent_submitted', 'task_parsed'].includes(s)) return 0;
+  if (['task_confirmed'].includes(s)) return 1;
+  if (['data_selecting', 'data_validating', 'data_ready'].includes(s)) return 2;
+  if (['plan_generating', 'plan_previewed', 'plan_frozen'].includes(s)) return 3;
+  if (['training_queued', 'training_running', 'training_succeeded'].includes(s)) return 4;
+  return 5;
+};
 
 const AgentCanvas: React.FC = () => {
-  const [datasets, setDatasets] = useState<Dataset[]>([]);
-  const [selectedDataset, setSelectedDataset] = useState<number>();
-  const [currentPipeline, setCurrentPipeline] = useState<Pipeline | null>(null);
+  const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [datasetsLoading, setDatasetsLoading] = useState(true);
+  const [autoTagLoading, setAutoTagLoading] = useState(false);
+  const [state, setState] = useState<FlowState>('draft');
 
-  // 入口区：未展开步骤前显示引导；展开后与步骤卡片动效衔接；任务列表可收起/展开
-  const [entryDismissed, setEntryDismissed] = useState(false);
-  const [entryListExpanded, setEntryListExpanded] = useState(false); // 展开步骤后，历史任务列表是否展开
-  const entryCollapsedBarRef = useRef<HTMLDivElement>(null); // 展开/收起那一行，用于展开后滚动露出
-  const [jobs, setJobs] = useState<TrainingJob[]>([]);
-  const [jobsLoading, setJobsLoading] = useState(true);
+  const [intentText, setIntentText] = useState('');
+  const [uiSelectedTags, setUiSelectedTags] = useState<string[]>([]);
+  const [modalityHint, setModalityHint] = useState('text');
+  const [selectedDomainTag, setSelectedDomainTag] = useState<string>();
+  const [selectedTaskTag, setSelectedTaskTag] = useState<string>();
+  const [selectedModalityTag, setSelectedModalityTag] = useState<string | undefined>();
+  const [customDomainInput, setCustomDomainInput] = useState('');
+  const [customDomainTags, setCustomDomainTags] = useState<string[]>([]);
 
-  // 画布步骤：1=仅步骤1, 2=步骤2（含附属卡片）, 3=训练计划与执行
-  const [canvasStep, setCanvasStep] = useState<1 | 2 | 3>(1);
-  const [modelType, setModelType] = useState<string>('text');
-  const [modelIntent, setModelIntent] = useState<string>('sentiment');
-  const [intentNote, setIntentNote] = useState<string>('');
-  const [goalInput, setGoalInput] = useState<string>('');
-  const [goalPreset, setGoalPreset] = useState<'full_pipeline' | 'train_only' | 'evaluate_only' | ''>('');
-  const [planLoading, setPlanLoading] = useState(false);
-  const [planError, setPlanError] = useState<string>('');
-  const [generatedPlan, setGeneratedPlan] = useState<AgentPlan | null>(null);
-  const [trainMode, setTrainMode] = useState<'classic_clf' | 'sft_lora'>('classic_clf');
-  const [materialSource, setMaterialSource] = useState<'upload' | 'agent' | null>(null);
-  const [dataAgentOptions, setDataAgentOptions] = useState<DataAgentOptions>({});
+  const [taskDraft, setTaskDraft] = useState<TaskDraft | null>(null);
+  const [taskSpec, setTaskSpec] = useState<TaskDraft | null>(null);
+  const [showAdvancedTaskEditor, setShowAdvancedTaskEditor] = useState(false);
+  const [parsedIntentSnapshot, setParsedIntentSnapshot] = useState('');
+  const [readOnlyPreview, setReadOnlyPreview] = useState(false);
 
-  // Agent 画布内独立的上传/导入（不跳转经典版）
-  const [uploadModalVisible, setUploadModalVisible] = useState(false);
-  const [urlModalVisible, setUrlModalVisible] = useState(false);
+  const [datasetSourceMode, setDatasetSourceMode] = useState<'upload' | 'agent_search' | 'agent_convert'>('upload');
+  const [datasets, setDatasets] = useState<Dataset[]>([]);
+  const [selectedDatasetId, setSelectedDatasetId] = useState<number>();
+  const [datasetValidationReport, setDatasetValidationReport] = useState<Record<string, string> | null>(null);
+  const [rawColumnsInput, setRawColumnsInput] = useState('');
+  const [agentColumnMap, setAgentColumnMap] = useState<Record<string, string>>({});
+
+  const [planSpec, setPlanSpec] = useState({
+    base_model: DEFAULT_BASE_MODEL,
+    training_method: '',
+    trainer_backend: 'llamafactory',
+    learning_rate: 0.00002,
+    batch_size: 16,
+    epochs: 3,
+    max_seq_length: 1024,
+    eval_strategy: 'per_epoch',
+    expected_outputs: ['adapter', 'metrics.json', 'eval_report.json'],
+  });
+
+  const [runSpec, setRunSpec] = useState<RunSpec | null>(null);
+  const [pipeline, setPipeline] = useState<any>(null);
+  const [runLogs, setRunLogs] = useState<string[]>([]);
+  const [chatMessages, setChatMessages] = useState<AgentChatMessage[]>(SAMPLE_AGENT_CONVERSATION.slice(0, 2));
+  const [mcpEvents, setMcpEvents] = useState<McpEvent[]>(SAMPLE_MCP_EVENTS.slice(0, 2));
+  const [mcpDrawerOpen, setMcpDrawerOpen] = useState(false);
+  const [evalConfirmed, setEvalConfirmed] = useState(false);
+  const [chatInput, setChatInput] = useState('');
+  const [flowMode, setFlowMode] = useState<FlowMode | null>(null);
+  const [flowModeConfirmed, setFlowModeConfirmed] = useState(false);
+  const [showStage1Card, setShowStage1Card] = useState(false);
+  const [showStage2Card, setShowStage2Card] = useState(false);
+  const [selectedDomain, setSelectedDomain] = useState('');
+  const [selectedTaskType, setSelectedTaskType] = useState('');
+  const [selectedTaskName, setSelectedTaskName] = useState('');
+  const [taxonomyConfirmed, setTaxonomyConfirmed] = useState(false);
+  const [planTimelineOpen, setPlanTimelineOpen] = useState(false);
+  const [chatSessions, setChatSessions] = useState<ChatSessionItem[]>([
+    { id: 'scenario_finance_full', title: '金融-文本-分类', subtitle: '训练任务-规划中' },
+    { id: 'scenario_med_train', title: '医疗-文本-NER', subtitle: '训练任务-规划中' },
+    { id: 'scenario_legal_eval', title: '法律-文本-摘要', subtitle: '评估任务-规划中' },
+    { id: 'live_new', title: '新建实时对话', subtitle: '训练任务-规划中' },
+  ]);
+  const [activeSessionId, setActiveSessionId] = useState('scenario_finance_full');
+
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [uploadForm] = Form.useForm();
-  const [urlForm] = Form.useForm();
+  const [importForm] = Form.useForm();
   const [fileList, setFileList] = useState<UploadFile[]>([]);
 
-  const intentOptionsFiltered = getIntentOptionsForModel(modelType);
-  const currentIntentValid = modelType && intentOptionsFiltered.some((o) => o.value === modelIntent);
+  const selectedDataset = useMemo(() => datasets.find((d) => d.id === selectedDatasetId), [datasets, selectedDatasetId]);
+
+  const readyDatasetCount = useMemo(() => datasets.filter((d) => d.status === 'ready').length, [datasets]);
+  const stateColor = useMemo(() => {
+    if (state === 'done') return 'success';
+    if (state === 'training_running' || state === 'evaluating') return 'processing';
+    if (state === 'plan_frozen' || state === 'training_queued') return 'warning';
+    return 'default';
+  }, [state]);
+
+  const canEnterStep = (target: number, s: FlowState) => STEP_STATE_RULES[target]?.includes(s) ?? false;
+  const currentFlowStep = useMemo(() => stepByState(state), [state]);
+  const isLocked = readOnlyPreview;
+
+  const goStep = (target: number) => {
+    if (!canEnterStep(target, state)) {
+      message.warning('当前状态不允许进入该页面');
+      return;
+    }
+    setReadOnlyPreview(false);
+    setStep(target);
+  };
+
+  const onStepClick = (target: number) => {
+    if (target < currentFlowStep) {
+      setReadOnlyPreview(true);
+      setStep(target);
+      return;
+    }
+    if (target === currentFlowStep) {
+      setReadOnlyPreview(false);
+      setStep(target);
+      return;
+    }
+    goStep(target);
+  };
+
+  const appendSingleTagToIntent = (
+    tag: string,
+    groupTags: string[],
+    setSelected: React.Dispatch<React.SetStateAction<string | undefined>>
+  ) => {
+    setSelected(tag);
+    setUiSelectedTags((prev) => {
+      const withoutGroup = prev.filter((x) => !groupTags.includes(x));
+      return [...withoutGroup, tag];
+    });
+    setIntentText((prev) => {
+      const parts = prev
+        .split(/[，,]/)
+        .map((x) => x.trim())
+        .filter((x) => x && !groupTags.includes(x));
+      return [...parts, tag].join('，');
+    });
+    if (tag === '图文') setModalityHint('image_text');
+    if (tag === '文本') setModalityHint('text');
+  };
+
+  const allDomainTags = useMemo(() => [...DOMAIN_TAGS, ...customDomainTags], [customDomainTags]);
+
+  const clearSelectedPromptOptions = () => {
+    setSelectedDomainTag(undefined);
+    setSelectedTaskTag(undefined);
+    setSelectedModalityTag(undefined);
+    setCustomDomainInput('');
+    setUiSelectedTags([]);
+    setIntentText('');
+    setTaskDraft(null);
+    setTaskSpec(null);
+    setRunSpec(null);
+    setPipeline(null);
+    setDatasetValidationReport(null);
+    setSelectedDatasetId(undefined);
+    setParsedIntentSnapshot('');
+    setState('draft');
+    setStep(0);
+    setReadOnlyPreview(false);
+    setModalityHint('text');
+  };
+
+  const restartFromStep = (target: number) => {
+    if (['training_queued', 'training_running', 'evaluating'].includes(state)) {
+      message.warning('当前 run 正在执行，暂不支持重开。请先等待完成或终止执行。');
+      return;
+    }
+    Modal.confirm({
+      title: '确认从当前步骤重开流程？',
+      content: '这会推翻后续步骤结果并回到可编辑状态。',
+      okText: '确认重开',
+      cancelText: '取消',
+      onOk: () => {
+        if (target <= 0) {
+          setTaskDraft(null);
+          setTaskSpec(null);
+          setDatasetValidationReport(null);
+          setSelectedDatasetId(undefined);
+          setRunSpec(null);
+          setPipeline(null);
+          setRunLogs([]);
+          setState('draft');
+          setStep(0);
+          setReadOnlyPreview(false);
+          return;
+        }
+        if (target === 1) {
+          if (taskSpec) setTaskDraft(taskSpec);
+          setTaskSpec(null);
+          setDatasetValidationReport(null);
+          setSelectedDatasetId(undefined);
+          setRunSpec(null);
+          setPipeline(null);
+          setRunLogs([]);
+          setState('task_parsed');
+          setStep(1);
+          setReadOnlyPreview(false);
+          return;
+        }
+        if (target === 2) {
+          setDatasetValidationReport(null);
+          setRunSpec(null);
+          setPipeline(null);
+          setRunLogs([]);
+          setState('data_selecting');
+          setStep(2);
+          setReadOnlyPreview(false);
+          return;
+        }
+        setRunSpec(null);
+        setPipeline(null);
+        setRunLogs([]);
+        setState('plan_previewed');
+        setStep(3);
+        setReadOnlyPreview(false);
+      },
+    });
+  };
+
+  const refreshReadyDatasets = async () => {
+    const res = await datasetService.getDatasets('training');
+    setDatasets((res.data?.datasets || []).filter((d) => d.status === 'ready'));
+  };
+
+  const downloadTaskTemplate = () => {
+    const headers = schemaHeadersByTask(taskSpec?.semantic_task_type);
+    const sample = headers.map((h) => `sample_${h}`);
+    const csv = `${headers.join(',')}\n${sample.join(',')}\n`;
+    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `task_template_${taskSpec?.semantic_task_type || 'default'}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const generateAgentColumnMap = () => {
+    const expected = schemaHeadersByTask(taskSpec?.semantic_task_type);
+    const rawCols = rawColumnsInput
+      .split(/[，,\n]/)
+      .map((x) => x.trim())
+      .filter(Boolean);
+    if (rawCols.length === 0) {
+      message.warning('请先输入原始字段名（逗号分隔）');
+      return;
+    }
+    const nextMap: Record<string, string> = {};
+    expected.forEach((targetKey) => {
+      const exact = rawCols.find((r) => r.toLowerCase() === targetKey.toLowerCase());
+      if (exact) {
+        nextMap[targetKey] = exact;
+        return;
+      }
+      const fuzzy = rawCols.find((r) =>
+        r.toLowerCase().includes(targetKey.toLowerCase()) ||
+        targetKey.toLowerCase().includes(r.toLowerCase())
+      );
+      if (fuzzy) nextMap[targetKey] = fuzzy;
+    });
+    setAgentColumnMap(nextMap);
+    message.success('已生成字段映射建议，可继续编辑后导入');
+  };
 
   useEffect(() => {
-    fetchDatasets();
+    void refreshReadyDatasets();
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
+    if (!pipeline?.id || !['queued', 'running'].includes(pipeline.status)) return;
+    const timer = setInterval(async () => {
       try {
-        const res = await trainingService.getJobs();
-        if (!cancelled && res?.data?.jobs) setJobs(res.data.jobs);
-      } catch (_) {
-        if (!cancelled) setJobs([]);
-      } finally {
-        if (!cancelled) setJobsLoading(false);
+        const res = await axios.get(`${API_BASE}/pipelines/${pipeline.id}`);
+        const next = res.data;
+        setPipeline(next);
+        if (next.status === 'queued') setState('training_queued');
+        if (next.status === 'running') {
+          if (next.current_step === 'evaluate') {
+            setState('training_succeeded');
+            setState('evaluating');
+          } else {
+            setState('training_running');
+          }
+        }
+        if (next.status === 'completed') setState('done');
+        if (next.status === 'failed') {
+          if (state === 'evaluating') setState('training_succeeded');
+          else setState('plan_frozen');
+        }
+      } catch {
+        // ignore poll errors
       }
-    })();
-    return () => { cancelled = true; };
-  }, []);
+    }, 2500);
+    return () => clearInterval(timer);
+  }, [pipeline, state]);
 
-  // 切换模型类型时，若当前任务类型不在该类型下可选则清空
   useEffect(() => {
-    if (!modelType || !modelIntent) return;
-    const options = getIntentOptionsForModel(modelType);
-    if (!options.some((o) => o.value === modelIntent)) setModelIntent('');
-  }, [modelType]);
-
-  useEffect(() => {
-    if (currentPipeline && currentPipeline.status === 'running') {
-      const interval = setInterval(() => fetchPipelineStatus(currentPipeline.id), 2000);
-      return () => clearInterval(interval);
-    }
-  }, [currentPipeline]);
-
-  const fetchDatasets = async () => {
-    setDatasetsLoading(true);
-    try {
-      const res = await datasetService.getDatasets('training');
-      if (res?.data?.datasets) {
-        const ready = (res.data.datasets as Dataset[]).filter((d) => d.status === 'ready');
-        setDatasets(ready);
-      } else {
-        setDatasets([]);
-      }
-    } catch (_) {
-      setDatasets([]);
-    } finally {
-      setDatasetsLoading(false);
-    }
-  };
-
-  const handleCanvasUpload = async () => {
-    const values = await uploadForm.validateFields().catch(() => null);
-    if (!values || fileList.length === 0) {
-      message.error('请选择文件');
+    if (!pipeline?.id) return;
+    if (pipeline?.logs && Array.isArray(pipeline.logs)) {
+      setRunLogs(pipeline.logs.map((x: unknown) => String(x)));
       return;
     }
-    const file = fileList[0].originFileObj as File;
-    try {
-      await datasetService.uploadDataset(file, values.name, values.type, 'training');
-      message.success('训练集上传成功，正在处理中...');
-      setUploadModalVisible(false);
-      uploadForm.resetFields();
-      setFileList([]);
-      setTimeout(fetchDatasets, 1000);
-    } catch (e: any) {
-      message.error(e?.message || '上传失败');
+    if (pipeline?.log_lines && Array.isArray(pipeline.log_lines)) {
+      setRunLogs(pipeline.log_lines.map((x: unknown) => String(x)));
     }
-  };
+  }, [pipeline]);
 
-  const handleCanvasImportFromUrl = async () => {
-    const values = await urlForm.validateFields().catch(() => null);
-    if (!values) return;
-    try {
-      await datasetService.importFromUrl({
-        name: values.name,
-        url: values.url,
-        type: values.type || 'text',
-        usage: 'training',
-      });
-      message.success('已提交从 URL 导入，正在拉取并处理...');
-      setUrlModalVisible(false);
-      urlForm.resetFields();
-      setTimeout(fetchDatasets, 1000);
-    } catch (e: any) {
-      message.error(e?.message || '从 URL 导入失败');
-    }
-  };
+  const parseIntent = async () => {
+    if (!intentText.trim()) return message.warning('请先输入训练目标');
 
-  /** 由 Data Agent 选项拼成用于驱动 Agent 的 prompt 片段（可传给后端） */
-  const getDataAgentPromptFragment = () => {
-    const o = dataAgentOptions;
-    const parts: string[] = [];
-    if (o.scale) parts.push(`数据规模：${DATA_AGENT_SCALE.find((x) => x.value === o.scale)?.label ?? o.scale}`);
-    if (o.language) parts.push(`语言：${DATA_AGENT_LANGUAGE.find((x) => x.value === o.language)?.label ?? o.language}`);
-    if (o.domain) parts.push(`领域：${DATA_AGENT_DOMAIN.find((x) => x.value === o.domain)?.label ?? o.domain}`);
-    if (o.recency) parts.push(`时效：${DATA_AGENT_RECENCY.find((x) => x.value === o.recency)?.label ?? o.recency}`);
-    if (o.quality) parts.push(`质量：${DATA_AGENT_QUALITY.find((x) => x.value === o.quality)?.label ?? o.quality}`);
-    if (o.sourcePreference) parts.push(`来源：${DATA_AGENT_SOURCE.find((x) => x.value === o.sourcePreference)?.label ?? o.sourcePreference}`);
-    if (o.customPrompt?.trim()) parts.push(`自定义要求：${o.customPrompt.trim()}`);
-    return parts.join('；');
-  };
-
-  const getPresetGoalText = (preset: 'full_pipeline' | 'train_only' | 'evaluate_only' | '') => {
-    if (preset === 'full_pipeline') return '从数据准备到评估报告，一次跑完整条训练链路';
-    if (preset === 'train_only') return '基于已有训练数据，快速产出一个可用模型';
-    if (preset === 'evaluate_only') return '对已训练模型做评估并生成报告';
-    return '';
-  };
-
-  const handleGeneratePlan = async () => {
-    const goal = goalInput.trim() || getPresetGoalText(goalPreset);
-    if (!goal) {
-      message.warning('请先选择预设目标或输入一句训练目标');
-      return;
-    }
-    setPlanLoading(true);
-    setPlanError('');
-    try {
-      const plan = await agentService.createPlan({
-        goal,
-        model_type: modelType,
-        intent: modelIntent,
-        material_source: materialSource,
-        data_agent_prompt: getDataAgentPromptFragment(),
-        train_mode: trainMode,
-      });
-      setGeneratedPlan(plan);
-
-      // 将规则计划自动映射到当前表单，用户仍可手动调整
-      if (plan.inferred_intent) setModelIntent(plan.inferred_intent);
-      if (plan.train_mode === 'classic_clf' || plan.train_mode === 'sft_lora') setTrainMode(plan.train_mode);
-      if (plan.data_agent_prompt && materialSource === 'agent') {
-        setDataAgentOptions((o) => ({ ...o, customPrompt: plan.data_agent_prompt }));
-      }
-
-      const firstReady = plan.selected_dataset_candidates?.[0]?.id;
-      if (firstReady && !selectedDataset) setSelectedDataset(firstReady);
-      message.success('已生成执行计划');
-    } catch (e: any) {
-      const errMsg = e?.message || '计划生成失败';
-      setPlanError(errMsg);
-      message.error(errMsg);
-    } finally {
-      setPlanLoading(false);
-    }
-  };
-
-  const getStepRationale = (step: string) => {
-    if (!generatedPlan?.steps?.length) return '';
-    return generatedPlan.steps.find((s) => s.name === step)?.rationale || '';
-  };
-
-  const fetchPipelineStatus = async (id: number) => {
-    try {
-      const res = await axios.get(`${API_BASE}/pipelines/${id}`);
-      setCurrentPipeline(res.data);
-    } catch (err) {}
-  };
-
-  const handleStart = async (overrideTrainConfig?: Record<string, unknown>) => {
-    if (!selectedDataset) {
-      message.warning('请先选择数据集');
-      return;
-    }
+    setState('intent_submitted');
     setLoading(true);
     try {
-      const planTrainConfig = generatedPlan?.train_config ?? {};
-      const payload: Record<string, unknown> = {
-        dataset_id: selectedDataset,
-        train_config: {
-          model_type: 'text_classification',
-          base_model: DEFAULT_BASE_MODEL,
-          epochs: 3,
-          learning_rate: 2e-5,
-          batch_size: 16,
-          ...planTrainConfig,
-          ...(overrideTrainConfig || {}),
-        },
+      const plannerGoal = `${intentText.trim()}
+
+【领域审查要求】
+1) 先判断用户选择的领域“${selectedDomainTag || '（未指定）'}”是否合理且客观存在；
+2) 若领域不合理或过于模糊，请给出更合适的领域建议并在结果中提示；
+3) 若领域合理，请沿用该领域继续生成任务草稿。`;
+
+      const plan = await agentService.createPlan({ goal: plannerGoal, model_type: 'text' });
+      const inferred = (plan.inferred_intent || '').toLowerCase();
+      const domain = (plan.intent_resolution?.domain_hint || 'general').toLowerCase();
+      const method = (plan.train_mode || 'classic_clf').toLowerCase();
+      const draft: TaskDraft = {
+        semantic_task_type: inferred || 'classification',
+        domain,
+        modality: modalityHint === 'image_text' ? 'image_text' : 'text',
+        output_structure: inferred.includes('ner') ? 'sequence_tags' : 'classification_label',
+        recommended_metrics: inferred.includes('ner') ? ['entity_f1', 'token_f1'] : ['accuracy', 'macro_f1'],
+        candidate_methods: method === 'sft_lora' ? ['lora', 'qlora'] : ['sft', 'lora'],
+        task_schema_id: inferred.includes('ner') ? 'ner_bio_v1' : 'text_cls_v1',
       };
-      if (materialSource === 'agent') {
-        const fragment = getDataAgentPromptFragment();
-        const promptFromPlan = generatedPlan?.data_agent_prompt;
-        if (fragment || promptFromPlan) payload.data_agent_prompt = fragment || promptFromPlan;
-      }
-      if (generatedPlan?.plan_id) payload.plan_id = generatedPlan.plan_id;
-      if (generatedPlan) payload.plan_payload = generatedPlan;
-      const res = await axios.post(`${API_BASE}/pipelines`, payload);
-      setCurrentPipeline(res.data);
-    } catch (err) {
+      setTaskDraft(draft);
+      setParsedIntentSnapshot(intentText.trim());
+      setState('task_parsed');
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          id: `msg_${Date.now()}`,
+          role: 'agent',
+          stage: 'task_confirm',
+          content: `我已识别为 ${draft.semantic_task_type}/${draft.domain}/${draft.modality}，请确认任务定义。`,
+          timestamp: new Date().toLocaleTimeString('zh-CN'),
+        },
+      ]);
+      message.success('已解析目标（草稿）');
+    } catch (e: any) {
+      setState('draft');
+      message.error(e?.message || '解析失败');
     } finally {
       setLoading(false);
     }
   };
 
-  const getStepIndex = (step: string) => {
-    const steps = ['clean_data', 'train', 'evaluate'];
-    return steps.indexOf(step);
+  const autoDetectOptions = async () => {
+    const text = intentText.trim();
+    if (!text) return message.warning('请先输入训练目标文本');
+    setAutoTagLoading(true);
+    try {
+      const resolved = await agentService.resolveIntent(text);
+      let domainTag = mapDomainHintToTag(resolved.domain_hint);
+      if (!domainTag) {
+        if (text.includes('法律')) domainTag = '法律';
+        else if (text.includes('金融')) domainTag = '金融';
+        else if (text.includes('医疗')) domainTag = '医疗';
+        else if (text.includes('教育')) domainTag = '教育';
+        else if (text.includes('电商')) domainTag = '电商';
+      }
+      if (!domainTag) {
+        const custom = (resolved.domain_hint || '').trim();
+        if (custom) {
+          if (!allDomainTags.includes(custom)) setCustomDomainTags((prev) => [...prev, custom]);
+          domainTag = custom;
+        } else {
+          domainTag = '通用';
+        }
+      }
+      appendSingleTagToIntent(domainTag, [...allDomainTags, domainTag], setSelectedDomainTag);
+
+      const taskTag = inferTaskTagFromText(`${text} ${resolved.inferred_intent || ''}`);
+      appendSingleTagToIntent(taskTag, TASK_TAGS, setSelectedTaskTag);
+
+      const modalityTag = text.includes('图像') || text.includes('图片') || text.includes('多模态') ? '图文' : '文本';
+      if (modalityTag === '文本') {
+        appendSingleTagToIntent('文本', MODALITY_TAGS, setSelectedModalityTag);
+      } else {
+        // 图文未开放，兜底仍选文本
+        appendSingleTagToIntent('文本', MODALITY_TAGS, setSelectedModalityTag);
+      }
+
+      message.success('已自动识别并填充选项，可直接解析目标');
+    } catch (e: any) {
+      message.error(e?.message || '自动识别失败，请手动选择');
+    } finally {
+      setAutoTagLoading(false);
+    }
   };
 
-  const getProgress = () => {
-    if (!currentPipeline) return 0;
-    if (currentPipeline.status === 'completed') return 100;
-    const idx = getStepIndex(currentPipeline.current_step);
-    return ((idx + 1) / 3) * 100;
+  const confirmTask = () => {
+    if (state !== 'task_parsed' || !taskDraft) return message.warning('请先完成任务解析');
+    setTaskSpec(taskDraft);
+    setShowAdvancedTaskEditor(false);
+    setState('data_selecting');
+    setStep(2);
+    setChatMessages((prev) => [
+      ...prev,
+      {
+        id: `msg_${Date.now()}`,
+        role: 'user',
+        stage: 'task_confirm',
+        content: '确认任务定义，进入数据准备。',
+        timestamp: new Date().toLocaleTimeString('zh-CN'),
+      },
+      {
+        id: `msg_${Date.now() + 1}`,
+        role: 'agent',
+        stage: 'data_prepare',
+        content: `请准备符合 schema（${schemaHintByTask(taskDraft.semantic_task_type)}）的数据。`,
+        timestamp: new Date().toLocaleTimeString('zh-CN'),
+      },
+    ]);
   };
 
-  const switchToClassic = () => {
-    localStorage.setItem('app-version', 'classic');
-    window.location.href = '/';
+  const confirmData = () => {
+    if (!['task_confirmed', 'data_selecting', 'data_validating'].includes(state)) {
+      return message.warning('当前状态不能确认数据');
+    }
+    if (!taskSpec) return message.warning('没有 task_confirmed，不能进入数据确认');
+    if (!selectedDatasetId) return message.warning('请先选择数据集');
+
+    setState('data_validating');
+
+    const expectedSchema = schemaHintByTask(taskSpec.semantic_task_type);
+    const expectedMinColumns =
+      expectedSchema.includes('tokens') || expectedSchema.includes('query') ? 3 :
+      expectedSchema.includes('source + summary') ? 2 : 2;
+    const actualColumns = Number(selectedDataset?.column_count || 0);
+    const fieldCheckPassed = actualColumns >= expectedMinColumns;
+
+    if (!selectedDataset?.row_count || selectedDataset.row_count <= 0) {
+      setState('data_selecting');
+      return message.error('数据校验失败：样本数为 0');
+    }
+    if (!fieldCheckPassed) {
+      setDatasetValidationReport({
+        schema_check: 'failed',
+        field_check: `failed（期望至少 ${expectedMinColumns} 列，当前 ${actualColumns} 列）`,
+        sample_count: `${selectedDataset.row_count}`,
+        label_distribution: 'unknown',
+      });
+      setState('data_selecting');
+      return message.error('数据校验失败：字段数不满足当前任务 schema');
+    }
+
+    setDatasetValidationReport({
+      schema_check: 'passed',
+      field_check: `passed（${actualColumns} 列）`,
+      sample_count: `${selectedDataset.row_count}`,
+      label_distribution: 'ok',
+    });
+
+    setState('data_ready');
+    setStep(3);
+    setChatMessages((prev) => [
+      ...prev,
+      {
+        id: `msg_${Date.now()}`,
+        role: 'agent',
+        stage: 'plan_confirm',
+        content: '数据校验通过。我将基于任务与数据生成建议训练计划，请确认。',
+        timestamp: new Date().toLocaleTimeString('zh-CN'),
+      },
+    ]);
   };
 
-  const [themeMode, setThemeMode] = useState<'light' | 'dark'>(() => (localStorage.getItem('app-theme') as 'light' | 'dark') || 'light');
+  const regeneratePlan = async () => {
+    if (state !== 'data_ready' && state !== 'plan_previewed') {
+      return message.warning('没有 data_ready，不能生成训练计划');
+    }
+    setState('plan_generating');
+    try {
+      const recommendedMethod = taskSpec?.candidate_methods?.[0] || planSpec.training_method || 'lora';
+      setPlanSpec((prev) => ({
+        ...prev,
+        training_method: recommendedMethod,
+        eval_strategy: taskSpec?.semantic_task_type?.includes('ner') ? 'per_epoch_entity_f1' : 'per_epoch',
+      }));
+      setState('plan_previewed');
+      message.success('已基于当前任务与数据重新生成建议计划');
+    } catch {
+      setState('data_ready');
+    }
+  };
+
+  const freezePlan = () => {
+    if (state !== 'data_ready' && state !== 'plan_previewed') {
+      return message.warning('当前状态不能冻结计划');
+    }
+    if (!taskSpec) return message.warning('任务未确认');
+    if (!selectedDatasetId) return message.warning('数据未确认');
+    if (!planSpec.training_method.trim()) return message.warning('请填写训练方法');
+
+    const now = new Date().toISOString();
+    const nextRunSpec: RunSpec = {
+      run_id: `run_${Date.now()}`,
+      task_spec: taskSpec,
+      dataset_spec: {
+        dataset_source_mode: datasetSourceMode,
+        dataset_id: selectedDataset ? String(selectedDataset.id) : undefined,
+        raw_file_path: selectedDataset?.original_file_path || undefined,
+        normalized_dataset_path: selectedDataset?.cleaned_file_path || undefined,
+        schema_valid: true,
+        split_strategy: 'preset',
+        train_path: selectedDataset?.cleaned_file_path || undefined,
+        sample_count: selectedDataset?.row_count || undefined,
+      },
+      plan_spec: planSpec,
+      current_state: 'plan_frozen',
+      created_at: now,
+      updated_at: now,
+      owner: 'default_user',
+      intent_draft: {
+        intent_text: intentText,
+        ui_selected_tags: uiSelectedTags,
+        modality_hint: modalityHint,
+      },
+    };
+
+    setRunSpec(nextRunSpec);
+    setState('plan_frozen');
+    setStep(4);
+    setChatMessages((prev) => [
+      ...prev,
+      {
+        id: `msg_${Date.now()}`,
+        role: 'agent',
+        stage: 'train_execute',
+        content: '计划已冻结。你可以启动训练，训练完成后将进入评估确认。',
+        timestamp: new Date().toLocaleTimeString('zh-CN'),
+      },
+    ]);
+  };
+
+  const startRun = async () => {
+    if (state !== 'plan_frozen') return message.warning('没有 plan_frozen，不能启动训练');
+    if (!selectedDatasetId || !runSpec) return;
+
+    setLoading(true);
+    try {
+      const payload: Record<string, unknown> = {
+        dataset_id: selectedDatasetId,
+        train_config: {
+          model_type: 'text_classification',
+          base_model: planSpec.base_model,
+          epochs: planSpec.epochs,
+          batch_size: planSpec.batch_size,
+          learning_rate: planSpec.learning_rate,
+        },
+        run_spec: runSpec,
+      };
+
+      setState('training_queued');
+      const res = await axios.post(`${API_BASE}/pipelines`, payload);
+      setPipeline(res.data);
+      setState('training_running');
+      setMcpEvents((prev) => [
+        ...prev,
+        {
+          id: `mcp_${Date.now()}`,
+          server: 'training',
+          tool: 'trainer.start_job',
+          summary: `提交训练任务成功，pipeline_id=${res.data?.id || '-'}`,
+          status: 'running',
+          timestamp: new Date().toLocaleTimeString('zh-CN'),
+        },
+      ]);
+      message.success('训练已启动');
+    } catch (e: any) {
+      setState('plan_frozen');
+      message.error(e?.message || '启动失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const statusSubtitleByState = (s: FlowState): string => {
+    if (['draft', 'intent_submitted', 'task_parsed', 'task_confirmed', 'data_selecting', 'data_validating', 'data_ready', 'plan_generating', 'plan_previewed'].includes(s)) {
+      return '训练任务-规划中';
+    }
+    if (['plan_frozen', 'training_queued', 'training_running', 'training_succeeded'].includes(s)) {
+      return '训练任务-进行中';
+    }
+    if (['evaluating'].includes(s)) return '评估任务-进行中';
+    if (s === 'done') return '评估任务-已完成';
+    return '任务进行中';
+  };
+
+  const statusAccentBySubtitle = (subtitle: string): string => {
+    if (subtitle.includes('已完成')) return '#52c41a';
+    if (subtitle.includes('进行中')) return '#1677ff';
+    return '#faad14';
+  };
 
   useEffect(() => {
-    localStorage.setItem('app-theme', themeMode);
-  }, [themeMode]);
+    setChatSessions((prev) =>
+      prev.map((it) =>
+        it.id === activeSessionId
+          ? {
+              ...it,
+              subtitle: statusSubtitleByState(state),
+              progress: state === 'training_running' ? 60 : state === 'evaluating' ? 90 : state === 'done' ? 100 : it.progress,
+            }
+          : it
+      )
+    );
+  }, [state, activeSessionId]);
 
-  const jobCount = jobs.length;
-  const isFirstTime = !jobsLoading && jobCount === 0;
-  const isDataAgentRequiredReady =
-    materialSource !== 'agent'
-      ? true
-      : Boolean(dataAgentOptions.scale && dataAgentOptions.language && dataAgentOptions.domain) &&
-        (dataAgentOptions.domain !== 'other' || Boolean(dataAgentOptions.customPrompt?.trim()));
-  const dataAgentRequiredMissing: string[] = [];
-  if (materialSource === 'agent') {
-    if (!dataAgentOptions.scale) dataAgentRequiredMissing.push('数据规模');
-    if (!dataAgentOptions.language) dataAgentRequiredMissing.push('语言');
-    if (!dataAgentOptions.domain) dataAgentRequiredMissing.push('领域');
-    if (dataAgentOptions.domain === 'other' && !dataAgentOptions.customPrompt?.trim()) dataAgentRequiredMissing.push('自定义要求（用于补充领域）');
+  useEffect(() => {
+    const scenario = SAMPLE_SCENARIOS.find((s) => s.id === activeSessionId);
+    if (!scenario) return;
+    setFlowMode(scenario.flowMode);
+    setFlowModeConfirmed(true);
+    setSelectedDomain(scenario.taxonomy.domain);
+    setSelectedTaskType(scenario.taxonomy.type);
+    setSelectedTaskName(scenario.taxonomy.task);
+    setTaxonomyConfirmed(true);
+    setChatMessages(scenario.conversation);
+    setMcpEvents(scenario.mcpTimeline);
+    setShowStage1Card(false);
+    setShowStage2Card(false);
+  }, [activeSessionId]);
+
+  const sendChat = async () => {
+    const text = chatInput.trim();
+    if (!text) return;
+    if (!flowModeConfirmed) {
+      message.warning('请先确认流程模式：全流程 / 仅训练 / 仅评估');
+      return;
+    }
+    if (!taxonomyConfirmed) {
+      message.warning('请先确认领域-类型-任务');
+      return;
+    }
+    setChatMessages((prev) => [
+      ...prev,
+      {
+        id: `msg_${Date.now()}`,
+        role: 'user',
+        stage: 'goal_input',
+        content: text,
+        timestamp: new Date().toLocaleTimeString('zh-CN'),
+      },
+    ]);
+    setIntentText(text);
+    setChatInput('');
+    if (state === 'draft' || state === 'task_parsed') {
+      await parseIntent();
+    }
+  };
+
+  const flowModeLabel = (m: FlowMode): string => {
+    if (m === 'full') return '全流程';
+    if (m === 'train_only') return '仅训练';
+    return '仅评估';
+  };
+
+  const confirmFlowMode = () => {
+    if (!flowMode) {
+      message.warning('请先选择流程模式');
+      return;
+    }
+    setFlowModeConfirmed(true);
+    setShowStage1Card(false);
+    setShowStage2Card(true);
+    setChatMessages((prev) => [
+      ...prev,
+      {
+        id: `msg_${Date.now()}`,
+        role: 'user',
+        stage: 'goal_input',
+        content: `我选择流程模式：${flowModeLabel(flowMode)}。`,
+        timestamp: new Date().toLocaleTimeString('zh-CN'),
+      },
+      {
+        id: `msg_${Date.now() + 1}`,
+        role: 'agent',
+        stage: 'goal_input',
+        content: 'Flow mode confirmed. Next, please confirm domain / type / task.',
+        timestamp: new Date().toLocaleTimeString('zh-CN'),
+      },
+    ]);
+  };
+
+  const confirmTaxonomy = () => {
+    if (!selectedDomain || !selectedTaskType || !selectedTaskName) {
+      message.warning('请完整选择领域、类型和任务');
+      return;
+    }
+    setTaxonomyConfirmed(true);
+    setShowStage2Card(false);
+    setChatInput(`${selectedDomain}，${selectedTaskType}，${selectedTaskName}。`);
+    setChatMessages((prev) => [
+      ...prev,
+      {
+        id: `msg_${Date.now()}`,
+        role: 'user',
+        stage: 'task_confirm',
+        content: `确认分类：${selectedDomain} / ${selectedTaskType} / ${selectedTaskName}`,
+        timestamp: new Date().toLocaleTimeString('zh-CN'),
+      },
+      {
+        id: `msg_${Date.now() + 1}`,
+        role: 'agent',
+        stage: 'task_confirm',
+        content: '分类已记录。请在输入框补充业务目标、数据来源和约束，我会开始规划。',
+        timestamp: new Date().toLocaleTimeString('zh-CN'),
+      },
+    ]);
+  };
+
+  const prototypeMode = true;
+  if (prototypeMode) {
+  const activeSession = chatSessions.find((s) => s.id === activeSessionId);
+    return (
+      <div className="agent-canvas" data-theme="light">
+        <div className="canvas-main">
+          <div className="agent-proto-header">
+            <Typography.Title level={4} style={{ margin: 0 }}>
+              Agent 训练编排中心
+            </Typography.Title>
+            <Button onClick={() => setMcpDrawerOpen(true)}>数据控制台</Button>
+          </div>
+
+          <Row gutter={[12, 12]}>
+            <Col xs={24} md={7} lg={6}>
+              <Card
+                className="agent-proto-side-card"
+                size="small"
+                title={(
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ fontWeight: 600, fontSize: 13 }}>会话列表</span>
+                    <Space size={4}>
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<PlusOutlined />}
+                        onClick={() => {
+                          const id = `s_${Date.now()}`;
+                          setChatSessions((prev) => [{ id, title: '新建对话', subtitle: '训练任务-规划中' }, ...prev]);
+                          setActiveSessionId(id);
+                          clearSelectedPromptOptions();
+                          setFlowMode(null);
+                          setFlowModeConfirmed(false);
+                          setShowStage1Card(true);
+                          setShowStage2Card(false);
+                          setSelectedDomain('');
+                          setSelectedTaskType('');
+                          setSelectedTaskName('');
+                          setTaxonomyConfirmed(false);
+                          setChatMessages([
+                            {
+                              id: `msg_${Date.now()}`,
+                              role: 'agent',
+                              stage: 'goal_input',
+                              content:
+                                'Hello! I am your training orchestration agent. Let us start with Stage 1: please choose a flow mode.',
+                              timestamp: new Date().toLocaleTimeString('zh-CN'),
+                            },
+                          ]);
+                          setMcpEvents([]);
+                        }}
+                      />
+                    </Space>
+                  </div>
+                )}
+              >
+                <List
+                  dataSource={chatSessions}
+                  renderItem={(item) => (
+                    <List.Item
+                      className={`agent-proto-session-item ${item.id === activeSessionId ? 'agent-proto-session-item-active' : ''}`}
+                      onClick={() => setActiveSessionId(item.id)}
+                    >
+                      <div style={{ width: '100%', position: 'relative' }}>
+                        <div className="agent-proto-session-accent" style={{ background: statusAccentBySubtitle(item.subtitle) }} />
+                        <div style={{ fontWeight: 600, paddingRight: 30, lineHeight: 1.45, marginBottom: 4 }}>{item.title}</div>
+                        <Button
+                          type="text"
+                          size="small"
+                          icon={<DeleteOutlined />}
+                          className="agent-proto-session-delete"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setChatSessions((prev) => prev.filter((x) => x.id !== item.id));
+                            if (activeSessionId === item.id) {
+                              const next = chatSessions.find((x) => x.id !== item.id);
+                              if (next) setActiveSessionId(next.id);
+                            }
+                          }}
+                        />
+                        <div style={{ fontSize: 12, color: '#52c41a', lineHeight: 1.45 }}>{item.subtitle}</div>
+                        {typeof item.progress === 'number' && (
+                          <>
+                            <div style={{ fontSize: 12, color: '#8c8c8c' }}>进度：{item.progress}%</div>
+                            <div className="agent-proto-progress-track">
+                              <div className="agent-proto-progress-fill" style={{ width: `${Math.max(0, Math.min(100, item.progress))}%` }} />
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </List.Item>
+                  )}
+                />
+              </Card>
+            </Col>
+
+            <Col xs={24} md={17} lg={18}>
+              <Card
+                className="agent-proto-main-card"
+                size="small"
+                title={(
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Space>
+                      <span style={{ fontWeight: 600 }}>{activeSession?.title || '当前对话'}</span>
+                      <span style={{ color: '#52c41a' }}>{activeSession?.subtitle || ''}</span>
+                    </Space>
+                    <Space size={4}>
+                      <Button type="text" size="small" icon={<EyeOutlined />} onClick={() => setPlanTimelineOpen(true)} />
+                      <Button type="text" size="small" icon={<PaperClipOutlined />} onClick={() => setMcpDrawerOpen(true)} />
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<EditOutlined />}
+                        onClick={() => {
+                          const current = activeSession?.title || '';
+                          const next = window.prompt('请输入新的对话名称', current);
+                          if (!next) return;
+                          setChatSessions((prev) => prev.map((s) => (s.id === activeSessionId ? { ...s, title: next } : s)));
+                        }}
+                      />
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<DeleteOutlined />}
+                        onClick={() => {
+                          setChatMessages([]);
+                          clearSelectedPromptOptions();
+                        }}
+                      />
+                    </Space>
+                  </div>
+                )}
+              >
+                <div className="agent-proto-chat-stream">
+                  <List
+                    dataSource={chatMessages}
+                    renderItem={(m) => (
+                      <List.Item className={`agent-proto-chat-row ${m.role === 'user' ? 'agent-proto-chat-row-user' : 'agent-proto-chat-row-agent'}`}>
+                        <div className={`agent-proto-bubble ${m.role === 'agent' ? 'agent-proto-bubble-agent' : 'agent-proto-bubble-user'}`}>
+                          <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 4 }}>
+                            {m.role === 'agent' ? 'Agent' : m.role === 'user' ? '你' : '系统'} · {m.timestamp}
+                          </div>
+                          <div>{m.content}</div>
+                        </div>
+                      </List.Item>
+                    )}
+                  />
+                  {showStage1Card && (
+                    <Card size="small" title="阶段 1：确认流程模式" style={{ marginBottom: 10 }}>
+                      <Space wrap>
+                        {[
+                          { key: 'full', label: '全流程（训练+评估）' },
+                          { key: 'train_only', label: '仅训练' },
+                          { key: 'eval_only', label: '仅评估' },
+                        ].map((item) => (
+                          <Button
+                            key={item.key}
+                            type={flowMode === item.key ? 'primary' : 'default'}
+                            onClick={() => setFlowMode(item.key as FlowMode)}
+                            disabled={flowModeConfirmed}
+                          >
+                            {item.label}
+                          </Button>
+                        ))}
+                        <Button type="dashed" onClick={confirmFlowMode} disabled={flowModeConfirmed}>
+                          {flowModeConfirmed ? '已确认流程模式' : '确认流程模式'}
+                        </Button>
+                      </Space>
+                    </Card>
+                  )}
+                  {showStage2Card && (
+                    <Card size="small" title="阶段 2：确认领域-类型-任务" style={{ marginBottom: 10 }}>
+                      <Row gutter={[8, 8]}>
+                        <Col span={8}>
+                          <Select
+                            value={selectedDomain || undefined}
+                            onChange={setSelectedDomain}
+                            placeholder="领域"
+                            disabled={!flowModeConfirmed || taxonomyConfirmed}
+                            style={{ width: '100%' }}
+                            options={['金融', '医疗', '法律', '电商', '教育', '通用'].map((x) => ({ label: x, value: x }))}
+                          />
+                        </Col>
+                        <Col span={8}>
+                          <Select
+                            value={selectedTaskType || undefined}
+                            onChange={setSelectedTaskType}
+                            placeholder="类型"
+                            disabled={!flowModeConfirmed || taxonomyConfirmed}
+                            style={{ width: '100%' }}
+                            options={['文本', '图文', '语音文本'].map((x) => ({ label: x, value: x }))}
+                          />
+                        </Col>
+                        <Col span={8}>
+                          <Select
+                            value={selectedTaskName || undefined}
+                            onChange={setSelectedTaskName}
+                            placeholder="任务"
+                            disabled={!flowModeConfirmed || taxonomyConfirmed}
+                            style={{ width: '100%' }}
+                            options={['分类', 'NER', '摘要', '生成', '匹配排序'].map((x) => ({ label: x, value: x }))}
+                          />
+                        </Col>
+                      </Row>
+                      <div style={{ marginTop: 8 }}>
+                        <Button type="dashed" onClick={confirmTaxonomy} disabled={!flowModeConfirmed || taxonomyConfirmed}>
+                          {taxonomyConfirmed ? '已确认领域-类型-任务' : '确认领域-类型-任务'}
+                        </Button>
+                      </div>
+                    </Card>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <Input.TextArea
+                    rows={3}
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    placeholder="请输入你的训练/评估目标、约束条件或修改意见…"
+                    disabled={!flowModeConfirmed || !taxonomyConfirmed}
+                  />
+                  <Button type="primary" onClick={() => void sendChat()} disabled={!flowModeConfirmed || !taxonomyConfirmed}>
+                    发送
+                  </Button>
+                </div>
+              </Card>
+            </Col>
+          </Row>
+        </div>
+
+        <Drawer
+          title="MCP 信息窗口（示例）"
+          open={mcpDrawerOpen}
+          onClose={() => setMcpDrawerOpen(false)}
+          width={460}
+        >
+          <Tabs
+            items={[
+              {
+                key: 'live',
+                label: '当前事件',
+                children: (
+                  <List
+                    size="small"
+                    dataSource={mcpEvents}
+                    renderItem={(evt) => (
+                      <List.Item>
+                        <div>
+                          <Typography.Text strong>{evt.server}.{evt.tool}</Typography.Text>
+                          <Tag style={{ marginLeft: 8 }} color={evt.status === 'success' ? 'success' : evt.status === 'failed' ? 'error' : 'processing'}>
+                            {evt.status}
+                          </Tag>
+                          <div style={{ marginTop: 4, fontSize: 12 }}>{evt.summary}</div>
+                          <Typography.Text type="secondary" style={{ fontSize: 12 }}>{evt.timestamp}</Typography.Text>
+                        </div>
+                      </List.Item>
+                    )}
+                  />
+                ),
+              },
+              {
+                key: 'sample',
+                label: '全流程示例',
+                children: (
+                  <List
+                    size="small"
+                    dataSource={SAMPLE_MCP_EVENTS}
+                    renderItem={(evt) => (
+                      <List.Item>
+                        <div>
+                          <Typography.Text strong>{evt.server}.{evt.tool}</Typography.Text>
+                          <div style={{ marginTop: 4, fontSize: 12 }}>{evt.summary}</div>
+                        </div>
+                      </List.Item>
+                    )}
+                  />
+                ),
+              },
+            ]}
+          />
+        </Drawer>
+
+        <Modal
+          title="规划阶段时间线"
+          open={planTimelineOpen}
+          onCancel={() => setPlanTimelineOpen(false)}
+          footer={null}
+        >
+          <Timeline
+            items={[
+              { color: flowModeConfirmed ? 'green' : 'gray', children: '已确认流程模式（全流程/仅训练/仅评估）' },
+              { color: taxonomyConfirmed ? 'green' : 'gray', children: '已确认领域-类型-任务' },
+              { color: chatMessages.some((m) => m.stage === 'plan_confirm') ? 'blue' : 'gray', children: 'Planner 已输出建议计划' },
+              { color: mcpEvents.length > 0 ? 'blue' : 'gray', children: 'MCP 事件流已接入可视化窗口' },
+            ]}
+          />
+        </Modal>
+      </div>
+    );
   }
 
   return (
-    <div className="agent-canvas" data-theme={themeMode}>
-      {/* 左侧边栏：主题切换 + 版本切换，固定于左下角，带简短文字提示 */}
-      <aside className="canvas-sider">
-        <div className="canvas-sider-inner">
-          <div className="canvas-sider-theme-wrap">
-            <span
-              className="canvas-sider-icon"
-              onClick={() => setThemeMode((t) => (t === 'light' ? 'dark' : 'light'))}
-              title={themeMode === 'light' ? '切换到深色模式' : '切换到浅色模式'}
-            >
-              {themeMode === 'light' ? <MoonOutlined /> : <SunOutlined />}
-            </span>
-            <span className="canvas-sider-hint">{themeMode === 'light' ? '切换深色' : '切换浅色'}</span>
-          </div>
-          <div className="canvas-sider-version-wrap">
-            <Switch
-              checked
-              onChange={() => switchToClassic()}
-              checkedChildren="Agent"
-              unCheckedChildren="经典"
-              size="small"
-              className="canvas-sider-version-switch"
-            />
-            <span className="canvas-sider-hint">切换到经典版</span>
-          </div>
-        </div>
-      </aside>
-
+    <div className="agent-canvas" data-theme="light">
       <div className="canvas-main">
-      <div className="canvas-header">
-        <div className="canvas-title">
-          <RobotOutlined style={{ fontSize: 32, marginRight: 12 }} />
-          <div>
-            <h1>训练从意图开始</h1>
-            <p>说出训练目标与数据来源，由 Agent 自动完成清洗、训练与评估</p>
-          </div>
-        </div>
-        {entryDismissed && (
-          <Button type="link" icon={<HomeOutlined />} onClick={() => { setEntryDismissed(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
-            返回首页
-          </Button>
-        )}
-      </div>
+        <PageHero
+          className="canvas-header"
+          icon={<RobotOutlined />}
+          title="Agent 训练编排中心"
+          subtitle="保留专业 UI 面板风格，使用状态机驱动五阶段流程。"
+          extra={(
+            <Button
+              className="canvas-back-to-classic-btn"
+              onClick={() => {
+                localStorage.setItem('app-version', 'classic');
+                window.location.href = '/';
+              }}
+            >
+              返回经典版工作台
+            </Button>
+          )}
+        />
 
-      {/* 入口区：引导语 + 任务列表（可收起）或零状态 + CTA；展开步骤后仅保留收起条+展开图标；首次使用时展开后隐藏整块 */}
-      <div className={`canvas-entry-block ${entryDismissed ? 'canvas-entry-block-collapsed' : ''} ${entryDismissed && isFirstTime ? 'canvas-entry-block-hidden' : ''}`}>
-        <div className="canvas-entry-inner">
-          {!jobsLoading && (
-            <>
-              {!entryDismissed ? (
-                <>
-                  {isFirstTime ? (
-                    <div className="canvas-entry-zero">
-                      <p className="canvas-entry-hint">还没有训练记录，点击下方开始创建你的第一次训练</p>
-                      <ul className="canvas-entry-guide">
-                        <li>选择训练目标（如情感分类、主题分类、多分类等）</li>
-                        <li>准备或上传数据集，或由 Data Agent 规划数据来源</li>
-                        <li>由 Agent 自动完成清洗、训练与评估</li>
-                      </ul>
-                    </div>
-                  ) : (
-                    <div className="canvas-entry-list-wrap">
-                      <p className="canvas-entry-hint">已进行 <strong>{jobCount}</strong> 次训练任务，点击下方创建新的训练任务</p>
-                      <ul className="canvas-entry-job-list">
-                        {jobs.slice(0, 8).map((j) => (
-                          <li key={j.id} className="canvas-entry-job-item">
-                            <ExperimentOutlined style={{ color: 'rgba(0,0,0,0.45)', marginRight: 8 }} />
-                            <span className="canvas-entry-job-name">{j.name || `训练任务 #${j.id}`}</span>
-                            <span
-                              className="canvas-entry-job-status"
-                              style={{
-                                color: j.status === 'completed' ? '#52c41a' : j.status === 'failed' || j.status === 'cancelled' ? '#ff4d4f' : '#1890ff',
+        <Row gutter={[12, 12]} style={{ marginBottom: 12 }}>
+          <Col xs={24} md={8}>
+            <Card>
+              <Statistic
+                title="当前状态"
+                value={state}
+                valueStyle={{ fontSize: 18 }}
+                suffix={<Tag color={stateColor}>{state === 'done' ? '已完成' : '进行中'}</Tag>}
+              />
+            </Card>
+          </Col>
+          <Col xs={24} md={8}>
+            <Card>
+              <Statistic title="就绪数据集" value={readyDatasetCount} prefix={<DatabaseOutlined />} />
+            </Card>
+          </Col>
+          <Col xs={24} md={8}>
+            <Card>
+              <Statistic title="Run ID" value={runSpec?.run_id || '-'} valueStyle={{ fontSize: 16 }} />
+            </Card>
+          </Col>
+        </Row>
+
+        <div className="canvas-board canvas-flat-board">
+          <Row gutter={[16, 16]}>
+            <Col xs={24} lg={18}>
+              <Card title="Agent 五阶段流程" className="step-card">
+                <Steps
+                  current={step}
+                  onChange={onStepClick}
+                  items={[
+                    { title: '目标输入' },
+                    { title: '任务确认' },
+                    { title: '数据准备' },
+                    { title: '计划确认' },
+                    { title: '训练执行' },
+                    { title: '评估确认与结果' },
+                  ]}
+                  style={{ marginBottom: 16 }}
+                />
+                <Card size="small" title="Agent 对话确认流" style={{ marginBottom: 12 }}>
+                  <List
+                    size="small"
+                    dataSource={chatMessages}
+                    renderItem={(m) => (
+                      <List.Item>
+                        <div style={{ width: '100%' }}>
+                          <Typography.Text strong>{m.role === 'agent' ? 'Agent' : m.role === 'user' ? '你' : '系统'}</Typography.Text>
+                          <Typography.Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>{m.timestamp}</Typography.Text>
+                          <div style={{ marginTop: 4 }}>{m.content}</div>
+                        </div>
+                      </List.Item>
+                    )}
+                  />
+                </Card>
+                {isLocked && (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    style={{ marginBottom: 12 }}
+                    message="当前为历史回看模式，内容已锁定不可编辑"
+                    action={
+                      <Button size="small" type="link" onClick={() => restartFromStep(step)}>
+                        从当前步骤重开流程
+                      </Button>
+                    }
+                  />
+                )}
+
+                {step === 0 && (
+                  <Row gutter={[12, 12]}>
+                    <Col xs={24}>
+                      <Space direction="vertical" style={{ width: '100%' }} size="middle">
+                        <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+                          单入口模式：快捷标签仅用于补全描述文本，不直接写入结构化字段或推进流程状态。
+                        </Typography.Text>
+                        <div style={{ position: 'relative' }}>
+                          <Input.TextArea
+                            rows={4}
+                            value={intentText}
+                            onChange={(e) => setIntentText(e.target.value)}
+                            placeholder="请描述你想训练什么模型、解决什么任务、希望输出什么结果（例如：训练一个金融文本模型，用于识别财报中的公司、金额和时间实体）"
+                            style={{ paddingRight: 40 }}
+                            disabled={isLocked}
+                          />
+                          <Button
+                            type="text"
+                            icon={<DeleteOutlined />}
+                            title="清空当前选项"
+                            onClick={clearSelectedPromptOptions}
+                            style={{ position: 'absolute', top: 6, right: 6, color: 'rgba(0,0,0,0.45)' }}
+                            disabled={isLocked}
+                          />
+                        </div>
+                        <div>
+                          <Typography.Text strong style={{ marginRight: 8 }}>领域：</Typography.Text>
+                          <Space wrap>
+                            {allDomainTags.map((x) => (
+                              <Tag className="flat-option-tag"
+                                key={x}
+                                color={selectedDomainTag === x ? 'blue' : 'default'}
+                                onClick={isLocked ? undefined : () => appendSingleTagToIntent(x, allDomainTags, setSelectedDomainTag)}
+                              >
+                                {x}
+                              </Tag>
+                            ))}
+                          </Space>
+                          <Space style={{ marginTop: 8 }}>
+                            <Input
+                              size="small"
+                              placeholder="自定义领域（如：政务、制造）"
+                              value={customDomainInput}
+                              onChange={(e) => setCustomDomainInput(e.target.value)}
+                              style={{ width: 220 }}
+                              disabled={isLocked}
+                            />
+                            <Button
+                              size="small"
+                              disabled={isLocked}
+                              onClick={() => {
+                                const v = customDomainInput.trim();
+                                if (!v) return;
+                                if (!allDomainTags.includes(v)) {
+                                  setCustomDomainTags((prev) => [...prev, v]);
+                                }
+                                appendSingleTagToIntent(v, [...allDomainTags, v], setSelectedDomainTag);
+                                setCustomDomainInput('');
                               }}
                             >
-                              {j.status === 'queued' || j.status === 'running' ? '进行中' : j.status === 'completed' ? '已完成' : j.status === 'failed' ? '失败' : '已取消'}
-                            </span>
-                            <span className="canvas-entry-job-time">
-                              {j.created_at ? new Date(j.created_at).toLocaleString('zh-CN') : ''}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                  <Button
-                    type="primary"
-                    size="large"
-                    icon={<ThunderboltOutlined />}
-                    className={isFirstTime ? 'canvas-entry-cta canvas-entry-cta-prominent' : 'canvas-entry-cta'}
-                    onClick={() => setEntryDismissed(true)}
-                  >
-                    {isFirstTime ? '开始第一次训练' : '新的训练任务'}
-                  </Button>
-                </>
-              ) : (
-                <>
-                  {jobCount > 0 && (
-                    <div className="canvas-entry-collapsed-bar" ref={entryCollapsedBarRef}>
-                      <span className="canvas-entry-collapsed-text">已进行 <strong>{jobCount}</strong> 次训练任务</span>
+                              创建并选择
+                            </Button>
+                          </Space>
+                        </div>
+                        <div>
+                          <Typography.Text strong style={{ marginRight: 8 }}>模态：</Typography.Text>
+                          <Space wrap>
+                            {MODALITY_TAGS.map((x) => (
+                              <Tag className="flat-option-tag"
+                                key={x}
+                                color={selectedModalityTag === x ? 'blue' : 'default'}
+                                style={x === '图文' ? { cursor: 'not-allowed', opacity: 0.6 } : undefined}
+                                onClick={isLocked || x === '图文' ? undefined : () => appendSingleTagToIntent(x, MODALITY_TAGS, setSelectedModalityTag)}
+                              >
+                                {x}{x === '图文' ? '（未开放）' : ''}
+                              </Tag>
+                            ))}
+                          </Space>
+                        </div>
+                        <div>
+                          <Typography.Text strong style={{ marginRight: 8 }}>任务：</Typography.Text>
+                          <Space wrap>
+                            {TASK_TAGS.map((x) => (
+                              <Tag className="flat-option-tag"
+                                key={x}
+                                color={selectedTaskTag === x ? 'blue' : 'default'}
+                                onClick={isLocked ? undefined : () => appendSingleTagToIntent(x, TASK_TAGS, setSelectedTaskTag)}
+                              >
+                                {x}
+                              </Tag>
+                            ))}
+                          </Space>
+                        </div>
+                        <Button
+                          type="primary"
+                          loading={loading}
+                          disabled={isLocked}
+                          icon={taskDraft && intentText.trim() === parsedIntentSnapshot ? <ArrowRightOutlined /> : undefined}
+                          onClick={() => {
+                            if (taskDraft && intentText.trim() === parsedIntentSnapshot) {
+                              goStep(1);
+                              return;
+                            }
+                            void parseIntent();
+                          }}
+                        >
+                          {taskDraft && intentText.trim() === parsedIntentSnapshot ? '下一步：任务确认' : '请解析目标'}
+                        </Button>
+                        <Button
+                          type="default"
+                          loading={autoTagLoading}
+                          disabled={isLocked}
+                          onClick={() => void autoDetectOptions()}
+                        >
+                          Agent 自动识别选项
+                        </Button>
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                          文本框是唯一主入口；下方选项仅用于快速补全输入，适合新手快速明确任务目标。
+                        </Typography.Text>
+                        <Card title="Planner 解析预览" size="small" className="planner-preview-flat">
+                          {taskDraft ? (
+                            <Descriptions column={1} size="small">
+                              <Descriptions.Item label="intent_text">{intentText || '-'}</Descriptions.Item>
+                              <Descriptions.Item label="parsed_task_draft">
+                                {`${taskDraft.semantic_task_type} / ${taskDraft.domain} / ${taskDraft.modality}`}
+                              </Descriptions.Item>
+                              <Descriptions.Item label="输出结构">{taskDraft.output_structure}</Descriptions.Item>
+                              <Descriptions.Item label="候选方法">{taskDraft.candidate_methods.join(', ') || '-'}</Descriptions.Item>
+                            </Descriptions>
+                          ) : (
+                            <Alert
+                              type="info"
+                              showIcon
+                              message="尚未解析"
+                              description="输入训练目标并点击“解析目标”后，这里展示 parsed_task_draft。"
+                            />
+                          )}
+                        </Card>
+                      </Space>
+                    </Col>
+                  </Row>
+                )}
+
+                {step === 1 && taskDraft && (
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <Card size="small" title="当前任务卡（Planner 草稿）">
+                      <Descriptions bordered column={1} size="small">
+                        <Descriptions.Item label="任务类型">{bilingual(taskDraft.semantic_task_type, TASK_CN_MAP)}</Descriptions.Item>
+                        <Descriptions.Item label="领域">{bilingual(taskDraft.domain, DOMAIN_CN_MAP)}</Descriptions.Item>
+                        <Descriptions.Item label="模态">{bilingual(taskDraft.modality, MODALITY_CN_MAP)}</Descriptions.Item>
+                        <Descriptions.Item label="推荐训练方法">{bilingualList(taskDraft.candidate_methods, METHOD_CN_MAP)}</Descriptions.Item>
+                        <Descriptions.Item label="推荐指标">{bilingualList(taskDraft.recommended_metrics, METRIC_CN_MAP)}</Descriptions.Item>
+                      </Descriptions>
+                    </Card>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                       <Button
                         type="link"
                         size="small"
-                        icon={entryListExpanded ? <UpOutlined /> : <DownOutlined />}
-                        onClick={() => {
-                          const next = !entryListExpanded;
-                          setEntryListExpanded(next);
-                          if (next) {
-                            setTimeout(() => {
-                              entryCollapsedBarRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                            }, 80);
-                          }
-                        }}
-                        className="canvas-entry-expand-btn"
+                        style={{ paddingRight: 0, color: 'rgba(0,0,0,0.45)' }}
+                        onClick={() => setShowAdvancedTaskEditor((v) => !v)}
                       >
-                        {entryListExpanded ? '收起' : '展开'}
+                        {showAdvancedTaskEditor ? '收起高级编辑' : '高级编辑（可选）'}
                       </Button>
                     </div>
-                  )}
-                  {jobCount > 0 && entryListExpanded && (
-                    <ul className="canvas-entry-job-list canvas-entry-job-list-collapsed">
-                      {jobs.slice(0, 8).map((j) => (
-                        <li key={j.id} className="canvas-entry-job-item">
-                          <ExperimentOutlined style={{ color: 'rgba(0,0,0,0.45)', marginRight: 8 }} />
-                          <span className="canvas-entry-job-name">{j.name || `训练任务 #${j.id}`}</span>
-                          <span
-                            className="canvas-entry-job-status"
-                            style={{
-                              color: j.status === 'completed' ? '#52c41a' : j.status === 'failed' || j.status === 'cancelled' ? '#ff4d4f' : '#1890ff',
-                            }}
-                          >
-                            {j.status === 'queued' || j.status === 'running' ? '进行中' : j.status === 'completed' ? '已完成' : j.status === 'failed' ? '失败' : '已取消'}
-                          </span>
-                          <span className="canvas-entry-job-time">
-                            {j.created_at ? new Date(j.created_at).toLocaleString('zh-CN') : ''}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </>
-              )}
-            </>
-          )}
-          {jobsLoading && <div className="canvas-entry-loading">加载中…</div>}
-        </div>
-      </div>
-
-      {/* 步骤区：与入口动效衔接，展开后展示步骤卡片 */}
-      <div className={`canvas-steps-reveal ${entryDismissed ? 'canvas-steps-reveal-open' : ''}`}>
-      {!currentPipeline ? (
-        <div className="canvas-setup">
-          {canvasStep === 3 ? (
-            <div className="canvas-flow">
-              <p className="canvas-flow-hint">
-                根据你在步骤 1、2 的输入，下方为编排层生成的训练计划；选择数据集即可启动流水线。
-              </p>
-              <Card className="canvas-step-card canvas-step-single" title={<span><span className="canvas-step-badge">步骤 3</span> 训练计划与执行</span>}>
-                <h3 style={{ marginBottom: 8, fontWeight: 600, fontSize: 15 }}>计划摘要</h3>
-                {generatedPlan ? (
-                  <div className="canvas-plan-card">
-                    <p style={{ color: 'rgba(0,0,0,0.65)', fontSize: 13, marginBottom: 12 }}>
-                      <strong>目标：</strong>{generatedPlan.goal}
-                    </p>
-                    <Space wrap style={{ marginBottom: 8 }}>
-                      <Tag color="blue">意图：{generatedPlan.inferred_intent}</Tag>
-                      {generatedPlan.train_mode && <Tag color="purple">训练方式：{generatedPlan.train_mode === 'sft_lora' ? 'SFT+LoRA' : '经典分类'}</Tag>}
-                      <Tag color="geekblue">预计耗时：{generatedPlan.estimated_duration_minutes || '--'} 分钟</Tag>
-                      {generatedPlan.plan_id && <Tag color="processing">{generatedPlan.plan_id}</Tag>}
-                    </Space>
-                    {generatedPlan.task_spec && (
-                      <div style={{ fontSize: 12, color: 'rgba(0,0,0,0.6)', marginBottom: 8 }}>
-                        <div>
-                          <strong>问题族：</strong>{generatedPlan.task_spec.problem_family}；<strong>输出：</strong>{generatedPlan.task_spec.output_form}
-                        </div>
-                        <div>
-                          <strong>最小数据列：</strong>{generatedPlan.task_spec.required_columns.join(' + ')}
-                        </div>
-                        {generatedPlan.task_spec.notes && <div style={{ marginTop: 4 }}>{generatedPlan.task_spec.notes}</div>}
-                      </div>
+                    {showAdvancedTaskEditor && (
+                      <Card size="small" title="高级编辑区">
+                        <Space direction="vertical" style={{ width: '100%' }}>
+                          <div>
+                            <Typography.Text strong>任务类型</Typography.Text>
+                            <Select
+                              style={{ width: '100%', marginTop: 6 }}
+                              value={taskDraft.semantic_task_type}
+                            disabled={isLocked}
+                              onChange={(v) => setTaskDraft({ ...taskDraft, semantic_task_type: v })}
+                              options={TASK_TYPE_OPTIONS.map((x) => ({ label: x, value: x }))}
+                            />
+                          </div>
+                          <div>
+                            <Typography.Text strong>领域</Typography.Text>
+                            <Select
+                              style={{ width: '100%', marginTop: 6 }}
+                              value={taskDraft.domain}
+                            disabled={isLocked}
+                              onChange={(v) => setTaskDraft({ ...taskDraft, domain: v })}
+                              options={DOMAIN_OPTIONS.map((x) => ({ label: x, value: x }))}
+                            />
+                          </div>
+                          <div>
+                            <Typography.Text strong>模态</Typography.Text>
+                            <Select
+                              style={{ width: '100%', marginTop: 6 }}
+                              value={taskDraft.modality}
+                            disabled={isLocked}
+                              onChange={(v) => setTaskDraft({ ...taskDraft, modality: v })}
+                              options={MODALITY_OPTIONS.map((x) => ({ label: x, value: x, disabled: x === 'image_text' }))}
+                            />
+                          </div>
+                          <div>
+                            <Typography.Text strong>方法建议（轻编辑）</Typography.Text>
+                            <Select
+                              mode="tags"
+                              style={{ width: '100%', marginTop: 6 }}
+                              value={taskDraft.candidate_methods}
+                            disabled={isLocked}
+                              onChange={(values) => setTaskDraft({ ...taskDraft, candidate_methods: values })}
+                              options={taskDraft.candidate_methods.map((x) => ({ label: x, value: x }))}
+                            />
+                          </div>
+                        </Space>
+                      </Card>
                     )}
-                    <ul className="canvas-plan-steps">
-                      {generatedPlan.steps.map((s) => (
-                        <li key={s.name}>
-                          <strong>{s.agent}</strong> · {s.name}：{s.rationale}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : (
-                  <p style={{ color: 'rgba(0,0,0,0.55)', fontSize: 13, marginBottom: 16 }}>
-                    根据你的选择，我们将进行 <strong>{MODEL_TYPE_OPTIONS.find((o) => o.value === modelType)?.label ?? '文本'}</strong> + <strong>{INTENT_OPTIONS.find((o) => o.value === modelIntent)?.label ?? '分类'}</strong> 的训练。
-                    {intentNote && (
-                      <span> 你的补充：{intentNote.slice(0, 80)}{intentNote.length > 80 ? '…' : ''}</span>
-                    )}
-                  </p>
-                )}
-                {materialSource === 'agent' && (
-                  <p className="canvas-agent-plan-note">
-                    你选择了由 Data Agent 从外部规划数据源；该能力完善后将自动执行。当前请先选择已有数据集以启动流水线。
-                  </p>
-                )}
-                <div className="canvas-plan-desc">
-                  流程：数据清洗 → 模型训练 → 模型评估。请选择已准备好的数据集并启动流水线。
-                </div>
-                <Space direction="vertical" size="large" style={{ width: '100%' }}>
-                  <div>
-                    <label>选择数据集</label>
-                    <Select
-                      placeholder={datasetsLoading ? '加载中…' : '选择已清洗的数据集'}
-                      style={{ width: '100%', marginTop: 6 }}
-                      value={selectedDataset}
-                      onChange={setSelectedDataset}
-                      options={datasets.map((d) => ({ label: d.name, value: d.id }))}
-                      size="large"
-                      loading={datasetsLoading}
-                      notFoundContent={null}
-                    />
-                    {!datasetsLoading && datasets.length === 0 && (
-                      <p className="canvas-no-data-hint" style={{ marginTop: 8, fontSize: 12, color: 'rgba(0,0,0,0.45)' }}>
-                        暂无已清洗的数据集，请返回步骤 2 在「数据集上传与选择」中上传或从 URL 导入。
-                      </p>
-                    )}
-                  </div>
-                  <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-                    <Button type="default" icon={<EditOutlined />} onClick={() => setCanvasStep(2)}>
-                      返回修改
-                    </Button>
                     <Space>
-                      <Button type="default" onClick={handleGeneratePlan} loading={planLoading}>
-                        刷新计划
-                      </Button>
-                      <Button
-                        type="primary"
-                        size="large"
-                        icon={<PlayCircleOutlined />}
-                        onClick={() => handleStart()}
-                        loading={loading}
-                        disabled={!selectedDataset}
-                      >
-                        启动 Agent 流水线
-                      </Button>
+                      <Button onClick={() => goStep(0)} disabled={isLocked}>返回</Button>
+                      <Button type="primary" onClick={confirmTask} disabled={isLocked}>确认任务</Button>
                     </Space>
                   </Space>
-                </Space>
-              </Card>
-            </div>
-          ) : (
-            <div className={`canvas-slider ${canvasStep === 2 ? 'canvas-slider-step2' : ''}`}>
-              <div className="canvas-slider-track">
-                <div className="canvas-slider-panel">
-                  <p className="canvas-flow-hint">
-                    先确认训练目标，确认后将进入下一步：选择数据准备方式。
-                  </p>
-                  <Card className="canvas-step-card" title={<span><span className="canvas-step-badge">步骤 1</span> 训练目标确认</span>}>
-                    <p className="canvas-step-desc">先确认要训练的模型类型与任务目标，Agent 将据此规划流程。</p>
-                    <div className="canvas-goal-block">
-                      <div className="canvas-goal-title">目标优先入口</div>
-                      <Space wrap style={{ marginBottom: 10 }}>
-                        <Button type={goalPreset === 'full_pipeline' ? 'primary' : 'default'} onClick={() => { setGoalPreset('full_pipeline'); setGoalInput(getPresetGoalText('full_pipeline')); }}>
-                          从数据到评估
-                        </Button>
-                        <Button type={goalPreset === 'train_only' ? 'primary' : 'default'} onClick={() => { setGoalPreset('train_only'); setGoalInput(getPresetGoalText('train_only')); }}>
-                          仅训练
-                        </Button>
-                        <Button type={goalPreset === 'evaluate_only' ? 'primary' : 'default'} onClick={() => { setGoalPreset('evaluate_only'); setGoalInput(getPresetGoalText('evaluate_only')); }}>
-                          仅评估
-                        </Button>
-                      </Space>
-                      <Input.TextArea
-                        placeholder="例如：用电商评论训练一个情感分类模型，自动完成清洗、训练和评估"
-                        value={goalInput}
-                        onChange={(e) => setGoalInput(e.target.value)}
-                        rows={2}
-                        maxLength={300}
-                        showCount
-                      />
-                      <div style={{ marginTop: 10 }}>
-                        <div style={{ marginBottom: 6, fontWeight: 500 }}>训练方式（范式）</div>
-                        <Radio.Group
-                          value={trainMode}
-                          onChange={(e) => setTrainMode(e.target.value)}
-                          style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}
-                        >
-                          <Radio value="classic_clf">经典分类训练（分类头）</Radio>
-                          <Radio value="sft_lora">SFT + LoRA 微调（参数高效）</Radio>
-                        </Radio.Group>
-                        <div style={{ marginTop: 6, fontSize: 12, color: 'rgba(0,0,0,0.55)' }}>
-                          系统会把该选择转成可执行的训练脚本路由（`text_classification` / `sft_finetune`）。
-                        </div>
-                      </div>
-                      <div className="canvas-goal-actions">
-                        <Button type="default" onClick={handleGeneratePlan} loading={planLoading}>
-                          生成执行计划
-                        </Button>
-                        {generatedPlan?.plan_id && <Tag color="processing">计划ID: {generatedPlan.plan_id}</Tag>}
-                      </div>
-                      {planError && <div className="canvas-required-hint">{planError}</div>}
-                    </div>
-                    <div style={{ marginBottom: 16 }}>
-                      <div style={{ marginBottom: 8, fontWeight: 500 }}>训练的是什么模型？</div>
-                      <Radio.Group
-                        value={modelType}
-                        onChange={(e) => setModelType(e.target.value)}
-                        style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 8 }}
-                      >
-                        {MODEL_TYPE_OPTIONS.map((opt) => {
-                          const available = opt.value === 'text';
-                          return (
-                            <Radio key={opt.value} value={opt.value} disabled={!available} style={{ marginRight: 0 }} className={!available ? 'canvas-option-locked' : ''}>
-                              <span>{opt.label}</span>
-                              <span style={{ marginLeft: 6, fontWeight: 400, color: 'rgba(0,0,0,0.55)', fontSize: 12 }}>{opt.desc}</span>
-                              {!available && <Tag color="default" style={{ marginLeft: 8, fontSize: 11 }}>开发中</Tag>}
-                            </Radio>
-                          );
-                        })}
-                      </Radio.Group>
-                    </div>
-                    <div style={{ marginBottom: 12 }}>
-                      <div style={{ marginBottom: 8, fontWeight: 500 }}>任务类型（训练目标）</div>
-                      {!modelType ? (
-                        <p style={{ fontSize: 13, color: 'rgba(0,0,0,0.45)', marginBottom: 0 }}>
-                          请先选择上方「训练的是什么模型？」，再选择本项。
-                        </p>
-                      ) : (
-                        <Radio.Group
-                          value={currentIntentValid ? modelIntent : undefined}
-                          onChange={(e) => setModelIntent(e.target.value)}
-                          style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 8 }}
-                        >
-                          {intentOptionsFiltered.map((opt) => {
-                            const available = opt.value === 'sentiment';
-                            return (
-                              <Radio key={opt.value} value={opt.value} disabled={!available} style={{ marginRight: 0 }} className={!available ? 'canvas-option-locked' : ''}>
-                                <span>{opt.label}</span>
-                                <span style={{ marginLeft: 6, fontWeight: 400, color: 'rgba(0,0,0,0.55)', fontSize: 12 }}>{opt.desc}</span>
-                                {!available && <Tag color="default" style={{ marginLeft: 8, fontSize: 11 }}>开发中</Tag>}
-                              </Radio>
-                            );
-                          })}
-                        </Radio.Group>
-                      )}
-                    </div>
-                    <div>
-                      <div style={{ marginBottom: 8, fontWeight: 500 }}>补充说明（可选）</div>
-                      <Input.TextArea
-                        placeholder="例如：希望区分好评/中评/差评，或标注业务场景、数据来源等"
-                        value={intentNote}
-                        onChange={(e) => setIntentNote(e.target.value)}
-                        rows={2}
-                        maxLength={500}
-                        showCount
-                      />
-                    </div>
-                  </Card>
-                  <div className="canvas-flow-actions">
-                    <Button
-                      type="primary"
-                      size="large"
-                      icon={<ArrowRightOutlined />}
-                      onClick={() => setCanvasStep(2)}
-                      disabled={!modelType || !modelIntent}
-                    >
-                      下一步
-                    </Button>
-                  </div>
-                </div>
-                <div className="canvas-slider-panel">
-                  <p className="canvas-flow-hint">
-                    选择数据准备方式后，右侧会出现对应附属卡片：上传/选择数据集，或设定 Data Agent 的获取偏好。
-                  </p>
-                  <div className="canvas-step2-row">
-                    <Card className="canvas-step-card canvas-step2-main" title={<span><span className="canvas-step-badge">步骤 2</span> 训练数据准备</span>}>
-                      <p className="canvas-step-desc">先确认是哪种数据准备方式，再在右侧附属卡片中完成具体操作。</p>
-                      <Radio.Group
-                        value={materialSource}
-                        onChange={(e) => {
-                          setMaterialSource(e.target.value);
-                          if (e.target.value === 'agent') setSelectedDataset(undefined);
-                        }}
-                        style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}
-                      >
-                        <Radio value="upload" style={{ marginRight: 0 }}>
-                          <strong>我已有材料</strong>（在右侧卡片中上传或选择数据集）
-                        </Radio>
-                        <Radio value="agent" style={{ marginRight: 0 }}>
-                          <strong>由 Data Agent 自行规划</strong>（在右侧卡片中设定获取偏好与自定义要求）
-                        </Radio>
-                      </Radio.Group>
+                )}
+
+                {step === 2 && (
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <Card size="small" title="固定任务卡">
+                      <Descriptions bordered column={1} size="small">
+                        <Descriptions.Item label="当前任务">
+                          {taskSpec ? `${taskSpec.domain} / ${taskSpec.semantic_task_type} / ${taskSpec.modality}` : '未确认'}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="所需数据 schema">
+                          {schemaHintByTask(taskSpec?.semantic_task_type)}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="默认指标">
+                          {taskSpec?.recommended_metrics?.join(', ') || '-'}
+                        </Descriptions.Item>
+                      </Descriptions>
                     </Card>
-                    {materialSource === 'upload' && (
-                      <Card className="canvas-step-card canvas-step2-side" title="数据集上传与选择">
-                        <p className="canvas-step-desc">在 Agent 画布内完成上传或从 URL 导入，无需跳转其他页面。</p>
+
+                    <Card size="small" title="数据来源方式">
+                      <Space direction="vertical" style={{ width: '100%' }}>
                         <Select
-                          placeholder={datasetsLoading ? '加载中…' : '选择已清洗的数据集'}
-                          style={{ width: '100%', marginBottom: 12 }}
-                          value={selectedDataset}
-                          onChange={setSelectedDataset}
-                          options={datasets.map((d) => ({ label: d.name, value: d.id }))}
-                          size="large"
-                          loading={datasetsLoading}
-                          notFoundContent={null}
+                          value={datasetSourceMode}
+                          disabled={isLocked}
+                          onChange={setDatasetSourceMode}
+                          options={[
+                            { label: '上传符合 schema 的数据', value: 'upload' },
+                            { label: '上传原始材料，由 Data Agent 转换', value: 'agent_convert' },
+                            { label: '由 Data Agent 搜索公开数据集', value: 'agent_search' },
+                          ]}
                         />
-                        <Space direction="vertical" style={{ width: '100%' }} size={8}>
-                          <Button type="default" block icon={<UploadOutlined />} onClick={() => setUploadModalVisible(true)}>
-                            本地上传
-                          </Button>
-                          <Button type="default" block icon={<LinkOutlined />} onClick={() => setUrlModalVisible(true)}>
-                            从 URL 导入
-                          </Button>
+                        <Space>
+                          <Button icon={<UploadOutlined />} onClick={() => setUploadOpen(true)} disabled={isLocked}>上传</Button>
+                          <Button icon={<LinkOutlined />} onClick={() => setImportOpen(true)} disabled={isLocked}>URL 导入</Button>
                         </Space>
-                        {!datasetsLoading && datasets.length === 0 && (
-                          <p style={{ marginTop: 12, fontSize: 12, color: 'rgba(0,0,0,0.45)' }}>
-                            暂无就绪数据集，请先使用上方按钮上传或导入。
-                          </p>
-                        )}
-                      </Card>
-                    )}
-                    {materialSource === 'agent' && (
-                      <Card className="canvas-step-card canvas-step2-side" title="Data Agent 规划选项">
-                        <p className="canvas-step-desc">设定数据获取偏好，这些选项将加入驱动 Data Agent 的 prompt。</p>
-                        {!isDataAgentRequiredReady && (
-                          <div className="canvas-required-hint">
-                            请先完成必填项：{dataAgentRequiredMissing.join('、')}
-                          </div>
-                        )}
-                        <Space direction="vertical" style={{ width: '100%' }} size={12}>
-                          <div>
-                            <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>
-                              数据规模 <span className="canvas-field-required">必填</span>
-                            </label>
-                            <Select
-                              placeholder="请选择"
-                              style={{ width: '100%' }}
-                              value={dataAgentOptions.scale}
-                              onChange={(v) => setDataAgentOptions((o) => ({ ...o, scale: v }))}
-                              options={DATA_AGENT_SCALE.map((x) => ({ label: x.label, value: x.value }))}
-                              allowClear
-                            />
-                          </div>
-                          <div>
-                            <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>
-                              语言 <span className="canvas-field-required">必填</span>
-                            </label>
-                            <Select
-                              placeholder="请选择"
-                              style={{ width: '100%' }}
-                              value={dataAgentOptions.language}
-                              onChange={(v) => setDataAgentOptions((o) => ({ ...o, language: v }))}
-                              options={DATA_AGENT_LANGUAGE.map((x) => ({ label: x.label, value: x.value }))}
-                              allowClear
-                            />
-                          </div>
-                          <div>
-                            <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>
-                              领域 <span className="canvas-field-required">必填</span>
-                            </label>
-                            <Select
-                              placeholder="请选择"
-                              style={{ width: '100%' }}
-                              value={dataAgentOptions.domain}
-                              onChange={(v) => setDataAgentOptions((o) => ({ ...o, domain: v }))}
-                              options={DATA_AGENT_DOMAIN.map((x) => ({ label: x.label, value: x.value }))}
-                              allowClear
-                            />
-                          </div>
-                          <div>
-                            <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>
-                              时效 <span className="canvas-field-optional">选填</span>
-                            </label>
-                            <Select
-                              placeholder="请选择"
-                              style={{ width: '100%' }}
-                              value={dataAgentOptions.recency}
-                              onChange={(v) => setDataAgentOptions((o) => ({ ...o, recency: v }))}
-                              options={DATA_AGENT_RECENCY.map((x) => ({ label: x.label, value: x.value }))}
-                              allowClear
-                            />
-                          </div>
-                          <div>
-                            <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>
-                              质量要求 <span className="canvas-field-optional">选填</span>
-                            </label>
-                            <Select
-                              placeholder="请选择"
-                              style={{ width: '100%' }}
-                              value={dataAgentOptions.quality}
-                              onChange={(v) => setDataAgentOptions((o) => ({ ...o, quality: v }))}
-                              options={DATA_AGENT_QUALITY.map((x) => ({ label: x.label, value: x.value }))}
-                              allowClear
-                            />
-                          </div>
-                          <div>
-                            <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>
-                              来源偏好 <span className="canvas-field-optional">选填</span>
-                            </label>
-                            <Select
-                              placeholder="请选择"
-                              style={{ width: '100%' }}
-                              value={dataAgentOptions.sourcePreference}
-                              onChange={(v) => setDataAgentOptions((o) => ({ ...o, sourcePreference: v }))}
-                              options={DATA_AGENT_SOURCE.map((x) => ({ label: x.label, value: x.value }))}
-                              allowClear
-                            />
-                          </div>
-                          <div>
-                            <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>
-                              自定义要求 {dataAgentOptions.domain === 'other' ? <span className="canvas-field-required">必填</span> : <span className="canvas-field-optional">选填</span>}
-                            </label>
-                            <Input.TextArea
-                              placeholder="例如：仅使用近两年数据、需包含多方言、排除某类来源等"
-                              value={dataAgentOptions.customPrompt ?? ''}
-                              onChange={(e) => setDataAgentOptions((o) => ({ ...o, customPrompt: e.target.value }))}
-                              rows={3}
-                              maxLength={500}
-                              showCount
-                            />
-                          </div>
+                        <Select
+                          value={selectedDatasetId}
+                          disabled={isLocked}
+                          onChange={setSelectedDatasetId}
+                          options={datasets.map((d) => ({ label: `${d.name} (ID:${d.id})`, value: d.id }))}
+                          placeholder="选择已就绪数据集"
+                        />
+                        <Divider style={{ margin: '8px 0' }} />
+                        <Typography.Text strong>模式A：标准模板填充（推荐）</Typography.Text>
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                          根据当前任务 schema 生成标准模板（CSV，可用 Excel 打开填写），填写后再上传可降低格式错误。
+                        </Typography.Text>
+                        <Button onClick={downloadTaskTemplate} disabled={isLocked}>下载任务模板（Excel 可打开）</Button>
+
+                        <Divider style={{ margin: '8px 0' }} />
+                        <Typography.Text strong>模式B：Agent 协助字段解析</Typography.Text>
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                          输入你原始数据的字段名，Agent 先给出字段映射建议，再执行导入/转换。
+                        </Typography.Text>
+                        <Input.TextArea
+                          rows={2}
+                          value={rawColumnsInput}
+                          onChange={(e) => setRawColumnsInput(e.target.value)}
+                          placeholder="例如：sentence, sentiment_label, source_id"
+                          disabled={isLocked}
+                        />
+                        <Space>
+                          <Button onClick={generateAgentColumnMap} disabled={isLocked}>Agent 解析字段映射</Button>
+                          <Button onClick={() => setAgentColumnMap({})} disabled={isLocked}>清空映射</Button>
                         </Space>
-                      </Card>
-                    )}
-                  </div>
-                  <div className="canvas-flow-actions">
-                    <Button type="default" onClick={() => setCanvasStep(1)} style={{ marginRight: 8 }}>
-                      上一步
-                    </Button>
-                    <Button
-                      type="primary"
-                      size="large"
-                      icon={<ArrowRightOutlined />}
-                      onClick={() => setCanvasStep(3)}
-                      disabled={
-                        !materialSource ||
-                        (materialSource === 'upload' && !selectedDataset)
-                        || (materialSource === 'agent' && !isDataAgentRequiredReady)
-                      }
-                    >
-                      下一步，制定训练计划
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className="canvas-board">
-          <Row gutter={[16, 16]}>
-            <Col span={24}>
-              <Card>
-                <Statistic
-                  title="流水线进度"
-                  value={getProgress()}
-                  suffix="%"
-                  prefix={currentPipeline.status === 'running' ? <SyncOutlined spin /> : null}
-                />
-                <Progress
-                  percent={getProgress()}
-                  status={currentPipeline.status === 'failed' ? 'exception' : currentPipeline.status === 'completed' ? 'success' : 'active'}
-                  strokeColor={{ from: '#108ee9', to: '#87d068' }}
-                />
-              </Card>
-            </Col>
-          </Row>
+                        {Object.keys(agentColumnMap).length > 0 && (
+                          <Descriptions bordered size="small" column={1} title="字段映射建议（可用于导入）">
+                            {Object.entries(agentColumnMap).map(([target, raw]) => (
+                              <Descriptions.Item key={target} label={target}>
+                                {raw}
+                              </Descriptions.Item>
+                            ))}
+                          </Descriptions>
+                        )}
+                      </Space>
+                    </Card>
 
-          <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
-            <Col span={12}>
-              <Card title="执行步骤" className="step-card">
-                <Steps
-                  direction="vertical"
-                  current={getStepIndex(currentPipeline.current_step)}
-                  status={currentPipeline.status === 'failed' ? 'error' : undefined}
-                >
-                  <Steps.Step title="数据清洗" description={getStepRationale('clean_data') || 'Data Agent 处理中'} />
-                  <Steps.Step title="模型训练" description={getStepRationale('train') || 'Training Agent 执行中'} />
-                  <Steps.Step title="模型评估" description={getStepRationale('evaluate') || 'Evaluation Agent 分析中'} />
-                </Steps>
-              </Card>
-            </Col>
+                    <Card size="small" title="数据检查卡">
+                      <Descriptions bordered column={1} size="small">
+                        <Descriptions.Item label="字段检查">{datasetValidationReport?.field_check || '待检查'}</Descriptions.Item>
+                        <Descriptions.Item label="schema 检查">{datasetValidationReport?.schema_check || '待检查'}</Descriptions.Item>
+                        <Descriptions.Item label="样本数检查">{datasetValidationReport?.sample_count || '待检查'}</Descriptions.Item>
+                        <Descriptions.Item label="标签分布检查">{datasetValidationReport?.label_distribution || '待检查'}</Descriptions.Item>
+                      </Descriptions>
+                    </Card>
 
-            <Col span={12}>
-              <Card title="MCP 消息流" className="mcp-card">
-                <Timeline>
-                  <Timeline.Item color="green">
-                    <p><strong>Session ID:</strong> {currentPipeline.session_id.slice(0, 8)}...</p>
-                  </Timeline.Item>
-                  <Timeline.Item color={getStepIndex(currentPipeline.current_step) >= 0 ? 'green' : 'gray'}>
-                    <p>Data Agent: clean_data</p>
-                    <Tag color="success">已完成</Tag>
-                    <p style={{ marginTop: 6, color: 'rgba(0,0,0,0.55)' }}>{getStepRationale('clean_data') || '清洗和标准化输入数据。'}</p>
-                  </Timeline.Item>
-                  <Timeline.Item color={getStepIndex(currentPipeline.current_step) >= 1 ? 'blue' : 'gray'}>
-                    <p>Training Agent: train</p>
-                    {currentPipeline.job_id && <Tag color="processing">Job #{currentPipeline.job_id}</Tag>}
-                    <p style={{ marginTop: 6, color: 'rgba(0,0,0,0.55)' }}>{getStepRationale('train') || '按计划配置执行训练。'}</p>
-                  </Timeline.Item>
-                  <Timeline.Item color={getStepIndex(currentPipeline.current_step) >= 2 ? 'blue' : 'gray'}>
-                    <p>Evaluation Agent: evaluate</p>
-                    {currentPipeline.model_id && <Tag color="processing">Model #{currentPipeline.model_id}</Tag>}
-                    <p style={{ marginTop: 6, color: 'rgba(0,0,0,0.55)' }}>{getStepRationale('evaluate') || '输出评估指标与报告。'}</p>
-                  </Timeline.Item>
-                </Timeline>
-              </Card>
-            </Col>
-          </Row>
+                    <Card size="small" title="数据预览表">
+                      <Table
+                        size="small"
+                        rowKey="id"
+                        pagination={{ pageSize: 5 }}
+                        dataSource={datasets}
+                        columns={[
+                          { title: 'ID', dataIndex: 'id', width: 72 },
+                          { title: '名称', dataIndex: 'name' },
+                          { title: '样本数', dataIndex: 'row_count', width: 100, render: (v: number | null) => v ?? '-' },
+                          { title: '状态', dataIndex: 'status', width: 90 },
+                        ]}
+                      />
+                    </Card>
 
-          <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
-            <Col span={24}>
-              <Card title="执行结果">
-                {currentPipeline.status === 'completed' && (
-                  <div style={{ textAlign: 'center', padding: 24 }}>
-                    <CheckCircleOutlined style={{ fontSize: 48, color: '#52c41a' }} />
-                    <h2>流水线执行成功</h2>
                     <Space>
-                      <Tag color="blue">训练任务 #{currentPipeline.job_id}</Tag>
-                      <Tag color="green">模型 #{currentPipeline.model_id}</Tag>
+                      <Button onClick={() => {
+                        if (taskSpec) setTaskDraft(taskSpec);
+                        setState('task_parsed');
+                        setStep(1);
+                      }} disabled={isLocked}>返回</Button>
+                      <Button type="primary" onClick={confirmData} disabled={isLocked}>检查并确认数据</Button>
                     </Space>
-                  </div>
+                  </Space>
                 )}
-                {currentPipeline.status === 'failed' && (
-                  <div style={{ textAlign: 'center', padding: 24 }}>
-                    <CloseCircleOutlined style={{ fontSize: 48, color: '#ff4d4f' }} />
-                    <h2>执行失败</h2>
-                    <p>{currentPipeline.error_msg}</p>
-                    <div className="canvas-fallback-actions">
+
+                {step === 3 && (
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <Alert type="warning" message="建议计划预览：确认前不会触发训练执行（provisional）" />
+                    <Card size="small" title="计划预览卡（系统建议）">
+                      <Descriptions bordered column={1} size="small">
+                        <Descriptions.Item label="当前任务">
+                          {taskSpec ? `${taskSpec.domain} / ${taskSpec.semantic_task_type} / ${taskSpec.modality}` : '-'}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="数据集">
+                          {selectedDataset ? `${selectedDataset.name} (ID:${selectedDataset.id})` : '-'}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="推荐训练方法">
+                          {planSpec.training_method || taskSpec?.candidate_methods?.[0] || '-'}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="推荐基座模型">
+                          {planSpec.base_model || DEFAULT_BASE_MODEL}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="训练参数摘要">
+                          {`epochs=${planSpec.epochs}, batch_size=${planSpec.batch_size}, learning_rate=${planSpec.learning_rate}`}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="评估方式">
+                          {planSpec.eval_strategy || 'per_epoch'}
+                        </Descriptions.Item>
+                      </Descriptions>
+                    </Card>
+
+                    <Card size="small" title="参数高级设置（可小幅调整）">
+                      <Space direction="vertical" style={{ width: '100%' }}>
+                        <Input
+                          addonBefore="base model（基座模型）"
+                          value={planSpec.base_model}
+                          disabled={isLocked}
+                          onChange={(e) => setPlanSpec({ ...planSpec, base_model: e.target.value })}
+                        />
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                          基座模型：训练前使用的原始模型底座，通常参数越大能力越强、资源消耗越高。
+                        </Typography.Text>
+
+                        <Input
+                          addonBefore="method（训练方法）"
+                          value={planSpec.training_method}
+                          disabled={isLocked}
+                          onChange={(e) => setPlanSpec({ ...planSpec, training_method: e.target.value })}
+                        />
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                          训练方法：如 LoRA / SFT，决定参数更新方式与训练成本。
+                        </Typography.Text>
+
+                        <InputNumber
+                          addonBefore="epochs（训练轮数）"
+                          value={planSpec.epochs}
+                          disabled={isLocked}
+                          onChange={(v) => setPlanSpec({ ...planSpec, epochs: Number(v || 1) })}
+                        />
+                        <InputNumber
+                          addonBefore="batch size（批大小）"
+                          value={planSpec.batch_size}
+                          disabled={isLocked}
+                          onChange={(v) => setPlanSpec({ ...planSpec, batch_size: Number(v || 1) })}
+                        />
+                        <InputNumber
+                          addonBefore="learning rate（学习率）"
+                          value={planSpec.learning_rate}
+                          disabled={isLocked}
+                          step={0.00001}
+                          onChange={(v) => setPlanSpec({ ...planSpec, learning_rate: Number(v || 0.00002) })}
+                        />
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                          小白建议：先使用默认参数直接跑通；仅在效果不佳时再小幅调整（例如学习率减半、epochs +1）。
+                        </Typography.Text>
+                      </Space>
+                    </Card>
+                    <Space>
+                      <Button onClick={() => void regeneratePlan()} disabled={isLocked}>重新生成计划</Button>
+                      <Button onClick={() => {
+                        setState('data_selecting');
+                        setStep(2);
+                      }} disabled={isLocked}>返回修改任务/数据</Button>
+                      <Button type="primary" onClick={freezePlan} disabled={isLocked}>确认并冻结计划</Button>
+                    </Space>
+                  </Space>
+                )}
+
+                {step === 4 && (
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <Alert type={state === 'done' ? 'success' : 'info'} message={state === 'done' ? '本次 Run 已完成' : '执行阶段：按当前 run 查看完整闭环'} />
+                    <Card size="small" title="当前 Run 状态卡">
+                      <Descriptions bordered column={1} size="small">
+                        <Descriptions.Item label="run_id">{runSpec?.run_id || pipeline?.id || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="任务">{taskSpec ? `${taskSpec.domain} / ${taskSpec.semantic_task_type}` : '-'}</Descriptions.Item>
+                        <Descriptions.Item label="数据">{selectedDataset?.name || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="方法">{planSpec.training_method || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="模型">{pipeline?.model_id || planSpec.base_model || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="当前阶段">{pipeline?.current_step || state}</Descriptions.Item>
+                      </Descriptions>
+                    </Card>
+
+                    <Card size="small" title="Timeline（Run 全链路）">
+                      <Timeline
+                        items={[
+                          { color: taskDraft ? 'green' : 'gray', children: '任务已解析（规划完成）' },
+                          { color: state === 'data_ready' || !!pipeline ? 'green' : 'gray', children: '数据已就绪（校验通过）' },
+                          { color: pipeline?.current_step === 'train' || state === 'done' ? 'blue' : 'gray', children: '训练已启动' },
+                          { color: pipeline?.model_id ? 'blue' : 'gray', children: '模型检查点已保存' },
+                          { color: state === 'done' ? 'green' : 'gray', children: '评估已完成' },
+                        ]}
+                      />
+                    </Card>
+
+                    <Card size="small" title="结果区">
+                      <Typography.Text strong>metrics</Typography.Text>
+                      <Descriptions bordered column={2} size="small" style={{ marginTop: 8, marginBottom: 12 }}>
+                        <Descriptions.Item label="accuracy">{pipeline?.metrics?.accuracy ?? '-'}</Descriptions.Item>
+                        <Descriptions.Item label="f1">{pipeline?.metrics?.f1 ?? '-'}</Descriptions.Item>
+                        <Descriptions.Item label="loss">{pipeline?.metrics?.loss ?? '-'}</Descriptions.Item>
+                        <Descriptions.Item label="status">{pipeline?.status || '-'}</Descriptions.Item>
+                      </Descriptions>
+
+                      <Typography.Text strong>产物下载</Typography.Text>
+                      <div style={{ marginTop: 8 }}>
+                        <Space wrap>
+                          <Button disabled={!pipeline?.artifacts?.model_url} href={pipeline?.artifacts?.model_url} target="_blank">
+                            下载模型产物
+                          </Button>
+                          <Button disabled={!pipeline?.artifacts?.metrics_url} href={pipeline?.artifacts?.metrics_url} target="_blank">
+                            下载 metrics.json
+                          </Button>
+                          <Button disabled={!pipeline?.artifacts?.eval_report_url} href={pipeline?.artifacts?.eval_report_url} target="_blank">
+                            下载 eval_report.json
+                          </Button>
+                        </Space>
+                      </div>
+
+                      <Divider style={{ margin: '12px 0' }} />
+                      <Typography.Text strong>日志</Typography.Text>
+                      <List
+                        size="small"
+                        style={{ marginTop: 8, maxHeight: 180, overflowY: 'auto', border: '1px solid #f0f0f0', borderRadius: 6, padding: 8 }}
+                        dataSource={runLogs}
+                        locale={{ emptyText: pipeline?.id ? '当前 run 暂无日志输出（可能后端尚未返回日志流）' : '尚未启动 run，暂无日志' }}
+                        renderItem={(line) => <List.Item style={{ padding: '4px 0', border: 'none' }}>{line}</List.Item>}
+                      />
+
+                      <Divider style={{ margin: '12px 0' }} />
+                      <Typography.Text strong>错误回放</Typography.Text>
+                      <Alert
+                        style={{ marginTop: 8 }}
+                        type={pipeline?.error_message ? 'error' : 'info'}
+                        message={pipeline?.error_message || '暂无错误'}
+                        showIcon
+                      />
+                    </Card>
+                    <Space>
                       <Button
+                        type="primary"
+                        icon={<PlayCircleOutlined />}
+                        loading={loading}
+                        disabled={state === 'training_queued' || state === 'training_running' || state === 'done'}
+                        onClick={() => void startRun()}
+                      >
+                        启动执行
+                      </Button>
+                      <Button type="default"
+                        icon={<SyncOutlined />}
                         onClick={() => {
-                          setSelectedDataset(currentPipeline.dataset_id);
-                          handleStart();
+                          if (!pipeline?.id) return;
+                          void axios.get(`${API_BASE}/pipelines/${pipeline.id}`).then((res) => setPipeline(res.data)).catch(() => {});
                         }}
                       >
-                        重新清洗后重跑
+                        刷新状态
                       </Button>
+                    </Space>
+                    {state === 'training_succeeded' && (
                       <Button
+                        type="primary"
                         onClick={() => {
-                          setSelectedDataset(currentPipeline.dataset_id);
-                          const baseLr = Number((generatedPlan?.train_config?.learning_rate as number) || 2e-5);
-                          handleStart({ learning_rate: baseLr * 0.5, batch_size: 8 });
+                          setStep(5);
+                          setState('evaluating');
+                          setChatMessages((prev) => [
+                            ...prev,
+                            {
+                              id: `msg_${Date.now()}`,
+                              role: 'agent',
+                              stage: 'eval_confirm',
+                              content: '训练已成功，请确认评估策略后执行评估。',
+                              timestamp: new Date().toLocaleTimeString('zh-CN'),
+                            },
+                          ]);
                         }}
                       >
-                        降低学习率重试
+                        进入评估确认
                       </Button>
-                      <Button
-                        onClick={() => {
-                          setMaterialSource('agent');
-                          setCurrentPipeline(null);
-                          setCanvasStep(2);
-                        }}
-                      >
-                        切换数据来源策略
-                      </Button>
-                    </div>
-                  </div>
+                    )}
+                  </Space>
                 )}
-                {currentPipeline.status === 'running' && (
-                  <div style={{ textAlign: 'center', padding: 24 }}>
-                    <SyncOutlined spin style={{ fontSize: 48, color: '#1890ff' }} />
-                    <h2>Agent 正在协同工作...</h2>
-                  </div>
+                {step === 5 && (
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <Card size="small" title="评估确认">
+                      <Descriptions bordered column={1} size="small">
+                        <Descriptions.Item label="评估策略">{planSpec.eval_strategy || 'per_epoch'}</Descriptions.Item>
+                        <Descriptions.Item label="评估指标">{taskSpec?.recommended_metrics?.join(', ') || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="评估对象">{pipeline?.model_id || planSpec.base_model || '-'}</Descriptions.Item>
+                      </Descriptions>
+                      <Space style={{ marginTop: 12 }}>
+                        <Button
+                          type="primary"
+                          onClick={() => {
+                            setEvalConfirmed(true);
+                            setState('done');
+                            setChatMessages((prev) => [
+                              ...prev,
+                              {
+                                id: `msg_${Date.now()}`,
+                                role: 'agent',
+                                stage: 'eval_result',
+                                content: '评估流程已确认并完成（示例）。可在结果区下载报告与产物。',
+                                timestamp: new Date().toLocaleTimeString('zh-CN'),
+                              },
+                            ]);
+                          }}
+                        >
+                          确认评估并完成
+                        </Button>
+                        <Button onClick={() => setStep(4)}>返回训练阶段</Button>
+                      </Space>
+                    </Card>
+                    <Card size="small" title="评估结果（Run 视图）">
+                      <Descriptions bordered column={2} size="small">
+                        <Descriptions.Item label="评估状态">{evalConfirmed ? '已完成' : '待确认'}</Descriptions.Item>
+                        <Descriptions.Item label="run_id">{runSpec?.run_id || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="accuracy">{pipeline?.metrics?.accuracy ?? '-'}</Descriptions.Item>
+                        <Descriptions.Item label="f1">{pipeline?.metrics?.f1 ?? '-'}</Descriptions.Item>
+                      </Descriptions>
+                    </Card>
+                  </Space>
                 )}
-                <div style={{ marginTop: 16, textAlign: 'center' }}>
-                  <Button onClick={() => setCurrentPipeline(null)}>返回配置</Button>
+              </Card>
+            </Col>
+
+            <Col xs={24} lg={6}>
+              <Card title="运行时间线" className="mcp-card compact-run-card">
+                <Button type="link" style={{ paddingLeft: 0 }} onClick={() => setMcpDrawerOpen(true)}>
+                  查看 MCP 信息窗口
+                </Button>
+                <div style={{ marginTop: 12 }}>
+                  <Timeline
+                    style={{ marginTop: 8 }}
+                    items={[
+                      { color: taskDraft ? 'green' : 'gray', children: '任务已解析（规划完成）' },
+                      { color: state === 'data_ready' || !!pipeline ? 'green' : 'gray', children: '数据已就绪（校验通过）' },
+                      { color: pipeline?.current_step === 'train' || state === 'done' ? 'blue' : 'gray', children: '训练已启动' },
+                      { color: pipeline?.model_id ? 'blue' : 'gray', children: '模型检查点已保存' },
+                      { color: state === 'done' ? 'green' : 'gray', children: '评估已完成' },
+                    ]}
+                  />
+                  {state === 'done' && <Alert type="success" icon={<CheckCircleOutlined />} message="已完成" />}
                 </div>
               </Card>
             </Col>
           </Row>
         </div>
-      )}
       </div>
-
-      {/* Agent 画布内独立的上传/导入弹窗（不跳转经典版） */}
-      <Modal
-        title="上传训练集"
-        open={uploadModalVisible}
-        onCancel={() => {
-          setUploadModalVisible(false);
-          uploadForm.resetFields();
-          setFileList([]);
-        }}
-        onOk={() => uploadForm.submit()}
-        okText="上传"
-        cancelText="取消"
+      <Drawer
+        title="MCP 信息窗口（示例）"
+        open={mcpDrawerOpen}
+        onClose={() => setMcpDrawerOpen(false)}
+        width={460}
       >
-        <Form form={uploadForm} layout="vertical" onFinish={handleCanvasUpload}>
-          <Form.Item label="选择文件" required>
-            <Upload
-              beforeUpload={() => false}
-              fileList={fileList}
-              onChange={({ fileList: newList }) => {
-                setFileList(newList);
-                const file = newList[0]?.originFileObj as File | undefined;
-                if (file && !uploadForm.getFieldValue('name')) {
-                  const base = file.name.replace(/\.[^/.]+$/, '');
-                  uploadForm.setFieldsValue({ name: base });
-                }
-              }}
-              maxCount={1}
-              accept=".csv,.json"
-            >
-              <Button icon={<UploadOutlined />}>选择文件（CSV / JSON）</Button>
+        <Tabs
+          items={[
+            {
+              key: 'live',
+              label: '当前事件',
+              children: (
+                <List
+                  size="small"
+                  dataSource={mcpEvents}
+                  renderItem={(evt) => (
+                    <List.Item>
+                      <div>
+                        <Typography.Text strong>{evt.server}.{evt.tool}</Typography.Text>
+                        <Tag style={{ marginLeft: 8 }} color={evt.status === 'success' ? 'success' : evt.status === 'failed' ? 'error' : 'processing'}>
+                          {evt.status}
+                        </Tag>
+                        <div style={{ marginTop: 4, fontSize: 12 }}>{evt.summary}</div>
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>{evt.timestamp}</Typography.Text>
+                      </div>
+                    </List.Item>
+                  )}
+                />
+              ),
+            },
+            {
+              key: 'sample',
+              label: '全流程示例',
+              children: (
+                <List
+                  size="small"
+                  dataSource={SAMPLE_MCP_EVENTS}
+                  renderItem={(evt) => (
+                    <List.Item>
+                      <div>
+                        <Typography.Text strong>{evt.server}.{evt.tool}</Typography.Text>
+                        <div style={{ marginTop: 4, fontSize: 12 }}>{evt.summary}</div>
+                      </div>
+                    </List.Item>
+                  )}
+                />
+              ),
+            },
+          ]}
+        />
+      </Drawer>
+
+      <Modal title="上传训练数据" open={uploadOpen} onCancel={() => setUploadOpen(false)} onOk={() => uploadForm.submit()}>
+        <Form
+          form={uploadForm}
+          layout="vertical"
+          onFinish={async (values) => {
+            if (!fileList.length) return message.warning('请选择文件');
+            await datasetService.uploadDataset(fileList[0].originFileObj as File, values.name, values.type || 'text', 'training');
+            setUploadOpen(false);
+            setFileList([]);
+            uploadForm.resetFields();
+            await refreshReadyDatasets();
+          }}
+        >
+          <Form.Item label="文件" required>
+            <Upload beforeUpload={() => false} fileList={fileList} onChange={({ fileList: f }) => setFileList(f)} maxCount={1}>
+              <Button icon={<UploadOutlined />}>选择文件</Button>
             </Upload>
           </Form.Item>
-          <Form.Item name="name" label="数据集名称" rules={[{ required: true, message: '请输入数据集名称' }]}>
-            <Input placeholder="请输入数据集名称" />
+          <Form.Item name="name" label="名称" rules={[{ required: true }]}>
+            <Input />
           </Form.Item>
-          <Form.Item name="type" label="数据类型" rules={[{ required: true, message: '请选择数据类型' }]}>
-            <Select placeholder="请选择数据类型">
-              <Select.Option value="text">文本（CSV/JSON）</Select.Option>
-              <Select.Option value="instruction">指令/对话（JSON）</Select.Option>
-              <Select.Option value="image">图像</Select.Option>
-            </Select>
+          <Form.Item name="type" label="类型" initialValue="text">
+            <Select options={[{ label: '文本', value: 'text' }]} />
           </Form.Item>
         </Form>
       </Modal>
-      <Modal
-        title="从 URL 导入数据集"
-        open={urlModalVisible}
-        onCancel={() => {
-          setUrlModalVisible(false);
-          urlForm.resetFields();
-        }}
-        onOk={() => urlForm.submit()}
-        okText="导入"
-        cancelText="取消"
-      >
-        <Form form={urlForm} layout="vertical" onFinish={handleCanvasImportFromUrl}>
-          <Form.Item name="name" label="数据集名称" rules={[{ required: true, message: '请输入数据集名称' }]}>
-            <Input placeholder="请输入数据集名称" />
+
+      <Modal title="从 URL 导入" open={importOpen} onCancel={() => setImportOpen(false)} onOk={() => importForm.submit()}>
+        <Form
+          form={importForm}
+          layout="vertical"
+          onFinish={async (values) => {
+            await datasetService.importFromUrl({
+              name: values.name,
+              url: values.url,
+              type: 'text',
+              usage: 'training',
+              column_map: Object.keys(agentColumnMap).length > 0 ? agentColumnMap : undefined,
+            });
+            setImportOpen(false);
+            importForm.resetFields();
+            setTimeout(() => void refreshReadyDatasets(), 1200);
+          }}
+        >
+          <Form.Item name="name" label="名称" rules={[{ required: true }]}>
+            <Input />
           </Form.Item>
-          <Form.Item
-            name="url"
-            label="CSV 文件链接"
-            rules={[
-              { required: true, message: '请输入 CSV 的 URL' },
-              { type: 'url', message: '请输入有效的 URL' },
-            ]}
-          >
-            <Input placeholder="https://example.com/data.csv" />
-          </Form.Item>
-          <Form.Item name="type" label="数据类型" initialValue="text">
-            <Select>
-              <Select.Option value="text">文本</Select.Option>
-              <Select.Option value="image">图像</Select.Option>
-            </Select>
+          <Form.Item name="url" label="URL" rules={[{ required: true }, { type: 'url' }]}>
+            <Input />
           </Form.Item>
         </Form>
       </Modal>
-      </div>
     </div>
   );
 };

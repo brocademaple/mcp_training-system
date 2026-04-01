@@ -1,0 +1,19 @@
+project_name: summarization-sft-research-demo
+base_model: Qwen/Qwen2.5-0.5B-Instruct
+semantic_task:
+  family: Generation
+  name: Summarization
+training_method:
+  name: SFT
+  params: {}
+domain:
+  name: Research
+metrics:
+  - rougeL
+  - bleu
+runtime:
+  epochs: 2
+  batch_size: 4
+  learning_rate: 0.0002
+artifacts:
+  output_dir: outputs/summarization-sft-research

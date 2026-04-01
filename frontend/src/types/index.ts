@@ -6,6 +6,10 @@ export interface Dataset {
   type: string;
   /** 用途：training 训练集 | test 测试集，与列表 Tab 一一对应，删除/操作互不影响 */
   usage?: 'training' | 'test';
+  /** 由「从训练集划分测试集」生成时，对应训练集 id（Go sql.NullInt64 序列化可能为 { Int64, Valid }） */
+  derived_from_dataset_id?: number | null | { Int64: number; Valid: boolean };
+  /** 来源训练集名称（列表 JOIN 返回；可能为 { String, Valid }） */
+  derived_from_dataset_name?: string | null | { String: string; Valid: boolean };
   source: string | null;
   original_file_path: string | null;
   cleaned_file_path: string | null;
@@ -26,6 +30,8 @@ export interface TrainingJob {
   dataset_id?: number | null;
   name?: string;
   model_type: string;
+  /** 统一 RunSpec（后端返回时可能含推导或持久化结果） */
+  run_spec?: RunSpec | Record<string, unknown>;
   hyperparams: {
     learning_rate: number;
     batch_size: number;
@@ -89,4 +95,86 @@ export interface ApiResponse<T = any> {
   code: number;
   message: string;
   data?: T;
+}
+
+export type RunCurrentState =
+  | 'draft'
+  | 'intent_submitted'
+  | 'task_parsed'
+  | 'task_confirmed'
+  | 'data_selecting'
+  | 'data_validating'
+  | 'data_ready'
+  | 'plan_generating'
+  | 'plan_previewed'
+  | 'plan_frozen'
+  | 'training_queued'
+  | 'training_running'
+  | 'training_succeeded'
+  | 'evaluating'
+  | 'done';
+
+export interface IntentDraftSpec {
+  intent_text: string;
+  ui_selected_tags?: string[];
+  modality_hint?: string;
+}
+
+export interface TaskSpec {
+  semantic_task_type: string;
+  domain: string;
+  modality: string;
+  output_structure: string;
+  recommended_metrics: string[];
+  candidate_methods: string[];
+  task_schema_id: string;
+}
+
+export interface DatasetSpec {
+  dataset_source_mode: 'upload' | 'agent_search' | 'agent_convert' | string;
+  dataset_id?: string;
+  raw_file_path?: string;
+  normalized_dataset_path?: string;
+  schema_valid: boolean;
+  split_strategy: 'preset' | 'auto_split' | string;
+  train_path?: string;
+  valid_path?: string;
+  test_path?: string;
+  sample_count?: number;
+}
+
+export interface PlanSpec {
+  base_model: string;
+  training_method: string;
+  trainer_backend: string;
+  learning_rate: number;
+  batch_size: number;
+  epochs: number;
+  max_seq_length?: number;
+  eval_strategy: string;
+  expected_outputs: string[];
+}
+
+export interface RunTrace {
+  trace_id: string;
+  run_id: string;
+  agent_name: string;
+  action: string;
+  input_ref?: string;
+  output_ref?: string;
+  status: string;
+  timestamp: string;
+}
+
+export interface RunSpec {
+  run_id: string;
+  task_spec: TaskSpec;
+  dataset_spec: DatasetSpec;
+  plan_spec: PlanSpec;
+  current_state: RunCurrentState;
+  created_at: string;
+  updated_at: string;
+  owner?: string;
+  intent_draft?: IntentDraftSpec;
+  run_trace?: RunTrace[];
 }

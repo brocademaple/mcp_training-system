@@ -51,10 +51,11 @@ func (a *TrainingAgent) Train(jobID int) error {
 	var datasetIDNull sql.NullInt64
 	var modelType string
 	var hyperparamsJSON []byte
+	var runSpecBytes []byte
 	err := a.db.QueryRow(`
-		SELECT dataset_id, model_type, hyperparams
+		SELECT dataset_id, model_type, hyperparams, run_spec
 		FROM training_jobs WHERE id = $1
-	`, jobID).Scan(&datasetIDNull, &modelType, &hyperparamsJSON)
+	`, jobID).Scan(&datasetIDNull, &modelType, &hyperparamsJSON, &runSpecBytes)
 	if err != nil {
 		utils.Error("TrainingAgent: Failed to query job: %v", err)
 		return fmt.Errorf("failed to query job: %v", err)
@@ -68,6 +69,12 @@ func (a *TrainingAgent) Train(jobID int) error {
 	var hyperparams map[string]interface{}
 	if err := json.Unmarshal(hyperparamsJSON, &hyperparams); err != nil {
 		return fmt.Errorf("failed to parse hyperparams: %v", err)
+	}
+	if len(runSpecBytes) > 0 {
+		if rs, err := models.ParseRunSpec(runSpecBytes); err == nil {
+			hyperparams = models.MergeRunSpecIntoHyperparams(hyperparams, rs)
+			modelType = models.ExecutionModelType(rs)
+		}
 	}
 	hyperparams["job_id"] = jobID
 
@@ -95,11 +102,14 @@ func (a *TrainingAgent) Train(jobID int) error {
 	models.SetTrainingJobStarted(a.db, jobID)
 	utils.Info("TrainingAgent: Job %d status updated to running", jobID)
 
-	// 4. Prepare Python command（按 model_type 选择脚本：sft_finetune → finetune.py，其余 → train_text_clf.py）
+	// 4. Prepare Python command（按 model_type / RunSpec 路由脚本）
 	hyperparamsJSON, _ = json.Marshal(hyperparams)
 	script := "training/train_text_clf.py"
-	if modelType == "sft_finetune" {
+	switch modelType {
+	case "sft_finetune", "token_classification":
 		script = "training/finetune.py"
+	case "dpo_alignment":
+		script = "training/dpo_train.py"
 	}
 	pyName, pyArgs := a.executor.CommandArgs(script, datasetPath, string(hyperparamsJSON))
 	cmd := exec.Command(pyName, pyArgs...)

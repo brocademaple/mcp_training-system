@@ -1,0 +1,17 @@
+domains:
+  - id: General
+    label_zh: 通用
+  - id: Finance
+    label_zh: 金融
+  - id: Medical
+    label_zh: 医疗
+  - id: Legal
+    label_zh: 法律
+  - id: Education
+    label_zh: 教育
+  - id: Code
+    label_zh: 代码
+  - id: Research
+    label_zh: 科研
+  - id: ECommerce
+    label_zh: 电商

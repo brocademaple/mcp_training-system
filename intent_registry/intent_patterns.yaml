@@ -1,0 +1,79 @@
+# Agent 意图识别规则（关键词加权）。扩展时增加 patterns / domain_hints 条目即可。
+version: 1
+
+# 每条：id、intent（与前端/Planner 一致）、weight、keywords（任一中即加分）、negative_keywords（命中则整组跳过）
+patterns:
+  - id: sentiment_basic
+    intent: sentiment
+    weight: 3
+    keywords: ["情感", "正负", "褒贬", "满意度", "sentiment", "positive", "negative"]
+  - id: topic_news
+    intent: topic
+    weight: 3
+    keywords: ["主题", "新闻分类", "类目", "topic", "category"]
+  - id: binary_clf
+    intent: binary
+    weight: 2
+    keywords: ["二分类", "两类", "是或否", "binary"]
+  - id: multiclass
+    intent: multiclass
+    weight: 2
+    keywords: ["多分类", "多标签", "multiclass", "multi-class"]
+  - id: intent_cls
+    intent: intent
+    weight: 2
+    keywords: ["意图", "intent", "槽位", "对话意图"]
+  - id: ner_basic
+    intent: ner
+    weight: 3
+    keywords: ["实体", "NER", "命名实体", "人名", "地名", "机构", "BIO", "序列标注"]
+  - id: summary_gen
+    intent: summary
+    weight: 3
+    keywords: ["摘要", "生成", "续写", "summarization", "摘要生成", "写文章"]
+  - id: extraction_info
+    intent: extraction
+    weight: 2
+    keywords: ["抽取", "关系抽取", "事件抽取", "三元组", "结构化信息", "json提取", "信息抽取", "relation extraction"]
+  - id: rewriting_text
+    intent: rewriting
+    weight: 3
+    keywords: ["改写", "复述", "润色", "纠错", "简化", "风格迁移", "paraphrase", "rewrite"]
+  - id: matching_ranking
+    intent: matching
+    weight: 3
+    keywords: ["匹配", "排序", "相似度", "NLI", "STS", "rerank", "重排序", "FAQ匹配", "检索重排"]
+  - id: infilling_reasoning
+    intent: infilling
+    weight: 3
+    keywords: ["填空", "补全", "推理", "cloze", "代码补全", "数学推理", "选择题", "cot"]
+  - id: alignment_dpo
+    intent: alignment
+    weight: 3
+    keywords: ["偏好", "对齐", "DPO", "RLHF", "chosen", "rejected", "人类反馈"]
+    negative_keywords: []
+domain_hints:
+  - domain: Finance
+    weight: 2
+    keywords: ["金融", "股票", "财报", "银行", "证券", "基金"]
+  - domain: Medical
+    weight: 2
+    keywords: ["医疗", "病历", "临床", "药品", "诊断"]
+  - domain: Education
+    weight: 2
+    keywords: ["教育", "课程", "考试", "作业", "学生"]
+  - domain: Legal
+    weight: 2
+    keywords: ["法律", "合同", "法条", "判决"]
+  - domain: Code
+    weight: 2
+    keywords: ["代码", "编程", "GitHub", "函数", "补全"]
+  - domain: Research
+    weight: 2
+    keywords: ["论文", "科研", "实验", "学术"]
+  - domain: ECommerce
+    weight: 2
+    keywords: ["电商", "商品", "评论", "买家"]
+
+# 分数低于阈值则视为低置信度，intent 回退为 sentiment
+low_confidence_threshold: 2

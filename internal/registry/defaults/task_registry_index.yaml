@@ -1,0 +1,33 @@
+families:
+  - id: Classification
+    label_zh: 分类
+    default_metrics: [accuracy, macro_f1]
+    supported_methods: [SFT, LoRA, QLoRA, FullFineTuning]
+    tasks:
+      - id: SentimentClassification
+        default_schema: text-label
+      - id: TopicClassification
+        default_schema: text-label
+  - id: SequenceTagging
+    label_zh: 序列标注
+    default_metrics: [entity_f1, span_f1]
+    supported_methods: [SFT, LoRA, QLoRA]
+    tasks:
+      - id: NER
+        default_schema: tokens-tags
+  - id: Generation
+    label_zh: 生成
+    default_metrics: [rougeL, bleu]
+    supported_methods: [SFT, LoRA, QLoRA]
+    tasks:
+      - id: Summarization
+        default_schema: prompt-response
+      - id: InstructionFollowing
+        default_schema: instruction-input-output
+  - id: Alignment
+    label_zh: 偏好对齐
+    default_metrics: [win_rate, reward_score]
+    supported_methods: [DPO, PPO]
+    tasks:
+      - id: DPOTraining
+        default_schema: prompt-chosen-rejected

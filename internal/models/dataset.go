@@ -22,8 +22,12 @@ type Dataset struct {
 	FileSize         sql.NullInt64  `json:"file_size"`
 	Status           string         `json:"status"`
 	ErrorMessage     sql.NullString `json:"error_message"`
-	CreatedAt        time.Time      `json:"created_at"`
-	UpdatedAt        time.Time      `json:"updated_at"`
+	// 测试集由某训练集划分生成时指向该训练集 id；删除训练集时置 NULL（ON DELETE SET NULL）
+	DerivedFromDatasetID sql.NullInt64  `json:"derived_from_dataset_id"`
+	// 列表/详情查询时 LEFT JOIN 填充，非表内独立列
+	DerivedFromName      sql.NullString `json:"derived_from_dataset_name"`
+	CreatedAt            time.Time      `json:"created_at"`
+	UpdatedAt            time.Time      `json:"updated_at"`
 }
 
 // Create creates a new dataset in the database
@@ -56,9 +60,12 @@ func (d *Dataset) Create(db *sql.DB) error {
 func GetDatasetByID(db *sql.DB, id int) (*Dataset, error) {
 	dataset := &Dataset{}
 	query := `
-		SELECT id, user_id, name, type, COALESCE("usage",'training'), source, original_file_path, cleaned_file_path,
-		       row_count, column_count, file_size, status, error_message, created_at, updated_at
-		FROM datasets WHERE id = $1
+		SELECT d.id, d.user_id, d.name, d.type, COALESCE(d."usage",'training'), d.source, d.original_file_path, d.cleaned_file_path,
+		       d.row_count, d.column_count, d.file_size, d.status, d.error_message, d.created_at, d.updated_at,
+		       d.derived_from_dataset_id, src.name
+		FROM datasets d
+		LEFT JOIN datasets src ON src.id = d.derived_from_dataset_id
+		WHERE d.id = $1
 	`
 	err := db.QueryRow(query, id).Scan(
 		&dataset.ID,
@@ -76,6 +83,8 @@ func GetDatasetByID(db *sql.DB, id int) (*Dataset, error) {
 		&dataset.ErrorMessage,
 		&dataset.CreatedAt,
 		&dataset.UpdatedAt,
+		&dataset.DerivedFromDatasetID,
+		&dataset.DerivedFromName,
 	)
 	if err != nil {
 		return nil, err
@@ -95,16 +104,19 @@ func GetDatasetsByUserIDAndUsage(db *sql.DB, userID int, usage string) ([]*Datas
 
 func getDatasetsByUserIDWithUsage(db *sql.DB, userID int, usage string) ([]*Dataset, error) {
 	query := `
-		SELECT id, user_id, name, type, COALESCE("usage",'training'), source, original_file_path, cleaned_file_path,
-		       row_count, column_count, file_size, status, error_message, created_at, updated_at
-		FROM datasets WHERE user_id = $1
+		SELECT d.id, d.user_id, d.name, d.type, COALESCE(d."usage",'training'), d.source, d.original_file_path, d.cleaned_file_path,
+		       d.row_count, d.column_count, d.file_size, d.status, d.error_message, d.created_at, d.updated_at,
+		       d.derived_from_dataset_id, src.name
+		FROM datasets d
+		LEFT JOIN datasets src ON src.id = d.derived_from_dataset_id
+		WHERE d.user_id = $1
 	`
 	args := []interface{}{userID}
 	if usage == "training" || usage == "test" {
-		query += ` AND COALESCE("usage",'training') = $2 ORDER BY created_at DESC`
+		query += ` AND COALESCE(d."usage",'training') = $2 ORDER BY d.created_at DESC`
 		args = append(args, usage)
 	} else {
-		query += ` ORDER BY created_at DESC`
+		query += ` ORDER BY d.created_at DESC`
 	}
 	rows, err := db.Query(query, args...)
 	if err != nil {
@@ -131,6 +143,8 @@ func getDatasetsByUserIDWithUsage(db *sql.DB, userID int, usage string) ([]*Data
 			&dataset.ErrorMessage,
 			&dataset.CreatedAt,
 			&dataset.UpdatedAt,
+			&dataset.DerivedFromDatasetID,
+			&dataset.DerivedFromName,
 		)
 		if err != nil {
 			return nil, err

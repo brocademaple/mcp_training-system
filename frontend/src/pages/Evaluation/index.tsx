@@ -15,14 +15,89 @@ import {
   Popconfirm,
   Progress,
   Tooltip,
+  Popover,
+  Divider,
+  Checkbox,
+  Typography,
 } from 'antd';
-import { PlusOutlined, ReloadOutlined, DownloadOutlined, SyncOutlined, StopOutlined, DeleteOutlined, EyeOutlined, QuestionCircleOutlined } from '@ant-design/icons';
+import type { ColumnsType } from 'antd/es/table';
+import {
+  PlusOutlined,
+  ReloadOutlined,
+  DownloadOutlined,
+  SyncOutlined,
+  StopOutlined,
+  DeleteOutlined,
+  EyeOutlined,
+  QuestionCircleOutlined,
+  SettingOutlined,
+} from '@ant-design/icons';
 import { evaluationService } from '@/services/evaluation';
 import { modelService } from '@/services/model';
 import { datasetService } from '@/services/dataset';
 import type { Evaluation, Model, Dataset } from '@/types';
 
 type StepStatus = 'wait' | 'process' | 'finish' | 'error';
+
+const EVAL_TABLE_COL_STORAGE_KEY = 'mcp-evaluation-table-columns-v1';
+
+type EvalTableColumnKey =
+  | 'order'
+  | 'eval_name'
+  | 'task_name'
+  | 'status'
+  | 'progress'
+  | 'accuracy'
+  | 'f1_score'
+  | 'created_at'
+  | 'action';
+
+const EVAL_COLUMN_LABELS: Record<EvalTableColumnKey, string> = {
+  order: '序号',
+  eval_name: '评估名称',
+  task_name: '任务名（展示用）',
+  status: '状态',
+  progress: '当前进度',
+  accuracy: '准确率',
+  f1_score: 'F1分数',
+  created_at: '创建时间',
+  action: '操作',
+};
+
+const EVAL_COLUMNS_TOGGLEABLE: EvalTableColumnKey[] = [
+  'order',
+  'eval_name',
+  'task_name',
+  'status',
+  'progress',
+  'accuracy',
+  'f1_score',
+  'created_at',
+];
+
+function defaultEvalColumnVisibility(): Record<EvalTableColumnKey, boolean> {
+  const v = {} as Record<EvalTableColumnKey, boolean>;
+  EVAL_COLUMNS_TOGGLEABLE.forEach((k) => {
+    v[k] = true;
+  });
+  v.action = true;
+  return v;
+}
+
+function loadEvalColumnVisibility(): Record<EvalTableColumnKey, boolean> {
+  const base = defaultEvalColumnVisibility();
+  try {
+    const raw = localStorage.getItem(EVAL_TABLE_COL_STORAGE_KEY);
+    if (!raw) return base;
+    const parsed = JSON.parse(raw) as Record<string, boolean>;
+    EVAL_COLUMNS_TOGGLEABLE.forEach((k) => {
+      if (typeof parsed[k] === 'boolean') base[k] = parsed[k];
+    });
+  } catch {
+    /* ignore */
+  }
+  return base;
+}
 
 const EvaluationManagement: React.FC = () => {
   const location = useLocation();
@@ -52,6 +127,15 @@ const EvaluationManagement: React.FC = () => {
   } | null>(null);
   const [helpModalVisible, setHelpModalVisible] = useState(false);
   const [form] = Form.useForm();
+  const [evalColumnVisibility, setEvalColumnVisibility] = useState(loadEvalColumnVisibility);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(EVAL_TABLE_COL_STORAGE_KEY, JSON.stringify(evalColumnVisibility));
+    } catch {
+      /* ignore */
+    }
+  }, [evalColumnVisibility]);
 
   const fetchEvaluations = async (silent = false) => {
     if (!silent) setLoading(true);
@@ -314,7 +398,7 @@ const EvaluationManagement: React.FC = () => {
     }
   };
 
-  const columns = [
+  const columns: ColumnsType<Evaluation> = [
     {
       title: '序号',
       key: 'order',
@@ -324,35 +408,54 @@ const EvaluationManagement: React.FC = () => {
     {
       title: '评估名称',
       dataIndex: 'name',
-      key: 'evalName',
+      key: 'eval_name',
+      ellipsis: { showTitle: false },
       width: 220,
-      onHeaderCell: () => ({
-        style: {
-          whiteSpace: 'normal',
-          wordBreak: 'break-word',
-          lineHeight: 1.2,
-        },
-      }),
       render: (_: unknown, record: Evaluation) => {
         const text = record.name && record.name.trim() ? record.name.trim() : getTaskName(record);
         return (
-          <div style={{ maxWidth: 220, whiteSpace: 'normal', wordBreak: 'break-all', lineHeight: 1.4 }}>
-            {text}
-          </div>
+          <Tooltip title={text}>
+            <span
+              style={{
+                display: 'inline-block',
+                maxWidth: '100%',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+            >
+              {text}
+            </span>
+          </Tooltip>
         );
       },
     },
     {
       title: '任务名',
-      key: 'name',
-      ellipsis: true,
-      render: (_: unknown, record: Evaluation) => getTaskName(record),
+      key: 'task_name',
+      width: 220,
+      ellipsis: { showTitle: false },
+      render: (_: unknown, record: Evaluation) => (
+        <Tooltip title={getTaskName(record)}>
+          <span
+            style={{
+              display: 'inline-block',
+              maxWidth: '100%',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
+            {getTaskName(record)}
+          </span>
+        </Tooltip>
+      ),
     },
     {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      width: 200,
+      width: 112,
       render: (status: string, record: Evaluation) => {
         const s = status || 'completed';
         const hasReport = !!record.report_path;
@@ -436,7 +539,7 @@ const EvaluationManagement: React.FC = () => {
     {
       title: '当前进度',
       key: 'progress',
-      width: 120,
+      width: 128,
       render: (_: unknown, record: Evaluation) => {
         const s = record.status || 'completed';
         const hasReport = !!record.report_path;
@@ -590,28 +693,74 @@ const EvaluationManagement: React.FC = () => {
     },
   ];
 
+  const displayedEvalColumns = columns.filter((col) => {
+    const k = col.key as EvalTableColumnKey;
+    if (k === 'action') return true;
+    if (!(k in EVAL_COLUMN_LABELS)) return true;
+    return evalColumnVisibility[k] !== false;
+  }) as ColumnsType<Evaluation>;
+
+  const evalColumnSettingContent = (
+    <div style={{ width: 248 }}>
+      <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 10 }}>
+        勾选要显示的列；「操作」始终显示。设置保存在本机浏览器。
+      </Typography.Text>
+      <Checkbox.Group
+        style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
+        value={EVAL_COLUMNS_TOGGLEABLE.filter((k) => evalColumnVisibility[k])}
+        onChange={(checkedValues) => {
+          const set = new Set(checkedValues as EvalTableColumnKey[]);
+          setEvalColumnVisibility((prev) => {
+            const next = { ...prev, action: true };
+            EVAL_COLUMNS_TOGGLEABLE.forEach((k) => {
+              next[k] = set.has(k);
+            });
+            return next;
+          });
+        }}
+      >
+        {EVAL_COLUMNS_TOGGLEABLE.map((k) => (
+          <Checkbox key={k} value={k}>
+            {EVAL_COLUMN_LABELS[k]}
+          </Checkbox>
+        ))}
+      </Checkbox.Group>
+      <Divider style={{ margin: '12px 0 8px' }} />
+      <Button type="link" size="small" style={{ padding: 0 }} onClick={() => setEvalColumnVisibility(defaultEvalColumnVisibility())}>
+        恢复默认（全部显示）
+      </Button>
+    </div>
+  );
+
   return (
     <div>
       <Card
         title={
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-            模型评估管理
-            <Tooltip title="如何创建评估任务与选择测试集">
-              <Button
-                type="text"
-                size="small"
-                icon={<QuestionCircleOutlined />}
-                onClick={() => setHelpModalVisible(true)}
-                style={{ padding: '0 4px', verticalAlign: 'middle' }}
-              />
-            </Tooltip>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              模型评估管理
+              <Tooltip title="如何创建评估任务与选择测试集">
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<QuestionCircleOutlined />}
+                  onClick={() => setHelpModalVisible(true)}
+                  style={{ padding: '0 4px', verticalAlign: 'middle' }}
+                />
+              </Tooltip>
+            </span>
+            <Popover content={evalColumnSettingContent} title="列表列显示" trigger="click" placement="bottomLeft">
+              <Button icon={<SettingOutlined />} size="small">
+                列设置
+              </Button>
+            </Popover>
           </span>
         }
         extra={
           <div>
             <Button
               icon={<ReloadOutlined />}
-              onClick={fetchEvaluations}
+              onClick={() => void fetchEvaluations()}
               style={{ marginRight: 8 }}
             >
               刷新
@@ -619,7 +768,7 @@ const EvaluationManagement: React.FC = () => {
             <Button
               type="primary"
               icon={<PlusOutlined />}
-              onClick={openCreateModal}
+              onClick={() => openCreateModal()}
             >
               创建评估任务
             </Button>
@@ -627,10 +776,11 @@ const EvaluationManagement: React.FC = () => {
         }
       >
         <Table
-          columns={columns}
+          columns={displayedEvalColumns}
           dataSource={evaluations}
           rowKey="id"
           loading={loading}
+          tableLayout="fixed"
           pagination={{
             current: page,
             pageSize,

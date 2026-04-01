@@ -2,12 +2,15 @@ package handlers
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"mcp-training-system/internal/agents"
 	"mcp-training-system/internal/models"
+	"mcp-training-system/internal/registry"
+	"mcp-training-system/internal/services"
 )
 
 // TrainingHandler handles training-related requests
@@ -31,11 +34,37 @@ func (h *TrainingHandler) CreateJob(c *gin.Context) {
 		DatasetID   int                    `json:"dataset_id"`
 		ModelType   string                 `json:"model_type"`
 		Hyperparams map[string]interface{} `json:"hyperparams"`
+		RunSpec     map[string]interface{} `json:"run_spec"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"code": 400, "message": "Invalid request"})
 		return
+	}
+
+	if req.Hyperparams == nil {
+		req.Hyperparams = map[string]interface{}{}
+	}
+
+	var runSpecJSON []byte
+	if req.RunSpec != nil {
+		rsBytes, _ := json.Marshal(req.RunSpec)
+		rs, err := models.ParseRunSpec(rsBytes)
+		if err != nil {
+			c.JSON(400, gin.H{"code": 400, "message": "invalid run_spec: " + err.Error()})
+			return
+		}
+		services.MergeMethodDefaults(rs)
+		services.ApplyDomainToRunSpec(rs)
+		if b := registry.Get(); b != nil {
+			if err := b.ValidateRunSpec(rs.SemanticTask.Family, rs.TrainingMethod.Name); err != nil {
+				c.JSON(400, gin.H{"code": 400, "message": err.Error()})
+				return
+			}
+		}
+		req.Hyperparams = models.MergeRunSpecIntoHyperparams(req.Hyperparams, rs)
+		req.ModelType = models.ExecutionModelType(rs)
+		runSpecJSON, _ = models.RunSpecToJSON(rs)
 	}
 
 	// 安全解析 epochs，避免类型断言 panic（前端可能传 float64 或缺失）
@@ -64,6 +93,9 @@ func (h *TrainingHandler) CreateJob(c *gin.Context) {
 		Hyperparams: req.Hyperparams,
 		Status:      "queued",
 		TotalEpochs: epochs,
+	}
+	if len(runSpecJSON) > 0 {
+		job.RunSpec = runSpecJSON
 	}
 
 	if err := job.Create(h.db); err != nil {
@@ -179,20 +211,35 @@ func (h *TrainingHandler) GetJobStatus(c *gin.Context) {
 	if job.ErrorMessage != nil {
 		errMsg = *job.ErrorMessage
 	}
+	data := gin.H{
+		"id":             job.ID,
+		"name":           job.Name,
+		"status":         job.Status,
+		"progress":       job.Progress,
+		"current_epoch": job.CurrentEpoch,
+		"total_epochs":   job.TotalEpochs,
+		"error_message":  errMsg,
+		"redis_progress": progress,
+		"log_lines":       logLines,
+		"model_type":     job.ModelType,
+		"hyperparams":    job.Hyperparams,
+	}
+	if len(job.RunSpec) > 0 {
+		var rsObj interface{}
+		if json.Unmarshal(job.RunSpec, &rsObj) == nil {
+			data["run_spec"] = rsObj
+		}
+	}
+	if eff := job.EffectiveRunSpec(); eff != nil {
+		b, _ := json.Marshal(eff)
+		var effObj interface{}
+		_ = json.Unmarshal(b, &effObj)
+		data["effective_run_spec"] = effObj
+	}
 	c.JSON(200, gin.H{
 		"code":    200,
 		"message": "success",
-		"data": gin.H{
-			"id":             job.ID,
-			"name":           job.Name,
-			"status":         job.Status,
-			"progress":       job.Progress,
-			"current_epoch": job.CurrentEpoch,
-			"total_epochs":   job.TotalEpochs,
-			"error_message":  errMsg,
-			"redis_progress": progress,
-			"log_lines":       logLines,
-		},
+		"data":    data,
 	})
 }
 

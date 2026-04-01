@@ -1,0 +1,18 @@
+project_name: dpo-chat-general-demo
+base_model: Qwen/Qwen2.5-0.5B-Instruct
+semantic_task:
+  family: Alignment
+  name: DPOTraining
+training_method:
+  name: DPO
+  params: {}
+domain:
+  name: General
+metrics:
+  - win_rate
+runtime:
+  epochs: 1
+  batch_size: 2
+  learning_rate: 0.00005
+artifacts:
+  output_dir: outputs/dpo-chat-general

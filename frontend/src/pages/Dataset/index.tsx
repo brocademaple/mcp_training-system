@@ -1,6 +1,38 @@
 import React, { useEffect, useState } from 'react';
-import { Card, Table, Button, Upload, Modal, Form, Input, InputNumber, Select, Slider, Tabs, message, Tag, List, Typography, Popconfirm, Tooltip } from 'antd';
-import { UploadOutlined, ReloadOutlined, LinkOutlined, CloudDownloadOutlined, TableOutlined, DeleteOutlined, SyncOutlined, PartitionOutlined } from '@ant-design/icons';
+import {
+  Card,
+  Table,
+  Button,
+  Upload,
+  Modal,
+  Form,
+  Input,
+  Select,
+  Slider,
+  Tabs,
+  message,
+  Tag,
+  List,
+  Typography,
+  Popconfirm,
+  Tooltip,
+  Popover,
+  Divider,
+  Checkbox,
+  Alert,
+} from 'antd';
+import type { ColumnsType } from 'antd/es/table';
+import {
+  UploadOutlined,
+  ReloadOutlined,
+  LinkOutlined,
+  CloudDownloadOutlined,
+  TableOutlined,
+  DeleteOutlined,
+  SyncOutlined,
+  PartitionOutlined,
+  SettingOutlined,
+} from '@ant-design/icons';
 import type { UploadFile } from 'antd/es/upload/interface';
 import { datasetService } from '@/services/dataset';
 import type { Dataset } from '@/types';
@@ -11,6 +43,81 @@ function isLikelyGarbled(name: string): boolean {
   if (name.includes('\uFFFD')) return true;
   if (/[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(name)) return true;
   return false;
+}
+
+/** Go encoding/json 对 sql.NullInt64 的默认序列化 */
+function coerceSqlNullInt(raw: unknown): number | null {
+  if (raw == null) return null;
+  if (typeof raw === 'number' && !Number.isNaN(raw)) return raw;
+  if (typeof raw === 'object' && raw !== null && 'Valid' in raw && 'Int64' in raw) {
+    const o = raw as { Valid: boolean; Int64: number };
+    if (!o.Valid) return null;
+    return typeof o.Int64 === 'number' ? o.Int64 : Number(o.Int64);
+  }
+  return null;
+}
+
+function coerceSqlNullString(raw: unknown): string | null {
+  if (raw == null) return null;
+  if (typeof raw === 'string') return raw;
+  if (typeof raw === 'object' && raw !== null && 'Valid' in raw && 'String' in raw) {
+    const o = raw as { Valid: boolean; String: string };
+    if (!o.Valid) return null;
+    return o.String || null;
+  }
+  return null;
+}
+
+const DATASET_COL_STORAGE_TRAINING = 'mcp-dataset-table-columns-training-v1';
+const DATASET_COL_STORAGE_TEST = 'mcp-dataset-table-columns-test-v1';
+
+/** 训练集 Tab 可配置列（操作列始终显示） */
+const DATASET_TRAINING_TOGGLEABLE = ['order', 'name', 'type', 'row_count', 'status', 'file_size', 'created_at'] as const;
+/** 测试集 Tab 额外含「来源训练集」 */
+const DATASET_TEST_TOGGLEABLE = ['order', 'name', 'type', 'derived_from', 'row_count', 'status', 'file_size', 'created_at'] as const;
+
+const DATASET_COLUMN_LABELS: Record<string, string> = {
+  order: '序号',
+  name: '数据集名称',
+  type: '类型',
+  derived_from: '来源训练集',
+  row_count: '样本行数',
+  status: '处理状态',
+  file_size: '文件大小',
+  created_at: '创建时间',
+};
+
+function defaultDatasetColVisTraining(): Record<string, boolean> {
+  const v: Record<string, boolean> = {};
+  DATASET_TRAINING_TOGGLEABLE.forEach((k) => {
+    v[k] = true;
+  });
+  return v;
+}
+
+function defaultDatasetColVisTest(): Record<string, boolean> {
+  const v: Record<string, boolean> = {};
+  DATASET_TEST_TOGGLEABLE.forEach((k) => {
+    v[k] = true;
+  });
+  return v;
+}
+
+function loadDatasetColVis(tab: 'training' | 'test'): Record<string, boolean> {
+  const base = tab === 'training' ? defaultDatasetColVisTraining() : defaultDatasetColVisTest();
+  const key = tab === 'training' ? DATASET_COL_STORAGE_TRAINING : DATASET_COL_STORAGE_TEST;
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return base;
+    const parsed = JSON.parse(raw) as Record<string, boolean>;
+    const keys = tab === 'training' ? DATASET_TRAINING_TOGGLEABLE : DATASET_TEST_TOGGLEABLE;
+    keys.forEach((k) => {
+      if (typeof parsed[k] === 'boolean') base[k] = parsed[k];
+    });
+  } catch {
+    /* ignore */
+  }
+  return base;
 }
 
 // 在线数据集预设：国内加速优先；支持情感、主题分类等多种文本任务，以及图像参考
@@ -161,7 +268,20 @@ const ONLINE_TEST_DATASETS: OnlinePreset[] = [
   },
 ];
 
-const DatasetManagement: React.FC = () => {
+export type DatasetManagementProps = {
+  /** 经典版整页（默认）| Agent 画布内弹窗，标题与说明与经典版区分 */
+  variant?: 'page' | 'agent-modal';
+  /** Agent 弹窗：关闭 */
+  onRequestClose?: () => void;
+  /** Agent 弹窗打开时默认选中的 Tab */
+  initialDatasetTab?: 'training' | 'test';
+};
+
+const DatasetManagement: React.FC<DatasetManagementProps> = ({
+  variant = 'page',
+  onRequestClose,
+  initialDatasetTab,
+}) => {
   const [trainingDatasets, setTrainingDatasets] = useState<Dataset[]>([]);
   const [testDatasets, setTestDatasets] = useState<Dataset[]>([]);
   const [loading, setLoading] = useState(false);
@@ -175,7 +295,7 @@ const DatasetManagement: React.FC = () => {
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
-  const [datasetTab, setDatasetTab] = useState<'training' | 'test'>('training');
+  const [datasetTab, setDatasetTab] = useState<'training' | 'test'>(() => initialDatasetTab ?? 'training');
   const [splitModalVisible, setSplitModalVisible] = useState(false);
   const [splitLoading, setSplitLoading] = useState(false);
   const [selectedRowKeys, setSelectedRowKeys] = useState<number[]>([]);
@@ -186,10 +306,28 @@ const DatasetManagement: React.FC = () => {
   const [urlForm] = Form.useForm();
   const [splitForm] = Form.useForm();
   const [renameForm] = Form.useForm();
+  const [colVisTraining, setColVisTraining] = useState(() => loadDatasetColVis('training'));
+  const [colVisTest, setColVisTest] = useState(() => loadDatasetColVis('test'));
 
   useEffect(() => {
     fetchDatasets();
   }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(DATASET_COL_STORAGE_TRAINING, JSON.stringify(colVisTraining));
+    } catch {
+      /* ignore */
+    }
+  }, [colVisTraining]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(DATASET_COL_STORAGE_TEST, JSON.stringify(colVisTest));
+    } catch {
+      /* ignore */
+    }
+  }, [colVisTest]);
 
   const fetchDatasets = async (showSuccess = false) => {
     setLoading(true);
@@ -367,23 +505,36 @@ const DatasetManagement: React.FC = () => {
     return Number.isNaN(n) ? null : n;
   };
 
-  const columns = [
+  const wrapCellStyle: React.CSSProperties = {
+    wordBreak: 'break-word',
+    overflowWrap: 'anywhere',
+    whiteSpace: 'normal',
+    minWidth: 0,
+    verticalAlign: 'top',
+  };
+
+  const allDatasetColumns: ColumnsType<Dataset> = [
     {
       title: '序号',
       key: 'order',
-      width: 72,
+      width: 64,
+      align: 'center',
+      onCell: () => ({ style: wrapCellStyle }),
+      onHeaderCell: () => ({ style: wrapCellStyle }),
       render: (_: unknown, __: Dataset, index: number) => (page - 1) * pageSize + index + 1,
     },
     {
       title: '数据集名称',
       dataIndex: 'name',
       key: 'name',
+      width: 240,
+      ellipsis: false,
+      onCell: () => ({ style: wrapCellStyle }),
+      onHeaderCell: () => ({ style: wrapCellStyle }),
       render: (name: string, record: Dataset) => (
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
-          <span title={name}>{name || '—'}</span>
-          {isLikelyGarbled(record.name) && (
-            <Tag color="orange">名称异常</Tag>
-          )}
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, minWidth: 0 }}>
+          <span>{name || '—'}</span>
+          {isLikelyGarbled(record.name) && <Tag color="orange">名称异常</Tag>}
           <Button
             type="link"
             size="small"
@@ -403,18 +554,62 @@ const DatasetManagement: React.FC = () => {
       title: '类型',
       dataIndex: 'type',
       key: 'type',
-      width: 88,
+      width: 96,
+      align: 'center',
+      ellipsis: true,
+      onCell: () => ({ style: { ...wrapCellStyle, verticalAlign: 'middle' } }),
+      onHeaderCell: () => ({ style: wrapCellStyle }),
+      render: (t: string) => <span>{t || '—'}</span>,
+    },
+    ...(datasetTab === 'test'
+      ? ([
+          {
+            title: '来源训练集',
+            key: 'derived_from',
+            width: 200,
+            ellipsis: false,
+            onCell: () => ({ style: wrapCellStyle }),
+            onHeaderCell: () => ({ style: wrapCellStyle }),
+            render: (_: unknown, record: Dataset) => {
+              const name = coerceSqlNullString(record.derived_from_dataset_name);
+              const id = coerceSqlNullInt(record.derived_from_dataset_id);
+              if (name) {
+                return (
+                  <Tooltip title={id != null ? `训练集 ID: ${id}` : '由训练集划分生成'}>
+                    <span>{name}</span>
+                  </Tooltip>
+                );
+              }
+              if (id != null) {
+                return <span>训练集 #{id}</span>;
+              }
+              return <span style={{ color: '#999' }}>—</span>;
+            },
+          },
+        ] as ColumnsType<Dataset>)
+      : []),
+    {
+      title: '样本行数',
+      dataIndex: 'row_count',
+      key: 'row_count',
+      width: 100,
+      align: 'right',
+      onCell: () => ({ style: { ...wrapCellStyle, verticalAlign: 'middle' } }),
+      onHeaderCell: () => ({ style: wrapCellStyle }),
+      render: (v: unknown) => {
+        const n = getRowCountNum(v);
+        return n == null ? '—' : n.toLocaleString('zh-CN');
+      },
     },
     {
       title: '处理状态',
       dataIndex: 'status',
       key: 'status',
-      width: 140,
+      width: 148,
+      onCell: () => ({ style: wrapCellStyle }),
+      onHeaderCell: () => ({ style: wrapCellStyle }),
       render: (status: string, record: Dataset) => {
-        const statusConfig: Record<
-          string,
-          { label: string; color: string; tip: string }
-        > = {
+        const statusConfig: Record<string, { label: string; color: string; tip: string }> = {
           uploading: {
             label: '已上传，待清洗',
             color: 'default',
@@ -441,13 +636,11 @@ const DatasetManagement: React.FC = () => {
           color: 'default',
           tip: '',
         };
-        const tag = (
-          <Tag color={config.color}>{config.label}</Tag>
-        );
+        const tag = <Tag color={config.color}>{config.label}</Tag>;
         const errMsg = getErrorMessage(record.error_message);
         const canTrain = status === 'ready';
         return (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
             {status === 'error' && errMsg ? (
               <Tooltip title={errMsg} placement="topLeft">
                 <span>{tag}</span>
@@ -457,12 +650,7 @@ const DatasetManagement: React.FC = () => {
                 <span>{tag}</span>
               </Tooltip>
             )}
-            <span
-              style={{
-                fontSize: 12,
-                color: canTrain ? '#52c41a' : '#999',
-              }}
-            >
+            <span style={{ fontSize: 12, color: canTrain ? '#52c41a' : '#999' }}>
               {canTrain ? '✓ 可训练' : '不可训练'}
             </span>
           </div>
@@ -473,10 +661,13 @@ const DatasetManagement: React.FC = () => {
       title: '文件大小',
       dataIndex: 'file_size',
       key: 'file_size',
-      width: 100,
+      width: 108,
+      align: 'right',
+      onCell: () => ({ style: { ...wrapCellStyle, verticalAlign: 'middle' } }),
+      onHeaderCell: () => ({ style: wrapCellStyle }),
       render: (size: unknown) => {
         const num = getFileSizeNum(size);
-        if (num == null || num === 0) return '-';
+        if (num == null || num === 0) return '—';
         if (num < 1024) return `${num} B`;
         if (num < 1024 * 1024) return `${(num / 1024).toFixed(2)} KB`;
         return `${(num / 1024 / 1024).toFixed(2)} MB`;
@@ -486,50 +677,133 @@ const DatasetManagement: React.FC = () => {
       title: '创建时间',
       dataIndex: 'created_at',
       key: 'created_at',
-      width: 172,
-      render: (text: string) => (text ? new Date(text).toLocaleString('zh-CN') : '-'),
+      width: 168,
+      ellipsis: true,
+      onCell: () => ({ style: { ...wrapCellStyle, verticalAlign: 'middle' } }),
+      onHeaderCell: () => ({ style: wrapCellStyle }),
+      render: (text: string) => (text ? new Date(text).toLocaleString('zh-CN') : '—'),
     },
     {
       title: '操作',
       key: 'action',
       width: 200,
       fixed: 'right' as const,
+      onCell: () => ({ style: { verticalAlign: 'top' } }),
       render: (_: unknown, record: Dataset) => (
-        <>
-          <Button
-            type="link"
-            size="small"
-            icon={<TableOutlined />}
-            onClick={() => handleViewData(record)}
-          >
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
+          <Button type="link" size="small" icon={<TableOutlined />} onClick={() => handleViewData(record)}>
             预览数据集
           </Button>
           {record.status === 'error' && (
-            <Button
-              type="link"
-              size="small"
-              icon={<SyncOutlined />}
-              onClick={() => handleRetryClean(record)}
-            >
+            <Button type="link" size="small" icon={<SyncOutlined />} onClick={() => handleRetryClean(record)}>
               重试清洗
             </Button>
           )}
-          <Popconfirm
-            title="确定删除该数据集？"
-            onConfirm={() => handleDelete(record)}
-          >
+          <Popconfirm title="确定删除该数据集？" onConfirm={() => handleDelete(record)}>
             <Button type="link" size="small" danger icon={<DeleteOutlined />}>
               删除数据集
             </Button>
           </Popconfirm>
-        </>
+        </div>
       ),
     },
   ];
 
+  const colVis = datasetTab === 'training' ? colVisTraining : colVisTest;
+  const setColVis = datasetTab === 'training' ? setColVisTraining : setColVisTest;
+  const toggleableKeys =
+    datasetTab === 'training' ? [...DATASET_TRAINING_TOGGLEABLE] : [...DATASET_TEST_TOGGLEABLE];
+
+  const displayedColumns = allDatasetColumns.filter((c) => {
+    const k = String(c.key);
+    if (k === 'action') return true;
+    return colVis[k] !== false;
+  });
+
+  const columnSettingsContent = (
+    <div style={{ maxWidth: 280 }}>
+      <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
+        勾选要在表格中显示的列；训练集与测试集各自记忆。
+      </Typography.Text>
+      <Checkbox.Group
+        style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
+        value={toggleableKeys.filter((k) => colVis[k] !== false)}
+        onChange={(checked) => {
+          const set = new Set(checked as string[]);
+          setColVis((prev) => {
+            const next = { ...prev };
+            toggleableKeys.forEach((k) => {
+              next[k] = set.has(k);
+            });
+            return next;
+          });
+        }}
+      >
+        {toggleableKeys.map((k) => (
+          <Checkbox key={k} value={k}>
+            {DATASET_COLUMN_LABELS[k] ?? k}
+          </Checkbox>
+        ))}
+      </Checkbox.Group>
+      <Divider style={{ margin: '12px 0' }} />
+      <Button
+        type="link"
+        size="small"
+        style={{ padding: 0 }}
+        onClick={() =>
+          setColVis(datasetTab === 'training' ? defaultDatasetColVisTraining() : defaultDatasetColVisTest())
+        }
+      >
+        恢复默认
+      </Button>
+    </div>
+  );
+
+  const isAgentModal = variant === 'agent-modal';
+
   return (
-    <div>
-      <Card>
+    <div className={isAgentModal ? 'dataset-management-root dataset-management-root--agent-modal' : undefined}>
+      <Card
+        className={isAgentModal ? 'dataset-management-card--agent-modal' : undefined}
+        title={
+          isAgentModal ? (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <span>数据与上传</span>
+              <Tag color="geekblue">Agent 内嵌</Tag>
+              <Popover title="列表列显示" trigger="click" placement="bottomLeft" content={columnSettingsContent}>
+                <Button icon={<SettingOutlined />} size="small">
+                  列设置
+                </Button>
+              </Popover>
+            </span>
+          ) : (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <span>数据集管理</span>
+              <Popover title="列表列显示" trigger="click" placement="bottomLeft" content={columnSettingsContent}>
+                <Button icon={<SettingOutlined />} size="small">
+                  列设置
+                </Button>
+              </Popover>
+            </span>
+          )
+        }
+        extra={
+          isAgentModal && onRequestClose ? (
+            <Button size="small" type="default" onClick={onRequestClose}>
+              关闭
+            </Button>
+          ) : undefined
+        }
+      >
+        {isAgentModal && (
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message="当前为 Agent 工作区视图"
+            description="数据与经典版菜单中的「数据集管理」实时同步，并非另一套数据。此处不离开画布即可上传、导入与维护；需要全屏多页体验时可切换到经典版。"
+          />
+        )}
         <Tabs
           activeKey={datasetTab}
           onChange={(k) => setDatasetTab(k as 'training' | 'test')}
@@ -593,12 +867,14 @@ const DatasetManagement: React.FC = () => {
             </Typography.Text>
           ) : (
             <Typography.Text type="secondary">
-              说明：以下数据集可在<strong>创建评估任务</strong>时选作<strong>测试集</strong>；请确保状态为「清洗完成」。本列表与「训练数据集」<strong>相互独立</strong>，删除仅影响本列表。
+              说明：以下数据集可在<strong>创建评估任务</strong>时选作<strong>测试集</strong>；请确保状态为「清洗完成」。通过「从训练集划分测试集」生成的记录会在<strong>来源训练集</strong>列标注对应训练集。本列表与「训练数据集」<strong>相互独立</strong>，删除仅影响本列表。
             </Typography.Text>
           )}
         </div>
-        <Table
-          columns={columns}
+        <Table<Dataset>
+          tableLayout="fixed"
+          scroll={{ x: 'max-content' }}
+          columns={displayedColumns}
           dataSource={datasetTab === 'training' ? trainingDatasets : testDatasets}
           rowKey="id"
           loading={loading}

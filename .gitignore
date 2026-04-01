@@ -19,6 +19,8 @@ data/
 logs/
 reports/
 results/
+prototypes/
+prototypes/**
 *.zip
 *.safetensors
 *.pt

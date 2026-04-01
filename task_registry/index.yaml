@@ -1,0 +1,72 @@
+# 语义任务层：一级任务族与示例二级子类（可扩展）
+families:
+  - id: Classification
+    label_zh: 分类
+    default_metrics: [accuracy, macro_f1]
+    supported_methods: [SFT, LoRA, QLoRA, FullFineTuning]
+    tasks:
+      - id: SentimentClassification
+        default_schema: text-label
+      - id: TopicClassification
+        default_schema: text-label
+      - id: IntentClassification
+        default_schema: text-label
+      - id: MultiLabelClassification
+        default_schema: text-labels
+  - id: SequenceTagging
+    label_zh: 序列标注
+    default_metrics: [entity_f1, span_f1]
+    supported_methods: [SFT, LoRA, QLoRA]
+    tasks:
+      - id: NER
+        default_schema: tokens-tags
+      - id: POS
+        default_schema: tokens-tags
+  - id: Generation
+    label_zh: 生成
+    default_metrics: [rougeL, bleu, bertscore]
+    supported_methods: [SFT, LoRA, QLoRA]
+    tasks:
+      - id: Summarization
+        default_schema: prompt-response
+      - id: Dialogue
+        default_schema: prompt-response
+      - id: InstructionFollowing
+        default_schema: instruction-input-output
+  - id: Extraction
+    label_zh: 抽取
+    default_metrics: [precision, recall, f1]
+    supported_methods: [SFT, LoRA]
+    tasks:
+      - id: RelationExtraction
+        default_schema: text-json
+  - id: Rewriting
+    label_zh: 改写
+    default_metrics: [sari, bleu]
+    supported_methods: [SFT, LoRA]
+    tasks:
+      - id: Paraphrase
+        default_schema: source-target
+  - id: MatchingRanking
+    label_zh: 匹配与排序
+    default_metrics: [accuracy, mrr, ndcg]
+    supported_methods: [SFT, LoRA]
+    tasks:
+      - id: NLI
+        default_schema: text_a-text_b-label
+  - id: InfillingReasoning
+    label_zh: 填空与推理
+    default_metrics: [exact_match, accuracy]
+    supported_methods: [SFT, LoRA, QLoRA]
+    tasks:
+      - id: MultiChoiceQA
+        default_schema: context-answer
+  - id: Alignment
+    label_zh: 偏好对齐
+    default_metrics: [win_rate, reward_score]
+    supported_methods: [DPO, PPO]
+    tasks:
+      - id: DPOTraining
+        default_schema: prompt-chosen-rejected
+      - id: RewardModelTraining
+        default_schema: prompt-chosen-rejected
