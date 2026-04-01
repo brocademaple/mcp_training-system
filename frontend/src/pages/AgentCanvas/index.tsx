@@ -3,19 +3,17 @@ import {
   Alert,
   Button,
   Card,
-  Col,
   Descriptions,
   Divider,
   Drawer,
-  Form,
+  Dropdown,
   Input,
   InputNumber,
   List,
   Modal,
-  Row,
+  Radio,
   Select,
   Space,
-  Statistic,
   Steps,
   Table,
   Tag,
@@ -26,14 +24,13 @@ import {
 } from 'antd';
 import { Upload } from 'antd';
 import type { UploadFile } from 'antd/es/upload/interface';
+import type { MenuProps } from 'antd';
 import {
-  ArrowRightOutlined,
   CheckCircleOutlined,
-  DatabaseOutlined,
-  EditOutlined,
   EyeOutlined,
+  InboxOutlined,
   LinkOutlined,
-  PaperClipOutlined,
+  MoreOutlined,
   PlusOutlined,
   PlayCircleOutlined,
   RobotOutlined,
@@ -45,9 +42,57 @@ import axios from 'axios';
 import { agentService } from '@/services/agent';
 import { datasetService } from '@/services/dataset';
 import { DEFAULT_BASE_MODEL } from '@/constants/baseModels';
-import type { Dataset, RunCurrentState, RunSpec } from '@/types';
-import PageHero from '@/components/PageHero';
-import { SAMPLE_AGENT_CONVERSATION, SAMPLE_MCP_EVENTS, SAMPLE_SCENARIOS, type AgentChatMessage, type McpEvent } from './sampleData';
+import type { Dataset, DatasetSpec, PlanSpec, RunCurrentState, RunSpec, TaskSpec } from '@/types';
+import {
+  MOCK_TRAIN_EXECUTION_MCP_STREAM,
+  SAMPLE_AGENT_CONVERSATION,
+  SAMPLE_MCP_EVENTS,
+  SAMPLE_SCENARIOS,
+  mcpEventToTrainExecutionRow,
+  type AgentChatMessage,
+  type McpEvent,
+} from './sampleData';
+
+/** 编排中心多 Agent 角色（仅展示层，不改变状态机） */
+type OrchAgentKey = 'orchestrator' | 'planning' | 'data' | 'training' | 'eval';
+
+const ORCH_AGENTS: Record<OrchAgentKey, { label: string; tagColor: string }> = {
+  orchestrator: { label: 'Orchestrator', tagColor: 'geekblue' },
+  planning: { label: 'Planning Agent', tagColor: 'blue' },
+  data: { label: 'Data Agent', tagColor: 'cyan' },
+  training: { label: 'Training Executor', tagColor: 'orange' },
+  eval: { label: 'Evaluation Agent', tagColor: 'purple' },
+};
+
+function OrchAgentTag({ agentKey }: { agentKey: OrchAgentKey }) {
+  const a = ORCH_AGENTS[agentKey];
+  return (
+    <Tag color={a.tagColor} style={{ marginInlineEnd: 0, fontSize: 11, lineHeight: '18px' }}>
+      {a.label}
+    </Tag>
+  );
+}
+
+function chatStageToAgentKey(stage: AgentChatMessage['stage']): OrchAgentKey {
+  switch (stage) {
+    case 'goal_input':
+      return 'orchestrator';
+    case 'task_confirm':
+      return 'planning';
+    case 'data_prepare':
+      return 'data';
+    case 'plan_prepare':
+    case 'plan_confirm':
+      return 'planning';
+    case 'train_execute':
+      return 'training';
+    case 'eval_confirm':
+    case 'eval_result':
+      return 'eval';
+    default:
+      return 'orchestrator';
+  }
+}
 import './index.css';
 
 const API_BASE = '/api/v1';
@@ -69,17 +114,114 @@ type ChatSessionItem = {
   title: string;
   subtitle: string;
   progress?: number;
+  /** 编排状态摘要：草稿 / 规划中 / 数据准备中 / … */
+  status?: string;
+  /** 如「阶段 2/6 · 数据准备」 */
+  currentStage?: string;
+  /** ISO 8601，用于「N 分钟前」 */
+  updatedAt?: string;
 };
 
 type FlowMode = 'full' | 'train_only' | 'eval_only';
 
-const DOMAIN_TAGS = ['通用', '金融', '医疗', '法律', '电商', '教育'];
-const TASK_TAGS = ['分类', 'NER', '摘要', '匹配排序', '偏好对齐'];
-const MODALITY_TAGS = ['文本', '图文'];
-const TASK_TYPE_OPTIONS = ['classification', 'ner', 'summarization', 'rerank', 'preference_alignment'];
-const DOMAIN_OPTIONS = ['general', 'finance', 'medical', 'legal', 'ecommerce', 'education'];
-const MODALITY_OPTIONS = ['text', 'image_text'];
+const FLOW_MODE_OPTIONS: { key: FlowMode; label: string }[] = [
+  { key: 'full', label: '全流程（训练+评估）' },
+  { key: 'train_only', label: '仅训练' },
+  { key: 'eval_only', label: '仅评估' },
+];
 
+const RUN_LIST_STAGE_LABELS = ['目标输入', '任务确认', '数据准备', '计划确认', '训练执行', '评估与结果'] as const;
+
+const runListStageLine = (step: number): string => {
+  const i = Math.min(Math.max(step, 0), 5);
+  return `阶段 ${i + 1}/6 · ${RUN_LIST_STAGE_LABELS[i]}`;
+};
+
+const mapFlowStateToRunListStatus = (s: FlowState): string => {
+  switch (s) {
+    case 'draft':
+      return '草稿';
+    case 'intent_submitted':
+    case 'task_parsed':
+    case 'task_confirmed':
+    case 'data_ready':
+    case 'plan_generating':
+    case 'plan_previewed':
+    case 'plan_frozen':
+      return '规划中';
+    case 'data_selecting':
+      return '待数据确认';
+    case 'data_validating':
+      return '数据准备中';
+    case 'training_queued':
+    case 'training_running':
+    case 'training_succeeded':
+      return '训练中';
+    case 'evaluating':
+      return '评测中';
+    case 'done':
+      return '已完成';
+    default:
+      return '规划中';
+  }
+};
+
+const formatRunListRelativeTime = (iso?: string): string => {
+  if (!iso) return '—';
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return '—';
+  const sec = Math.floor((Date.now() - t) / 1000);
+  if (sec < 10) return '刚刚更新';
+  if (sec < 60) return `${sec} 秒前`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min} 分钟前`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h} 小时前`;
+  return new Date(iso).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+};
+
+const runListAccentByStatus = (status?: string): string => {
+  if (!status) return '#faad14';
+  if (status === '已完成') return '#52c41a';
+  if (status === '训练中' || status === '评测中') return '#1677ff';
+  if (status === '已失败') return '#ff4d4f';
+  if (status === '草稿') return '#8c8c8c';
+  if (status === '数据准备中' || status === '待数据确认') return '#13c2c2';
+  return '#faad14';
+};
+
+const DOMAIN_TAGS = ['通用', '金融', '医疗', '法律', '电商', '教育'];
+/** 阶段 1 / 阶段 2 任务类型芯片：含分类、生成、提取等常用说法 */
+const GOAL_TASK_CHIPS = ['分类', '生成', '提取', 'NER', '摘要', '匹配排序', '偏好对齐'];
+const MODALITY_TAGS = ['文本', '图文'];
+
+const GOAL_INTENT_SNIPPETS: { key: string; label: string; text: string }[] = [
+  {
+    key: 'fin_cls',
+    label: '财报情感分类',
+    text: '训练财报短文本情感分类模型，输出正面、中性、负面三类标签，用于研报与公告舆情辅助。',
+  },
+  {
+    key: 'edu_cls',
+    label: '教育知识点分类',
+    text: '面向在线教育场景，将学员提问分类到预定义知识点标签，便于自动路由到对应讲义或助教。',
+  },
+  {
+    key: 'legal_sum',
+    label: '法律合同摘要',
+    text: '训练法律领域摘要模型，输入合同或条款长文本，输出关键义务与风险点的简短摘要。',
+  },
+  {
+    key: 'med_ner',
+    label: '医学实体抽取',
+    text: '训练医学文本命名实体识别，标注疾病、药物、剂量、检查项目等，输出 BIO 序列标签。',
+  },
+  {
+    key: 'ecom_rerank',
+    label: '商品检索排序',
+    text: '训练查询-商品相关性排序模型，输入用户查询与候选商品描述，输出相关性分数或档位。',
+  },
+];
 const schemaHintByTask = (taskType?: string): string => {
   const t = (taskType || '').toLowerCase();
   if (t.includes('ner')) return 'tokens + ner_tags（BIO）';
@@ -95,6 +237,9 @@ const schemaHeadersByTask = (taskType?: string): string[] => {
   if (t.includes('rerank') || t.includes('match')) return ['query', 'candidate', 'relevance'];
   return ['text', 'label'];
 };
+
+/** 本地模拟就绪数据集（不走后端列表） */
+const MOCK_WORKSPACE_DATASET_ID = -9001;
 
 const DOMAIN_CN_MAP: Record<string, string> = {
   general: '通用领域',
@@ -148,7 +293,8 @@ const mapDomainHintToTag = (hint?: string): string => {
 const inferTaskTagFromText = (text: string): string => {
   const t = text.toLowerCase();
   if (t.includes('摘要') || t.includes('summar')) return '摘要';
-  if (t.includes('ner') || t.includes('实体')) return 'NER';
+  if (t.includes('生成')) return '生成';
+  if (t.includes('提取') || t.includes('ner') || t.includes('实体')) return '提取';
   if (t.includes('匹配') || t.includes('排序') || t.includes('rerank')) return '匹配排序';
   if (t.includes('偏好') || t.includes('对齐')) return '偏好对齐';
   return '分类';
@@ -166,6 +312,48 @@ const bilingualList = (items?: string[], dict?: Record<string, string>): string 
   return items.map((x) => bilingual(x, dict)).join('，');
 };
 
+const DOMAIN_EN_TO_CN: Record<string, string> = {
+  general: '通用',
+  finance: '金融',
+  medical: '医疗',
+  legal: '法律',
+  ecommerce: '电商',
+  education: '教育',
+};
+
+const DOMAIN_CN_TO_EN: Record<string, string> = {
+  通用: 'general',
+  金融: 'finance',
+  医疗: 'medical',
+  法律: 'legal',
+  电商: 'ecommerce',
+  教育: 'education',
+};
+
+const MODALITY_CN_TO_EN = (cn: string): 'text' | 'image_text' => (cn === '图文' ? 'image_text' : 'text');
+
+const TASK_CN_TO_SEMANTIC: Record<string, string> = {
+  分类: 'classification',
+  NER: 'ner',
+  摘要: 'summarization',
+  生成: 'summarization',
+  提取: 'ner',
+  匹配排序: 'rerank',
+  偏好对齐: 'preference_alignment',
+};
+
+const draftToTaxonomyCn = (draft: TaskDraft) => {
+  const domainCn = DOMAIN_EN_TO_CN[draft.domain] || '通用';
+  const typeCn = draft.modality === 'image_text' ? '图文' : '文本';
+  let taskCn = '分类';
+  const st = (draft.semantic_task_type || '').toLowerCase();
+  if (st.includes('ner')) taskCn = 'NER';
+  else if (st.includes('summar')) taskCn = '摘要';
+  else if (st.includes('rerank')) taskCn = '匹配排序';
+  else if (st.includes('preference')) taskCn = '偏好对齐';
+  return { domainCn, typeCn, taskCn };
+};
+
 const STEP_STATE_RULES: Record<number, FlowState[]> = {
   0: ['draft', 'intent_submitted', 'task_parsed'],
   1: ['task_parsed'],
@@ -177,11 +365,11 @@ const STEP_STATE_RULES: Record<number, FlowState[]> = {
 
 const stepByState = (s: FlowState): number => {
   if (['draft', 'intent_submitted', 'task_parsed'].includes(s)) return 0;
-  if (['task_confirmed'].includes(s)) return 1;
-  if (['data_selecting', 'data_validating', 'data_ready'].includes(s)) return 2;
-  if (['plan_generating', 'plan_previewed', 'plan_frozen'].includes(s)) return 3;
-  if (['training_queued', 'training_running', 'training_succeeded'].includes(s)) return 4;
-  return 5;
+  if (['task_confirmed', 'data_selecting', 'data_validating'].includes(s)) return 2;
+  if (['data_ready', 'plan_generating', 'plan_previewed'].includes(s)) return 3;
+  if (['plan_frozen', 'training_queued', 'training_running', 'training_succeeded'].includes(s)) return 4;
+  if (['evaluating', 'done'].includes(s)) return 5;
+  return 0;
 };
 
 const AgentCanvas: React.FC = () => {
@@ -194,15 +382,10 @@ const AgentCanvas: React.FC = () => {
   const [uiSelectedTags, setUiSelectedTags] = useState<string[]>([]);
   const [modalityHint, setModalityHint] = useState('text');
   const [selectedDomainTag, setSelectedDomainTag] = useState<string>();
-  const [selectedTaskTag, setSelectedTaskTag] = useState<string>();
-  const [selectedModalityTag, setSelectedModalityTag] = useState<string | undefined>();
-  const [customDomainInput, setCustomDomainInput] = useState('');
   const [customDomainTags, setCustomDomainTags] = useState<string[]>([]);
 
   const [taskDraft, setTaskDraft] = useState<TaskDraft | null>(null);
   const [taskSpec, setTaskSpec] = useState<TaskDraft | null>(null);
-  const [showAdvancedTaskEditor, setShowAdvancedTaskEditor] = useState(false);
-  const [parsedIntentSnapshot, setParsedIntentSnapshot] = useState('');
   const [readOnlyPreview, setReadOnlyPreview] = useState(false);
 
   const [datasetSourceMode, setDatasetSourceMode] = useState<'upload' | 'agent_search' | 'agent_convert'>('upload');
@@ -231,33 +414,110 @@ const AgentCanvas: React.FC = () => {
   const [mcpEvents, setMcpEvents] = useState<McpEvent[]>(SAMPLE_MCP_EVENTS.slice(0, 2));
   const [mcpDrawerOpen, setMcpDrawerOpen] = useState(false);
   const [evalConfirmed, setEvalConfirmed] = useState(false);
-  const [chatInput, setChatInput] = useState('');
   const [flowMode, setFlowMode] = useState<FlowMode | null>(null);
   const [flowModeConfirmed, setFlowModeConfirmed] = useState(false);
-  const [showStage1Card, setShowStage1Card] = useState(false);
-  const [showStage2Card, setShowStage2Card] = useState(false);
   const [selectedDomain, setSelectedDomain] = useState('');
   const [selectedTaskType, setSelectedTaskType] = useState('');
   const [selectedTaskName, setSelectedTaskName] = useState('');
   const [taxonomyConfirmed, setTaxonomyConfirmed] = useState(false);
   const [planTimelineOpen, setPlanTimelineOpen] = useState(false);
+  const [splitStrategy, setSplitStrategy] = useState<'preset' | 'random'>('preset');
   const [chatSessions, setChatSessions] = useState<ChatSessionItem[]>([
-    { id: 'scenario_finance_full', title: '金融-文本-分类', subtitle: '训练任务-规划中' },
-    { id: 'scenario_med_train', title: '医疗-文本-NER', subtitle: '训练任务-规划中' },
-    { id: 'scenario_legal_eval', title: '法律-文本-摘要', subtitle: '评估任务-规划中' },
-    { id: 'live_new', title: '新建实时对话', subtitle: '训练任务-规划中' },
+    {
+      id: 'scenario_finance_full',
+      title: '金融 / 文本 / 分类',
+      subtitle: '训练任务-规划中',
+      status: '规划中',
+      currentStage: runListStageLine(0),
+      updatedAt: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
+    },
+    {
+      id: 'scenario_med_train',
+      title: '医疗 / 文本 / NER',
+      subtitle: '训练任务-规划中',
+      status: '训练中',
+      currentStage: runListStageLine(4),
+      updatedAt: new Date(Date.now() - 45 * 60 * 1000).toISOString(),
+    },
+    {
+      id: 'scenario_legal_eval',
+      title: '法律 / 文本 / 摘要',
+      subtitle: '评估任务-规划中',
+      status: '评测中',
+      currentStage: runListStageLine(5),
+      updatedAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+    },
+    {
+      id: 'live_new',
+      title: '新建 Run',
+      subtitle: '训练任务-规划中',
+      status: '草稿',
+      currentStage: runListStageLine(0),
+      updatedAt: new Date().toISOString(),
+    },
   ]);
   const [activeSessionId, setActiveSessionId] = useState('scenario_finance_full');
+  const [runListRenameOpen, setRunListRenameOpen] = useState(false);
+  const [runListRenameId, setRunListRenameId] = useState<string | null>(null);
+  const [runListRenameTitle, setRunListRenameTitle] = useState('');
 
-  const [uploadOpen, setUploadOpen] = useState(false);
-  const [importOpen, setImportOpen] = useState(false);
-  const [uploadForm] = Form.useForm();
-  const [importForm] = Form.useForm();
-  const [fileList, setFileList] = useState<UploadFile[]>([]);
+  const [dataWorkbenchMode, setDataWorkbenchMode] = useState<'summary' | 'edit'>('edit');
+  const [workspaceUploadList, setWorkspaceUploadList] = useState<UploadFile[]>([]);
+  const [localMockDataset, setLocalMockDataset] = useState<Dataset | null>(null);
+  const [mockPreviewRows, setMockPreviewRows] = useState<Record<string, string>[]>([]);
+  const [tvSplit, setTvSplit] = useState({ train: 80, valid: 10, test: 10 });
+  const [importUrlName, setImportUrlName] = useState('');
+  const [importUrlValue, setImportUrlValue] = useState('');
+  const [realUploadDatasetName, setRealUploadDatasetName] = useState('');
 
-  const selectedDataset = useMemo(() => datasets.find((d) => d.id === selectedDatasetId), [datasets, selectedDatasetId]);
+  const selectedDataset = useMemo(() => {
+    if (selectedDatasetId === MOCK_WORKSPACE_DATASET_ID && localMockDataset) {
+      return localMockDataset;
+    }
+    return datasets.find((d) => d.id === selectedDatasetId);
+  }, [datasets, selectedDatasetId, localMockDataset]);
 
   const readyDatasetCount = useMemo(() => datasets.filter((d) => d.status === 'ready').length, [datasets]);
+  const activeSession = useMemo(
+    () => chatSessions.find((s) => s.id === activeSessionId),
+    [chatSessions, activeSessionId]
+  );
+
+  const handleRunListMenuClick = (item: ChatSessionItem): MenuProps['onClick'] => (info) => {
+    info.domEvent.stopPropagation();
+    const { key } = info;
+    if (key === 'rename') {
+      setRunListRenameId(item.id);
+      setRunListRenameTitle(item.title);
+      setRunListRenameOpen(true);
+      return;
+    }
+    if (key === 'copy') {
+      message.info('复制 Run：即将支持');
+      return;
+    }
+    if (key === 'archive') {
+      message.info('归档：即将支持');
+      return;
+    }
+    if (key === 'delete') {
+      Modal.confirm({
+        title: '删除此 Run？',
+        content: '删除后无法恢复，请确认后再操作。',
+        okText: '删除',
+        okType: 'danger',
+        cancelText: '取消',
+        onOk: () => {
+          const filtered = chatSessions.filter((x) => x.id !== item.id);
+          setChatSessions(filtered);
+          if (activeSessionId === item.id && filtered.length > 0) {
+            setActiveSessionId(filtered[0].id);
+          }
+        },
+      });
+    }
+  };
+
   const stateColor = useMemo(() => {
     if (state === 'done') return 'success';
     if (state === 'training_running' || state === 'evaluating') return 'processing';
@@ -268,6 +528,37 @@ const AgentCanvas: React.FC = () => {
   const canEnterStep = (target: number, s: FlowState) => STEP_STATE_RULES[target]?.includes(s) ?? false;
   const currentFlowStep = useMemo(() => stepByState(state), [state]);
   const isLocked = readOnlyPreview;
+  const isDataPrepPhase = state === 'data_selecting' || state === 'data_validating';
+  /** 数据已确认之后：对话区不再展示「目标输入」大表单，只保留计划准备提示（由结构化 state 驱动） */
+  const hideEarlyGoalInput =
+    state === 'data_ready' || state === 'plan_generating' || state === 'plan_previewed';
+  /** 右侧「训练计划工作台」：建议计划展示与确认（不含 data_ready 占位） */
+  const isPlanWorkbenchPhase = state === 'plan_previewed' || state === 'plan_generating';
+  /** 训练已启动后的编排状态（MCP/日志在右侧执行工作台展示，不混入主聊天） */
+  const isTrainingExecutionActive = [
+    'training_queued',
+    'training_running',
+    'training_succeeded',
+    'evaluating',
+    'done',
+  ].includes(state);
+  const isTrainingExecutionView = step === 4 && isTrainingExecutionActive;
+
+  const trainExecutionMcpRows = useMemo(() => {
+    const mapped = mcpEvents.map(mcpEventToTrainExecutionRow);
+    if (!isTrainingExecutionView) return mapped;
+    return [...MOCK_TRAIN_EXECUTION_MCP_STREAM, ...mapped];
+  }, [mcpEvents, isTrainingExecutionView]);
+
+  const primaryOrchAgent = useMemo((): OrchAgentKey => {
+    if (['draft', 'intent_submitted', 'task_parsed', 'task_confirmed'].includes(state)) return 'planning';
+    if (['data_selecting', 'data_validating'].includes(state)) return 'data';
+    if (['data_ready', 'plan_generating', 'plan_previewed'].includes(state)) return 'planning';
+    if (state === 'plan_frozen') return 'orchestrator';
+    if (['training_queued', 'training_running', 'training_succeeded'].includes(state)) return 'training';
+    if (state === 'evaluating' || state === 'done') return 'eval';
+    return 'orchestrator';
+  }, [state]);
 
   const goStep = (target: number) => {
     if (!canEnterStep(target, state)) {
@@ -295,9 +586,9 @@ const AgentCanvas: React.FC = () => {
   const appendSingleTagToIntent = (
     tag: string,
     groupTags: string[],
-    setSelected: React.Dispatch<React.SetStateAction<string | undefined>>
+    setSelected?: React.Dispatch<React.SetStateAction<string | undefined>>
   ) => {
-    setSelected(tag);
+    setSelected?.(tag);
     setUiSelectedTags((prev) => {
       const withoutGroup = prev.filter((x) => !groupTags.includes(x));
       return [...withoutGroup, tag];
@@ -313,13 +604,17 @@ const AgentCanvas: React.FC = () => {
     if (tag === '文本') setModalityHint('text');
   };
 
+  const appendGoalSnippet = (text: string) => {
+    setIntentText((prev) => {
+      const t = prev.trim();
+      return t ? `${t} ${text}` : text;
+    });
+  };
+
   const allDomainTags = useMemo(() => [...DOMAIN_TAGS, ...customDomainTags], [customDomainTags]);
 
   const clearSelectedPromptOptions = () => {
     setSelectedDomainTag(undefined);
-    setSelectedTaskTag(undefined);
-    setSelectedModalityTag(undefined);
-    setCustomDomainInput('');
     setUiSelectedTags([]);
     setIntentText('');
     setTaskDraft(null);
@@ -328,11 +623,24 @@ const AgentCanvas: React.FC = () => {
     setPipeline(null);
     setDatasetValidationReport(null);
     setSelectedDatasetId(undefined);
-    setParsedIntentSnapshot('');
     setState('draft');
     setStep(0);
     setReadOnlyPreview(false);
     setModalityHint('text');
+    setFlowMode(null);
+    setFlowModeConfirmed(false);
+    setTaxonomyConfirmed(false);
+    setSelectedDomain('');
+    setSelectedTaskType('');
+    setSelectedTaskName('');
+    setDataWorkbenchMode('edit');
+    setWorkspaceUploadList([]);
+    setLocalMockDataset(null);
+    setMockPreviewRows([]);
+    setTvSplit({ train: 80, valid: 10, test: 10 });
+    setImportUrlName('');
+    setImportUrlValue('');
+    setRealUploadDatasetName('');
   };
 
   const restartFromStep = (target: number) => {
@@ -439,6 +747,118 @@ const AgentCanvas: React.FC = () => {
     message.success('已生成字段映射建议，可继续编辑后导入');
   };
 
+  const applyMockWorkspaceValidation = () => {
+    if (!taskSpec) {
+      message.warning('无任务定义');
+      return;
+    }
+    const headers = schemaHeadersByTask(taskSpec.semantic_task_type);
+    const n = headers.length;
+    const map: Record<string, string> = {};
+    headers.forEach((h) => {
+      map[h] = h;
+    });
+    setAgentColumnMap(map);
+    const name = workspaceUploadList[0]?.name?.replace(/（URL）$/, '') || 'mock_staging_dataset';
+    const now = new Date().toISOString();
+    const mockDs: Dataset = {
+      id: MOCK_WORKSPACE_DATASET_ID,
+      user_id: 0,
+      name,
+      type: 'text',
+      usage: 'training',
+      source: 'mock_workspace',
+      original_file_path: null,
+      cleaned_file_path: '/mock/normalized.csv',
+      row_count: 1200,
+      column_count: n,
+      file_size: 256000,
+      status: 'ready',
+      created_at: now,
+      updated_at: now,
+    };
+    setLocalMockDataset(mockDs);
+    setSelectedDatasetId(MOCK_WORKSPACE_DATASET_ID);
+    setDatasetValidationReport({
+      schema_check: 'passed（mock）',
+      field_check: `passed（${n} 列对齐 schema）`,
+      sample_count: '1200',
+      label_distribution: 'balanced（mock）',
+    });
+    const samples = [0, 1, 2].map((i) =>
+      Object.fromEntries(headers.map((h) => [h, `${h}_mock_${i + 1}`]))
+    );
+    setMockPreviewRows(samples);
+    message.success('已应用模拟字段检测与 schema 校验');
+  };
+
+  const mockAgentSearchStaging = () => {
+    const uid = `search_${Date.now()}`;
+    setWorkspaceUploadList((prev) => [
+      ...prev,
+      {
+        uid,
+        name: 'mock_public_dataset.csv（检索）',
+        status: 'done',
+        url: 'https://example.com/datasets/mock_public_dataset.csv',
+      },
+    ]);
+    message.success('（mock）已添加模拟公开数据集引用');
+  };
+
+  const addUrlToWorkspaceStaging = () => {
+    const name = importUrlName.trim();
+    const url = importUrlValue.trim();
+    if (!name || !url) {
+      message.warning('请填写名称与 URL');
+      return;
+    }
+    try {
+      // eslint-disable-next-line no-new
+      new URL(url);
+    } catch {
+      message.warning('URL 格式不正确');
+      return;
+    }
+    const uid = `url_${Date.now()}`;
+    setWorkspaceUploadList((prev) => [
+      ...prev,
+      { uid, name: `${name}（URL）`, status: 'done', url },
+    ]);
+    setImportUrlName('');
+    setImportUrlValue('');
+    message.success('已加入待处理文件列表');
+  };
+
+  const submitRealDatasetUpload = async () => {
+    const first = workspaceUploadList[0];
+    const f = first?.originFileObj;
+    if (!f || !(f instanceof File)) {
+      message.warning('请先在上方拖拽或选择本地文件');
+      return;
+    }
+    const nm = realUploadDatasetName.trim() || first.name || 'dataset';
+    setLoading(true);
+    try {
+      await datasetService.uploadDataset(f, nm, 'text', 'training');
+      message.success('已上传到服务器');
+      setWorkspaceUploadList([]);
+      setRealUploadDatasetName('');
+      setLocalMockDataset(null);
+      setMockPreviewRows([]);
+      setSelectedDatasetId(undefined);
+      await refreshReadyDatasets();
+    } catch (e: any) {
+      message.error(e?.message || '上传失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateAgentColumnMapField = (target: string, raw: string) => {
+    setAgentColumnMap((prev) => ({ ...prev, [target]: raw }));
+  };
+
   useEffect(() => {
     void refreshReadyDatasets();
   }, []);
@@ -509,22 +929,38 @@ const AgentCanvas: React.FC = () => {
         task_schema_id: inferred.includes('ner') ? 'ner_bio_v1' : 'text_cls_v1',
       };
       setTaskDraft(draft);
-      setParsedIntentSnapshot(intentText.trim());
       setState('task_parsed');
+      setTaxonomyConfirmed(false);
+      setStep(0);
+      const cn = draftToTaxonomyCn(draft);
+      setSelectedDomain(cn.domainCn);
+      setSelectedTaskType(cn.typeCn);
+      setSelectedTaskName(cn.taskCn);
       setChatMessages((prev) => [
         ...prev,
         {
           id: `msg_${Date.now()}`,
           role: 'agent',
           stage: 'task_confirm',
-          content: `我已识别为 ${draft.semantic_task_type}/${draft.domain}/${draft.modality}，请确认任务定义。`,
+          content: `Planner 初判：领域「${bilingual(draft.domain, DOMAIN_CN_MAP)}」、模态「${bilingual(draft.modality, MODALITY_CN_MAP)}」、任务「${bilingual(draft.semantic_task_type, TASK_CN_MAP)}」。请在下方用芯片调整并「确认流程」，确认后再点击「确认任务」。`,
           timestamp: new Date().toLocaleTimeString('zh-CN'),
         },
       ]);
       message.success('已解析目标（草稿）');
     } catch (e: any) {
       setState('draft');
-      message.error(e?.message || '解析失败');
+      const errMsg = e?.message || '解析失败';
+      message.error(errMsg);
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          id: `msg_${Date.now()}`,
+          role: 'agent',
+          stage: 'goal_input',
+          content: `解析未成功：${errMsg}。请检查描述是否完整，或稍后重试。`,
+          timestamp: new Date().toLocaleTimeString('zh-CN'),
+        },
+      ]);
     } finally {
       setLoading(false);
     }
@@ -556,14 +992,14 @@ const AgentCanvas: React.FC = () => {
       appendSingleTagToIntent(domainTag, [...allDomainTags, domainTag], setSelectedDomainTag);
 
       const taskTag = inferTaskTagFromText(`${text} ${resolved.inferred_intent || ''}`);
-      appendSingleTagToIntent(taskTag, TASK_TAGS, setSelectedTaskTag);
+      appendSingleTagToIntent(taskTag, GOAL_TASK_CHIPS);
 
       const modalityTag = text.includes('图像') || text.includes('图片') || text.includes('多模态') ? '图文' : '文本';
       if (modalityTag === '文本') {
-        appendSingleTagToIntent('文本', MODALITY_TAGS, setSelectedModalityTag);
+        appendSingleTagToIntent('文本', MODALITY_TAGS);
       } else {
         // 图文未开放，兜底仍选文本
-        appendSingleTagToIntent('文本', MODALITY_TAGS, setSelectedModalityTag);
+        appendSingleTagToIntent('文本', MODALITY_TAGS);
       }
 
       message.success('已自动识别并填充选项，可直接解析目标');
@@ -577,8 +1013,7 @@ const AgentCanvas: React.FC = () => {
   const confirmTask = () => {
     if (state !== 'task_parsed' || !taskDraft) return message.warning('请先完成任务解析');
     setTaskSpec(taskDraft);
-    setShowAdvancedTaskEditor(false);
-    setState('data_selecting');
+    setState('task_confirmed');
     setStep(2);
     setChatMessages((prev) => [
       ...prev,
@@ -586,25 +1021,56 @@ const AgentCanvas: React.FC = () => {
         id: `msg_${Date.now()}`,
         role: 'user',
         stage: 'task_confirm',
-        content: '确认任务定义，进入数据准备。',
+        content: '确认任务定义。',
         timestamp: new Date().toLocaleTimeString('zh-CN'),
       },
       {
         id: `msg_${Date.now() + 1}`,
         role: 'agent',
+        stage: 'task_confirm',
+        content:
+          '任务已确认。请在右侧工作台点击「进入数据准备」，完成上传、字段映射与 schema 校验。',
+        timestamp: new Date().toLocaleTimeString('zh-CN'),
+      },
+    ]);
+  };
+
+  const enterDataPreparation = () => {
+    if (state !== 'task_confirmed' || !taskSpec) {
+      message.warning('请先确认任务');
+      return;
+    }
+    setDataWorkbenchMode('edit');
+    setWorkspaceUploadList([]);
+    setLocalMockDataset(null);
+    setMockPreviewRows([]);
+    setDatasetValidationReport(null);
+    setSelectedDatasetId(undefined);
+    setAgentColumnMap({});
+    setTvSplit({ train: 80, valid: 10, test: 10 });
+    setState('data_selecting');
+    setChatMessages((prev) => [
+      ...prev,
+      {
+        id: `msg_${Date.now()}`,
+        role: 'agent',
         stage: 'data_prepare',
-        content: `请准备符合 schema（${schemaHintByTask(taskDraft.semantic_task_type)}）的数据。`,
+        content: `已进入数据准备阶段。所需 schema：${schemaHintByTask(taskSpec.semantic_task_type)}。请使用右侧「数据工作台」完成上传、映射与校验；中间栏仅作说明，无需在此操作数据。`,
         timestamp: new Date().toLocaleTimeString('zh-CN'),
       },
     ]);
   };
 
   const confirmData = () => {
-    if (!['task_confirmed', 'data_selecting', 'data_validating'].includes(state)) {
-      return message.warning('当前状态不能确认数据');
+    if (!['data_selecting', 'data_validating'].includes(state)) {
+      return message.warning('请先进入数据准备阶段');
     }
     if (!taskSpec) return message.warning('没有 task_confirmed，不能进入数据确认');
     if (!selectedDatasetId) return message.warning('请先选择数据集');
+    const tvtSum = tvSplit.train + tvSplit.valid + tvSplit.test;
+    if (tvtSum !== 100) {
+      return message.warning('Train / Valid / Test 比例之和须为 100');
+    }
 
     setState('data_validating');
 
@@ -630,12 +1096,88 @@ const AgentCanvas: React.FC = () => {
       return message.error('数据校验失败：字段数不满足当前任务 schema');
     }
 
-    setDatasetValidationReport({
+    const now = new Date().toISOString();
+    const splitStr = `${splitStrategy};tvt=${tvSplit.train}:${tvSplit.valid}:${tvSplit.test}`;
+    const validationRecord: Record<string, string> = {
       schema_check: 'passed',
       field_check: `passed（${actualColumns} 列）`,
       sample_count: `${selectedDataset.row_count}`,
       label_distribution: 'ok',
+      confirmed_at: now,
+      dataset_id: String(selectedDataset.id),
+      split_tvt: `${tvSplit.train}:${tvSplit.valid}:${tvSplit.test}`,
+      split_strategy: splitStr,
+      dataset_source_mode: datasetSourceMode,
+      column_map_json:
+        Object.keys(agentColumnMap).length > 0 ? JSON.stringify(agentColumnMap) : '{}',
+    };
+    setDatasetValidationReport(validationRecord);
+
+    const nextDatasetSpec: DatasetSpec = {
+      dataset_source_mode: datasetSourceMode,
+      dataset_id: String(selectedDataset.id),
+      raw_file_path: selectedDataset.original_file_path || undefined,
+      normalized_dataset_path: selectedDataset.cleaned_file_path || undefined,
+      schema_valid: true,
+      split_strategy: splitStr,
+      train_path: selectedDataset.cleaned_file_path || undefined,
+      sample_count: selectedDataset.row_count ?? undefined,
+    };
+
+    const method =
+      planSpec.training_method.trim() || taskSpec.candidate_methods?.[0] || 'lora';
+    if (!planSpec.training_method.trim()) {
+      setPlanSpec((prev) => ({ ...prev, training_method: method }));
+    }
+    const planForRun: PlanSpec = {
+      base_model: planSpec.base_model,
+      training_method: method,
+      trainer_backend: planSpec.trainer_backend,
+      learning_rate: planSpec.learning_rate,
+      batch_size: planSpec.batch_size,
+      epochs: planSpec.epochs,
+      max_seq_length: planSpec.max_seq_length,
+      eval_strategy: planSpec.eval_strategy,
+      expected_outputs: planSpec.expected_outputs,
+    };
+
+    const taskForRun = taskSpec as unknown as TaskSpec;
+    setRunSpec((prev) => {
+      const rid = prev?.run_id ?? `run_${Date.now()}`;
+      return {
+        run_id: rid,
+        task_spec: taskForRun,
+        dataset_spec: nextDatasetSpec,
+        dataset_validation_report: validationRecord,
+        plan_spec: planForRun,
+        current_state: 'data_ready',
+        created_at: prev?.created_at ?? now,
+        updated_at: now,
+        owner: prev?.owner ?? 'default_user',
+        intent_draft:
+          prev?.intent_draft ?? {
+            intent_text: intentText,
+            ui_selected_tags: uiSelectedTags,
+            modality_hint: modalityHint,
+          },
+        run_trace: prev?.run_trace,
+      };
     });
+
+    const sourceCn =
+      datasetSourceMode === 'upload'
+        ? '上传符合 schema'
+        : datasetSourceMode === 'agent_convert'
+          ? '原始材料由 Data Agent 转换'
+          : 'Data Agent 检索公开数据';
+    const agentSummary = [
+      `结构化状态已更新为 data_ready（run 内 dataset_spec / dataset_validation_report 已写入）。`,
+      `数据集：${selectedDataset.name}（id=${selectedDataset.id}），样本 ${selectedDataset.row_count}，列 ${actualColumns}。`,
+      `切分：train/valid/test=${tvSplit.train}:${tvSplit.valid}:${tvSplit.test}，策略 ${splitStrategy}。`,
+      `校验：schema=${validationRecord.schema_check}；字段=${validationRecord.field_check}。`,
+      `数据来源：${sourceCn}。`,
+      `下一步：请在右侧「阶段工作台」第 3 步查看/生成训练计划，无需再发消息。`,
+    ].join('\n');
 
     setState('data_ready');
     setStep(3);
@@ -644,8 +1186,8 @@ const AgentCanvas: React.FC = () => {
       {
         id: `msg_${Date.now()}`,
         role: 'agent',
-        stage: 'plan_confirm',
-        content: '数据校验通过。我将基于任务与数据生成建议训练计划，请确认。',
+        stage: 'plan_prepare',
+        content: agentSummary,
         timestamp: new Date().toLocaleTimeString('zh-CN'),
       },
     ]);
@@ -664,15 +1206,15 @@ const AgentCanvas: React.FC = () => {
         eval_strategy: taskSpec?.semantic_task_type?.includes('ner') ? 'per_epoch_entity_f1' : 'per_epoch',
       }));
       setState('plan_previewed');
-      message.success('已基于当前任务与数据重新生成建议计划');
+      message.success('已生成建议计划，请在右侧工作台核对');
     } catch {
       setState('data_ready');
     }
   };
 
   const freezePlan = () => {
-    if (state !== 'data_ready' && state !== 'plan_previewed') {
-      return message.warning('当前状态不能冻结计划');
+    if (state !== 'plan_previewed') {
+      return message.warning('请先在右侧生成并查看「建议计划」后再确认');
     }
     if (!taskSpec) return message.warning('任务未确认');
     if (!selectedDatasetId) return message.warning('数据未确认');
@@ -680,28 +1222,30 @@ const AgentCanvas: React.FC = () => {
 
     const now = new Date().toISOString();
     const nextRunSpec: RunSpec = {
-      run_id: `run_${Date.now()}`,
-      task_spec: taskSpec,
+      run_id: runSpec?.run_id ?? `run_${Date.now()}`,
+      task_spec: taskSpec as unknown as TaskSpec,
       dataset_spec: {
         dataset_source_mode: datasetSourceMode,
         dataset_id: selectedDataset ? String(selectedDataset.id) : undefined,
         raw_file_path: selectedDataset?.original_file_path || undefined,
         normalized_dataset_path: selectedDataset?.cleaned_file_path || undefined,
         schema_valid: true,
-        split_strategy: 'preset',
+        split_strategy: `${splitStrategy};tvt=${tvSplit.train}:${tvSplit.valid}:${tvSplit.test}`,
         train_path: selectedDataset?.cleaned_file_path || undefined,
         sample_count: selectedDataset?.row_count || undefined,
       },
-      plan_spec: planSpec,
+      dataset_validation_report: runSpec?.dataset_validation_report,
+      plan_spec: planSpec as PlanSpec,
       current_state: 'plan_frozen',
-      created_at: now,
+      created_at: runSpec?.created_at ?? now,
       updated_at: now,
-      owner: 'default_user',
-      intent_draft: {
+      owner: runSpec?.owner ?? 'default_user',
+      intent_draft: runSpec?.intent_draft ?? {
         intent_text: intentText,
         ui_selected_tags: uiSelectedTags,
         modality_hint: modalityHint,
       },
+      run_trace: runSpec?.run_trace,
     };
 
     setRunSpec(nextRunSpec);
@@ -712,8 +1256,9 @@ const AgentCanvas: React.FC = () => {
       {
         id: `msg_${Date.now()}`,
         role: 'agent',
-        stage: 'train_execute',
-        content: '计划已冻结。你可以启动训练，训练完成后将进入评估确认。',
+        stage: 'plan_confirm',
+        content:
+          '计划已确认并锁定（plan_frozen），参数已写入 run_spec。当前阶段为「已确认计划」；后续执行需在工作台「训练执行」步骤单独发起，并非自动开始。',
         timestamp: new Date().toLocaleTimeString('zh-CN'),
       },
     ]);
@@ -773,12 +1318,6 @@ const AgentCanvas: React.FC = () => {
     return '任务进行中';
   };
 
-  const statusAccentBySubtitle = (subtitle: string): string => {
-    if (subtitle.includes('已完成')) return '#52c41a';
-    if (subtitle.includes('进行中')) return '#1677ff';
-    return '#faad14';
-  };
-
   useEffect(() => {
     setChatSessions((prev) =>
       prev.map((it) =>
@@ -787,11 +1326,14 @@ const AgentCanvas: React.FC = () => {
               ...it,
               subtitle: statusSubtitleByState(state),
               progress: state === 'training_running' ? 60 : state === 'evaluating' ? 90 : state === 'done' ? 100 : it.progress,
+              status: mapFlowStateToRunListStatus(state),
+              currentStage: runListStageLine(step),
+              updatedAt: new Date().toISOString(),
             }
           : it
       )
     );
-  }, [state, activeSessionId]);
+  }, [state, step, activeSessionId]);
 
   useEffect(() => {
     const scenario = SAMPLE_SCENARIOS.find((s) => s.id === activeSessionId);
@@ -804,19 +1346,13 @@ const AgentCanvas: React.FC = () => {
     setTaxonomyConfirmed(true);
     setChatMessages(scenario.conversation);
     setMcpEvents(scenario.mcpTimeline);
-    setShowStage1Card(false);
-    setShowStage2Card(false);
   }, [activeSessionId]);
 
   const sendChat = async () => {
-    const text = chatInput.trim();
-    if (!text) return;
+    const text = intentText.trim();
+    if (!text) return message.warning('请输入内容');
     if (!flowModeConfirmed) {
-      message.warning('请先确认流程模式：全流程 / 仅训练 / 仅评估');
-      return;
-    }
-    if (!taxonomyConfirmed) {
-      message.warning('请先确认领域-类型-任务');
+      message.warning('请先在对话区上方确认任务范围（全流程 / 仅训练 / 仅评估）');
       return;
     }
     setChatMessages((prev) => [
@@ -829,10 +1365,10 @@ const AgentCanvas: React.FC = () => {
         timestamp: new Date().toLocaleTimeString('zh-CN'),
       },
     ]);
-    setIntentText(text);
-    setChatInput('');
-    if (state === 'draft' || state === 'task_parsed') {
+    if (flowModeConfirmed && ['draft', 'intent_submitted', 'task_parsed'].includes(state)) {
       await parseIntent();
+    } else {
+      setIntentText('');
     }
   };
 
@@ -848,22 +1384,20 @@ const AgentCanvas: React.FC = () => {
       return;
     }
     setFlowModeConfirmed(true);
-    setShowStage1Card(false);
-    setShowStage2Card(true);
     setChatMessages((prev) => [
       ...prev,
       {
         id: `msg_${Date.now()}`,
         role: 'user',
         stage: 'goal_input',
-        content: `我选择流程模式：${flowModeLabel(flowMode)}。`,
+        content: `确认任务范围：${flowModeLabel(flowMode)}。`,
         timestamp: new Date().toLocaleTimeString('zh-CN'),
       },
       {
         id: `msg_${Date.now() + 1}`,
         role: 'agent',
         stage: 'goal_input',
-        content: 'Flow mode confirmed. Next, please confirm domain / type / task.',
+        content: '范围已记录。请在下方输入训练/评估目标与约束，并点击「发送并解析」。',
         timestamp: new Date().toLocaleTimeString('zh-CN'),
       },
     ]);
@@ -871,341 +1405,81 @@ const AgentCanvas: React.FC = () => {
 
   const confirmTaxonomy = () => {
     if (!selectedDomain || !selectedTaskType || !selectedTaskName) {
-      message.warning('请完整选择领域、类型和任务');
+      message.warning('请选择领域、模态与任务类型');
       return;
     }
+    if (!taskDraft) {
+      message.warning('请先完成阶段 1：输入目标并发送解析');
+      return;
+    }
+    const enDomain = DOMAIN_CN_TO_EN[selectedDomain] || 'general';
+    const modality = MODALITY_CN_TO_EN(selectedTaskType);
+    const semanticType = TASK_CN_TO_SEMANTIC[selectedTaskName] || 'classification';
+    const next: TaskDraft = {
+      ...taskDraft,
+      domain: enDomain,
+      modality,
+      semantic_task_type: semanticType,
+      output_structure: semanticType === 'ner' ? 'sequence_tags' : taskDraft.output_structure,
+      recommended_metrics: semanticType === 'ner' ? ['entity_f1', 'token_f1'] : taskDraft.recommended_metrics,
+      task_schema_id: semanticType === 'ner' ? 'ner_bio_v1' : 'text_cls_v1',
+    };
+    setTaskDraft(next);
     setTaxonomyConfirmed(true);
-    setShowStage2Card(false);
-    setChatInput(`${selectedDomain}，${selectedTaskType}，${selectedTaskName}。`);
+    setStep(1);
+    setModalityHint(modality === 'image_text' ? 'image_text' : 'text');
     setChatMessages((prev) => [
       ...prev,
       {
         id: `msg_${Date.now()}`,
         role: 'user',
         stage: 'task_confirm',
-        content: `确认分类：${selectedDomain} / ${selectedTaskType} / ${selectedTaskName}`,
+        content: `确认流程：${selectedDomain} · ${selectedTaskType} · ${selectedTaskName}`,
         timestamp: new Date().toLocaleTimeString('zh-CN'),
       },
       {
         id: `msg_${Date.now() + 1}`,
         role: 'agent',
         stage: 'task_confirm',
-        content: '分类已记录。请在输入框补充业务目标、数据来源和约束，我会开始规划。',
+        content: '流程已对齐。请核对下方任务摘要，确认无误后点击「确认任务」。',
         timestamp: new Date().toLocaleTimeString('zh-CN'),
       },
     ]);
+    message.success('流程已确认');
   };
 
-  const prototypeMode = true;
-  if (prototypeMode) {
-  const activeSession = chatSessions.find((s) => s.id === activeSessionId);
-    return (
-      <div className="agent-canvas" data-theme="light">
-        <div className="canvas-main">
-          <div className="agent-proto-header">
-            <Typography.Title level={4} style={{ margin: 0 }}>
-              Agent 训练编排中心
-            </Typography.Title>
-            <Button onClick={() => setMcpDrawerOpen(true)}>数据控制台</Button>
-          </div>
 
-          <Row gutter={[12, 12]}>
-            <Col xs={24} md={7} lg={6}>
-              <Card
-                className="agent-proto-side-card"
-                size="small"
-                title={(
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ fontWeight: 600, fontSize: 13 }}>会话列表</span>
-                    <Space size={4}>
-                      <Button
-                        type="text"
-                        size="small"
-                        icon={<PlusOutlined />}
-                        onClick={() => {
-                          const id = `s_${Date.now()}`;
-                          setChatSessions((prev) => [{ id, title: '新建对话', subtitle: '训练任务-规划中' }, ...prev]);
-                          setActiveSessionId(id);
-                          clearSelectedPromptOptions();
-                          setFlowMode(null);
-                          setFlowModeConfirmed(false);
-                          setShowStage1Card(true);
-                          setShowStage2Card(false);
-                          setSelectedDomain('');
-                          setSelectedTaskType('');
-                          setSelectedTaskName('');
-                          setTaxonomyConfirmed(false);
-                          setChatMessages([
-                            {
-                              id: `msg_${Date.now()}`,
-                              role: 'agent',
-                              stage: 'goal_input',
-                              content:
-                                'Hello! I am your training orchestration agent. Let us start with Stage 1: please choose a flow mode.',
-                              timestamp: new Date().toLocaleTimeString('zh-CN'),
-                            },
-                          ]);
-                          setMcpEvents([]);
-                        }}
-                      />
-                    </Space>
-                  </div>
-                )}
-              >
-                <List
-                  dataSource={chatSessions}
-                  renderItem={(item) => (
-                    <List.Item
-                      className={`agent-proto-session-item ${item.id === activeSessionId ? 'agent-proto-session-item-active' : ''}`}
-                      onClick={() => setActiveSessionId(item.id)}
-                    >
-                      <div style={{ width: '100%', position: 'relative' }}>
-                        <div className="agent-proto-session-accent" style={{ background: statusAccentBySubtitle(item.subtitle) }} />
-                        <div style={{ fontWeight: 600, paddingRight: 30, lineHeight: 1.45, marginBottom: 4 }}>{item.title}</div>
-                        <Button
-                          type="text"
-                          size="small"
-                          icon={<DeleteOutlined />}
-                          className="agent-proto-session-delete"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setChatSessions((prev) => prev.filter((x) => x.id !== item.id));
-                            if (activeSessionId === item.id) {
-                              const next = chatSessions.find((x) => x.id !== item.id);
-                              if (next) setActiveSessionId(next.id);
-                            }
-                          }}
-                        />
-                        <div style={{ fontSize: 12, color: '#52c41a', lineHeight: 1.45 }}>{item.subtitle}</div>
-                        {typeof item.progress === 'number' && (
-                          <>
-                            <div style={{ fontSize: 12, color: '#8c8c8c' }}>进度：{item.progress}%</div>
-                            <div className="agent-proto-progress-track">
-                              <div className="agent-proto-progress-fill" style={{ width: `${Math.max(0, Math.min(100, item.progress))}%` }} />
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    </List.Item>
-                  )}
-                />
-              </Card>
-            </Col>
-
-            <Col xs={24} md={17} lg={18}>
-              <Card
-                className="agent-proto-main-card"
-                size="small"
-                title={(
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Space>
-                      <span style={{ fontWeight: 600 }}>{activeSession?.title || '当前对话'}</span>
-                      <span style={{ color: '#52c41a' }}>{activeSession?.subtitle || ''}</span>
-                    </Space>
-                    <Space size={4}>
-                      <Button type="text" size="small" icon={<EyeOutlined />} onClick={() => setPlanTimelineOpen(true)} />
-                      <Button type="text" size="small" icon={<PaperClipOutlined />} onClick={() => setMcpDrawerOpen(true)} />
-                      <Button
-                        type="text"
-                        size="small"
-                        icon={<EditOutlined />}
-                        onClick={() => {
-                          const current = activeSession?.title || '';
-                          const next = window.prompt('请输入新的对话名称', current);
-                          if (!next) return;
-                          setChatSessions((prev) => prev.map((s) => (s.id === activeSessionId ? { ...s, title: next } : s)));
-                        }}
-                      />
-                      <Button
-                        type="text"
-                        size="small"
-                        icon={<DeleteOutlined />}
-                        onClick={() => {
-                          setChatMessages([]);
-                          clearSelectedPromptOptions();
-                        }}
-                      />
-                    </Space>
-                  </div>
-                )}
-              >
-                <div className="agent-proto-chat-stream">
-                  <List
-                    dataSource={chatMessages}
-                    renderItem={(m) => (
-                      <List.Item className={`agent-proto-chat-row ${m.role === 'user' ? 'agent-proto-chat-row-user' : 'agent-proto-chat-row-agent'}`}>
-                        <div className={`agent-proto-bubble ${m.role === 'agent' ? 'agent-proto-bubble-agent' : 'agent-proto-bubble-user'}`}>
-                          <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 4 }}>
-                            {m.role === 'agent' ? 'Agent' : m.role === 'user' ? '你' : '系统'} · {m.timestamp}
-                          </div>
-                          <div>{m.content}</div>
-                        </div>
-                      </List.Item>
-                    )}
-                  />
-                  {showStage1Card && (
-                    <Card size="small" title="阶段 1：确认流程模式" style={{ marginBottom: 10 }}>
-                      <Space wrap>
-                        {[
-                          { key: 'full', label: '全流程（训练+评估）' },
-                          { key: 'train_only', label: '仅训练' },
-                          { key: 'eval_only', label: '仅评估' },
-                        ].map((item) => (
-                          <Button
-                            key={item.key}
-                            type={flowMode === item.key ? 'primary' : 'default'}
-                            onClick={() => setFlowMode(item.key as FlowMode)}
-                            disabled={flowModeConfirmed}
-                          >
-                            {item.label}
-                          </Button>
-                        ))}
-                        <Button type="dashed" onClick={confirmFlowMode} disabled={flowModeConfirmed}>
-                          {flowModeConfirmed ? '已确认流程模式' : '确认流程模式'}
-                        </Button>
-                      </Space>
-                    </Card>
-                  )}
-                  {showStage2Card && (
-                    <Card size="small" title="阶段 2：确认领域-类型-任务" style={{ marginBottom: 10 }}>
-                      <Row gutter={[8, 8]}>
-                        <Col span={8}>
-                          <Select
-                            value={selectedDomain || undefined}
-                            onChange={setSelectedDomain}
-                            placeholder="领域"
-                            disabled={!flowModeConfirmed || taxonomyConfirmed}
-                            style={{ width: '100%' }}
-                            options={['金融', '医疗', '法律', '电商', '教育', '通用'].map((x) => ({ label: x, value: x }))}
-                          />
-                        </Col>
-                        <Col span={8}>
-                          <Select
-                            value={selectedTaskType || undefined}
-                            onChange={setSelectedTaskType}
-                            placeholder="类型"
-                            disabled={!flowModeConfirmed || taxonomyConfirmed}
-                            style={{ width: '100%' }}
-                            options={['文本', '图文', '语音文本'].map((x) => ({ label: x, value: x }))}
-                          />
-                        </Col>
-                        <Col span={8}>
-                          <Select
-                            value={selectedTaskName || undefined}
-                            onChange={setSelectedTaskName}
-                            placeholder="任务"
-                            disabled={!flowModeConfirmed || taxonomyConfirmed}
-                            style={{ width: '100%' }}
-                            options={['分类', 'NER', '摘要', '生成', '匹配排序'].map((x) => ({ label: x, value: x }))}
-                          />
-                        </Col>
-                      </Row>
-                      <div style={{ marginTop: 8 }}>
-                        <Button type="dashed" onClick={confirmTaxonomy} disabled={!flowModeConfirmed || taxonomyConfirmed}>
-                          {taxonomyConfirmed ? '已确认领域-类型-任务' : '确认领域-类型-任务'}
-                        </Button>
-                      </div>
-                    </Card>
-                  )}
-                </div>
-
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <Input.TextArea
-                    rows={3}
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    placeholder="请输入你的训练/评估目标、约束条件或修改意见…"
-                    disabled={!flowModeConfirmed || !taxonomyConfirmed}
-                  />
-                  <Button type="primary" onClick={() => void sendChat()} disabled={!flowModeConfirmed || !taxonomyConfirmed}>
-                    发送
-                  </Button>
-                </div>
-              </Card>
-            </Col>
-          </Row>
-        </div>
-
-        <Drawer
-          title="MCP 信息窗口（示例）"
-          open={mcpDrawerOpen}
-          onClose={() => setMcpDrawerOpen(false)}
-          width={460}
-        >
-          <Tabs
-            items={[
-              {
-                key: 'live',
-                label: '当前事件',
-                children: (
-                  <List
-                    size="small"
-                    dataSource={mcpEvents}
-                    renderItem={(evt) => (
-                      <List.Item>
-                        <div>
-                          <Typography.Text strong>{evt.server}.{evt.tool}</Typography.Text>
-                          <Tag style={{ marginLeft: 8 }} color={evt.status === 'success' ? 'success' : evt.status === 'failed' ? 'error' : 'processing'}>
-                            {evt.status}
-                          </Tag>
-                          <div style={{ marginTop: 4, fontSize: 12 }}>{evt.summary}</div>
-                          <Typography.Text type="secondary" style={{ fontSize: 12 }}>{evt.timestamp}</Typography.Text>
-                        </div>
-                      </List.Item>
-                    )}
-                  />
-                ),
-              },
-              {
-                key: 'sample',
-                label: '全流程示例',
-                children: (
-                  <List
-                    size="small"
-                    dataSource={SAMPLE_MCP_EVENTS}
-                    renderItem={(evt) => (
-                      <List.Item>
-                        <div>
-                          <Typography.Text strong>{evt.server}.{evt.tool}</Typography.Text>
-                          <div style={{ marginTop: 4, fontSize: 12 }}>{evt.summary}</div>
-                        </div>
-                      </List.Item>
-                    )}
-                  />
-                ),
-              },
-            ]}
-          />
-        </Drawer>
-
-        <Modal
-          title="规划阶段时间线"
-          open={planTimelineOpen}
-          onCancel={() => setPlanTimelineOpen(false)}
-          footer={null}
-        >
-          <Timeline
-            items={[
-              { color: flowModeConfirmed ? 'green' : 'gray', children: '已确认流程模式（全流程/仅训练/仅评估）' },
-              { color: taxonomyConfirmed ? 'green' : 'gray', children: '已确认领域-类型-任务' },
-              { color: chatMessages.some((m) => m.stage === 'plan_confirm') ? 'blue' : 'gray', children: 'Planner 已输出建议计划' },
-              { color: mcpEvents.length > 0 ? 'blue' : 'gray', children: 'MCP 事件流已接入可视化窗口' },
-            ]}
-          />
-        </Modal>
-      </div>
-    );
-  }
 
   return (
     <div className="agent-canvas" data-theme="light">
-      <div className="canvas-main">
-        <PageHero
-          className="canvas-header"
-          icon={<RobotOutlined />}
-          title="Agent 训练编排中心"
-          subtitle="保留专业 UI 面板风格，使用状态机驱动五阶段流程。"
-          extra={(
+      <div className="canvas-main canvas-main--orchestration">
+        <div className="agent-orch-toolbar">
+          <div className="agent-orch-toolbar-left">
+            <Space align="center" size={12}>
+              <RobotOutlined style={{ fontSize: 22, color: '#1677ff' }} />
+              <div>
+                <Typography.Title level={4} style={{ margin: 0 }}>
+                  多 Agent 训练编排中心
+                </Typography.Title>
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  状态
+                  <Tag color={stateColor} style={{ marginLeft: 6 }}>{state}</Tag>
+                  <span style={{ margin: '0 6px' }}>·</span>
+                  主责
+                  <span style={{ marginLeft: 6 }}>
+                    <OrchAgentTag agentKey={primaryOrchAgent} />
+                  </span>
+                  <span style={{ margin: '0 6px' }}>·</span>
+                  就绪数据集 {readyDatasetCount}
+                  <span style={{ margin: '0 6px' }}>·</span>
+                  Run {runSpec?.run_id || '-'}
+                </Typography.Text>
+              </div>
+            </Space>
+          </div>
+          <Space wrap className="agent-orch-toolbar-right">
+            <Button type="text" icon={<EyeOutlined />} onClick={() => setPlanTimelineOpen(true)} />
+            <Button onClick={() => setMcpDrawerOpen(true)}>MCP 侧信道</Button>
             <Button
               className="canvas-back-to-classic-btn"
               onClick={() => {
@@ -1215,558 +1489,1541 @@ const AgentCanvas: React.FC = () => {
             >
               返回经典版工作台
             </Button>
-          )}
-        />
+          </Space>
+        </div>
 
-        <Row gutter={[12, 12]} style={{ marginBottom: 12 }}>
-          <Col xs={24} md={8}>
-            <Card>
-              <Statistic
-                title="当前状态"
-                value={state}
-                valueStyle={{ fontSize: 18 }}
-                suffix={<Tag color={stateColor}>{state === 'done' ? '已完成' : '进行中'}</Tag>}
+        <div className="agent-orch-grid">
+          <div className="agent-orch-col agent-orch-col-left">
+            <Card
+              size="small"
+              className="agent-orch-session-card"
+              title={(
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontWeight: 600, fontSize: 13 }}>会话 / Run</span>
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<PlusOutlined />}
+                    onClick={() => {
+                      const id = `s_${Date.now()}`;
+                      setChatSessions((prev) => [
+                        {
+                          id,
+                          title: '新建 Run',
+                          subtitle: '训练任务-规划中',
+                          status: '草稿',
+                          currentStage: runListStageLine(0),
+                          updatedAt: new Date().toISOString(),
+                        },
+                        ...prev,
+                      ]);
+                      setActiveSessionId(id);
+                      clearSelectedPromptOptions();
+                      setChatMessages([
+                        {
+                          id: `msg_${Date.now()}`,
+                          role: 'agent',
+                          stage: 'goal_input',
+                          content:
+                            '你好，我是 Orchestrator（编排中心），会协调 Planning Agent、Data Agent、Training Executor、Evaluation Agent 完成本 Run。请先在下方确认「全流程 / 仅训练 / 仅评估」，再输入训练目标并发送解析。',
+                          timestamp: new Date().toLocaleTimeString('zh-CN'),
+                        },
+                      ]);
+                      setMcpEvents([]);
+                    }}
+                  />
+                </div>
+              )}
+            >
+              <List
+                dataSource={chatSessions}
+                renderItem={(item) => (
+                  <List.Item
+                    className={`agent-proto-session-item ${item.id === activeSessionId ? 'agent-proto-session-item-active' : ''}`}
+                    onClick={() => setActiveSessionId(item.id)}
+                  >
+                    <div style={{ width: '100%', position: 'relative' }}>
+                      <div
+                        className="agent-proto-session-accent"
+                        style={{ background: runListAccentByStatus(item.status) }}
+                      />
+                      <div style={{ fontWeight: 600, paddingRight: 30, lineHeight: 1.45, marginBottom: 4 }}>{item.title}</div>
+                      <Dropdown
+                        menu={{
+                          items: [
+                            { key: 'rename', label: '重命名' },
+                            { key: 'copy', label: '复制' },
+                            { key: 'archive', label: '归档' },
+                            { key: 'delete', label: '删除', danger: true },
+                          ],
+                          onClick: handleRunListMenuClick(item),
+                        }}
+                        trigger={['click']}
+                        placement="bottomRight"
+                      >
+                        <Button
+                          type="text"
+                          size="small"
+                          icon={<MoreOutlined />}
+                          className="agent-proto-session-more"
+                          aria-label="更多操作"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </Dropdown>
+                      <div
+                        className="agent-run-list-item-meta"
+                        style={{
+                          fontSize: 11,
+                          color: 'rgba(0, 0, 0, 0.45)',
+                          lineHeight: 1.45,
+                          paddingRight: 28,
+                        }}
+                      >
+                        {item.status ?? '—'} · {item.currentStage ?? '—'} · {formatRunListRelativeTime(item.updatedAt)}
+                      </div>
+                      {typeof item.progress === 'number' && (
+                        <>
+                          <div style={{ fontSize: 12, color: '#8c8c8c' }}>进度：{item.progress}%</div>
+                          <div className="agent-proto-progress-track">
+                            <div className="agent-proto-progress-fill" style={{ width: `${Math.max(0, Math.min(100, item.progress))}%` }} />
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </List.Item>
+                )}
               />
             </Card>
-          </Col>
-          <Col xs={24} md={8}>
-            <Card>
-              <Statistic title="就绪数据集" value={readyDatasetCount} prefix={<DatabaseOutlined />} />
-            </Card>
-          </Col>
-          <Col xs={24} md={8}>
-            <Card>
-              <Statistic title="Run ID" value={runSpec?.run_id || '-'} valueStyle={{ fontSize: 16 }} />
-            </Card>
-          </Col>
-        </Row>
+          </div>
 
-        <div className="canvas-board canvas-flat-board">
-          <Row gutter={[16, 16]}>
-            <Col xs={24} lg={18}>
-              <Card title="Agent 五阶段流程" className="step-card">
-                <Steps
-                  current={step}
-                  onChange={onStepClick}
-                  items={[
-                    { title: '目标输入' },
-                    { title: '任务确认' },
-                    { title: '数据准备' },
-                    { title: '计划确认' },
-                    { title: '训练执行' },
-                    { title: '评估确认与结果' },
-                  ]}
-                  style={{ marginBottom: 16 }}
-                />
-                <Card size="small" title="Agent 对话确认流" style={{ marginBottom: 12 }}>
-                  <List
-                    size="small"
-                    dataSource={chatMessages}
-                    renderItem={(m) => (
-                      <List.Item>
-                        <div style={{ width: '100%' }}>
-                          <Typography.Text strong>{m.role === 'agent' ? 'Agent' : m.role === 'user' ? '你' : '系统'}</Typography.Text>
-                          <Typography.Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>{m.timestamp}</Typography.Text>
-                          <div style={{ marginTop: 4 }}>{m.content}</div>
-                        </div>
-                      </List.Item>
-                    )}
-                  />
-                </Card>
-                {isLocked && (
-                  <Alert
-                    type="warning"
-                    showIcon
-                    style={{ marginBottom: 12 }}
-                    message="当前为历史回看模式，内容已锁定不可编辑"
-                    action={
-                      <Button size="small" type="link" onClick={() => restartFromStep(step)}>
-                        从当前步骤重开流程
-                      </Button>
-                    }
-                  />
-                )}
-
-                {step === 0 && (
-                  <Row gutter={[12, 12]}>
-                    <Col xs={24}>
-                      <Space direction="vertical" style={{ width: '100%' }} size="middle">
-                        <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-                          单入口模式：快捷标签仅用于补全描述文本，不直接写入结构化字段或推进流程状态。
-                        </Typography.Text>
-                        <div style={{ position: 'relative' }}>
-                          <Input.TextArea
-                            rows={4}
-                            value={intentText}
-                            onChange={(e) => setIntentText(e.target.value)}
-                            placeholder="请描述你想训练什么模型、解决什么任务、希望输出什么结果（例如：训练一个金融文本模型，用于识别财报中的公司、金额和时间实体）"
-                            style={{ paddingRight: 40 }}
-                            disabled={isLocked}
-                          />
-                          <Button
-                            type="text"
-                            icon={<DeleteOutlined />}
-                            title="清空当前选项"
-                            onClick={clearSelectedPromptOptions}
-                            style={{ position: 'absolute', top: 6, right: 6, color: 'rgba(0,0,0,0.45)' }}
-                            disabled={isLocked}
-                          />
-                        </div>
-                        <div>
-                          <Typography.Text strong style={{ marginRight: 8 }}>领域：</Typography.Text>
-                          <Space wrap>
-                            {allDomainTags.map((x) => (
-                              <Tag className="flat-option-tag"
-                                key={x}
-                                color={selectedDomainTag === x ? 'blue' : 'default'}
-                                onClick={isLocked ? undefined : () => appendSingleTagToIntent(x, allDomainTags, setSelectedDomainTag)}
-                              >
-                                {x}
-                              </Tag>
-                            ))}
-                          </Space>
-                          <Space style={{ marginTop: 8 }}>
-                            <Input
-                              size="small"
-                              placeholder="自定义领域（如：政务、制造）"
-                              value={customDomainInput}
-                              onChange={(e) => setCustomDomainInput(e.target.value)}
-                              style={{ width: 220 }}
-                              disabled={isLocked}
-                            />
-                            <Button
-                              size="small"
-                              disabled={isLocked}
-                              onClick={() => {
-                                const v = customDomainInput.trim();
-                                if (!v) return;
-                                if (!allDomainTags.includes(v)) {
-                                  setCustomDomainTags((prev) => [...prev, v]);
-                                }
-                                appendSingleTagToIntent(v, [...allDomainTags, v], setSelectedDomainTag);
-                                setCustomDomainInput('');
-                              }}
-                            >
-                              创建并选择
-                            </Button>
-                          </Space>
-                        </div>
-                        <div>
-                          <Typography.Text strong style={{ marginRight: 8 }}>模态：</Typography.Text>
-                          <Space wrap>
-                            {MODALITY_TAGS.map((x) => (
-                              <Tag className="flat-option-tag"
-                                key={x}
-                                color={selectedModalityTag === x ? 'blue' : 'default'}
-                                style={x === '图文' ? { cursor: 'not-allowed', opacity: 0.6 } : undefined}
-                                onClick={isLocked || x === '图文' ? undefined : () => appendSingleTagToIntent(x, MODALITY_TAGS, setSelectedModalityTag)}
-                              >
-                                {x}{x === '图文' ? '（未开放）' : ''}
-                              </Tag>
-                            ))}
-                          </Space>
-                        </div>
-                        <div>
-                          <Typography.Text strong style={{ marginRight: 8 }}>任务：</Typography.Text>
-                          <Space wrap>
-                            {TASK_TAGS.map((x) => (
-                              <Tag className="flat-option-tag"
-                                key={x}
-                                color={selectedTaskTag === x ? 'blue' : 'default'}
-                                onClick={isLocked ? undefined : () => appendSingleTagToIntent(x, TASK_TAGS, setSelectedTaskTag)}
-                              >
-                                {x}
-                              </Tag>
-                            ))}
-                          </Space>
-                        </div>
-                        <Button
-                          type="primary"
-                          loading={loading}
-                          disabled={isLocked}
-                          icon={taskDraft && intentText.trim() === parsedIntentSnapshot ? <ArrowRightOutlined /> : undefined}
-                          onClick={() => {
-                            if (taskDraft && intentText.trim() === parsedIntentSnapshot) {
-                              goStep(1);
-                              return;
-                            }
-                            void parseIntent();
-                          }}
-                        >
-                          {taskDraft && intentText.trim() === parsedIntentSnapshot ? '下一步：任务确认' : '请解析目标'}
-                        </Button>
-                        <Button
-                          type="default"
-                          loading={autoTagLoading}
-                          disabled={isLocked}
-                          onClick={() => void autoDetectOptions()}
-                        >
-                          Agent 自动识别选项
-                        </Button>
-                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                          文本框是唯一主入口；下方选项仅用于快速补全输入，适合新手快速明确任务目标。
-                        </Typography.Text>
-                        <Card title="Planner 解析预览" size="small" className="planner-preview-flat">
-                          {taskDraft ? (
-                            <Descriptions column={1} size="small">
-                              <Descriptions.Item label="intent_text">{intentText || '-'}</Descriptions.Item>
-                              <Descriptions.Item label="parsed_task_draft">
-                                {`${taskDraft.semantic_task_type} / ${taskDraft.domain} / ${taskDraft.modality}`}
-                              </Descriptions.Item>
-                              <Descriptions.Item label="输出结构">{taskDraft.output_structure}</Descriptions.Item>
-                              <Descriptions.Item label="候选方法">{taskDraft.candidate_methods.join(', ') || '-'}</Descriptions.Item>
-                            </Descriptions>
+          <div className="agent-orch-col agent-orch-col-chat">
+            <Card
+              size="small"
+              className="agent-orch-chat-card"
+              title={(
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <Space align="center" size={8}>
+                    <span style={{ fontWeight: 600 }}>编排对话</span>
+                    <OrchAgentTag agentKey={primaryOrchAgent} />
+                    <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                      主责随阶段切换
+                    </Typography.Text>
+                  </Space>
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }} ellipsis>
+                    {activeSession?.title}
+                  </Typography.Text>
+                </div>
+              )}
+            >
+              <div className="agent-proto-chat-stream agent-orch-chat-stream">
+                <List
+                  dataSource={chatMessages}
+                  renderItem={(m) => (
+                    <List.Item className={`agent-proto-chat-row ${m.role === 'user' ? 'agent-proto-chat-row-user' : 'agent-proto-chat-row-agent'}`}>
+                      <div className={`agent-proto-bubble ${m.role === 'agent' ? 'agent-proto-bubble-agent' : 'agent-proto-bubble-user'}`}>
+                        <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 4 }}>
+                          {m.role === 'agent' ? (
+                            <Space size={6} align="center" wrap>
+                              <span>来自</span>
+                              <OrchAgentTag agentKey={chatStageToAgentKey(m.stage)} />
+                              <span>· {m.timestamp}</span>
+                            </Space>
+                          ) : m.role === 'user' ? (
+                            <>你 · {m.timestamp}</>
                           ) : (
-                            <Alert
-                              type="info"
-                              showIcon
-                              message="尚未解析"
-                              description="输入训练目标并点击“解析目标”后，这里展示 parsed_task_draft。"
-                            />
+                            <>系统 · {m.timestamp}</>
                           )}
-                        </Card>
+                        </div>
+                        <div>{m.content}</div>
+                      </div>
+                    </List.Item>
+                  )}
+                />
+              </div>
+              {!isLocked ? (
+                <>
+                  <Divider style={{ margin: '12px 0' }} />
+                  {!isDataPrepPhase && !flowModeConfirmed && (
+                    <Card
+                      size="small"
+                      className="agent-orch-chat-phase-card"
+                      title={(
+                        <Space size={8} align="center">
+                          <span>阶段 1 · 任务范围</span>
+                          <OrchAgentTag agentKey="orchestrator" />
+                        </Space>
+                      )}
+                    >
+                      <Typography.Paragraph type="secondary" style={{ marginBottom: 10, fontSize: 12 }}>
+                        选择本轮训练与评估的组织方式，对应「训练任务 / 评测任务」范围。
+                      </Typography.Paragraph>
+                      <Space wrap>
+                        {FLOW_MODE_OPTIONS.map((item) => (
+                          <Button
+                            key={item.key}
+                            size="small"
+                            type={flowMode === item.key ? 'primary' : 'default'}
+                            onClick={() => setFlowMode(item.key)}
+                          >
+                            {item.label}
+                          </Button>
+                        ))}
                       </Space>
-                    </Col>
-                  </Row>
-                )}
+                      <Button type="primary" size="small" style={{ marginTop: 10 }} disabled={!flowMode} onClick={confirmFlowMode}>
+                        确认范围
+                      </Button>
+                    </Card>
+                  )}
 
-                {step === 1 && taskDraft && (
-                  <Space direction="vertical" style={{ width: '100%' }}>
-                    <Card size="small" title="当前任务卡（Planner 草稿）">
-                      <Descriptions bordered column={1} size="small">
-                        <Descriptions.Item label="任务类型">{bilingual(taskDraft.semantic_task_type, TASK_CN_MAP)}</Descriptions.Item>
+                  {!isDataPrepPhase && flowModeConfirmed && !hideEarlyGoalInput && !isTrainingExecutionActive && (
+                    <Card
+                      size="small"
+                      className="agent-orch-chat-phase-card"
+                      title={(
+                        <Space size={8} align="center">
+                          <span>阶段 1 · 训练目标</span>
+                          <OrchAgentTag agentKey="planning" />
+                        </Space>
+                      )}
+                      style={{ marginTop: 12 }}
+                    >
+                      <Typography.Paragraph type="secondary" style={{ marginBottom: 12, fontSize: 12 }}>
+                        自上而下逐级选择（流程图式）；任一步可回看修改，文本框可自由编辑，阶段 2 前可反复解析。
+                      </Typography.Paragraph>
+                      <div className="agent-goal-cascade">
+                        <div className="agent-goal-cascade-row">
+                          <div className="agent-goal-cascade-rail" aria-hidden>
+                            <span className="agent-goal-cascade-dot">1</span>
+                            <span className="agent-goal-cascade-line" />
+                          </div>
+                          <div className="agent-goal-cascade-panel">
+                            <Typography.Text strong className="agent-goal-cascade-title">
+                              领域
+                            </Typography.Text>
+                            <Typography.Text type="secondary" className="agent-goal-cascade-hint">
+                              行业或通用场景，写入目标描述供 Planning Agent 审查
+                            </Typography.Text>
+                            <Space wrap className="agent-goal-cascade-actions">
+                              {allDomainTags.map((x) => (
+                                <Button
+                                  key={x}
+                                  size="small"
+                                  type={selectedDomainTag === x ? 'primary' : 'default'}
+                                  onClick={() => appendSingleTagToIntent(x, allDomainTags, setSelectedDomainTag)}
+                                >
+                                  {x}
+                                </Button>
+                              ))}
+                            </Space>
+                          </div>
+                        </div>
+                        <div className="agent-goal-cascade-row">
+                          <div className="agent-goal-cascade-rail" aria-hidden>
+                            <span className="agent-goal-cascade-dot">2</span>
+                            <span className="agent-goal-cascade-line" />
+                          </div>
+                          <div className="agent-goal-cascade-panel">
+                            <Typography.Text strong className="agent-goal-cascade-title">
+                              任务类型
+                            </Typography.Text>
+                            <Typography.Text type="secondary" className="agent-goal-cascade-hint">
+                              分类、生成、提取等与模型形态相关的目标
+                            </Typography.Text>
+                            <Space wrap className="agent-goal-cascade-actions">
+                              {GOAL_TASK_CHIPS.map((x) => (
+                                <Button key={x} size="small" onClick={() => appendSingleTagToIntent(x, GOAL_TASK_CHIPS)}>
+                                  {x}
+                                </Button>
+                              ))}
+                            </Space>
+                          </div>
+                        </div>
+                        <div className="agent-goal-cascade-row">
+                          <div className="agent-goal-cascade-rail" aria-hidden>
+                            <span className="agent-goal-cascade-dot">3</span>
+                            <span className="agent-goal-cascade-line" />
+                          </div>
+                          <div className="agent-goal-cascade-panel">
+                            <Typography.Text strong className="agent-goal-cascade-title">
+                              模态
+                            </Typography.Text>
+                            <Typography.Text type="secondary" className="agent-goal-cascade-hint">
+                              当前以文本为主；图文能力未开放时仍选文本
+                            </Typography.Text>
+                            <Space wrap className="agent-goal-cascade-actions">
+                              {MODALITY_TAGS.map((x) => (
+                                <Button
+                                  key={x}
+                                  size="small"
+                                  type={uiSelectedTags.includes(x) ? 'primary' : 'default'}
+                                  disabled={x === '图文'}
+                                  onClick={() => x !== '图文' && appendSingleTagToIntent(x, MODALITY_TAGS)}
+                                >
+                                  {x}
+                                  {x === '图文' ? '（未开放）' : ''}
+                                </Button>
+                              ))}
+                            </Space>
+                          </div>
+                        </div>
+                        <div className="agent-goal-cascade-row">
+                          <div className="agent-goal-cascade-rail" aria-hidden>
+                            <span className="agent-goal-cascade-dot">4</span>
+                            <span className="agent-goal-cascade-line" />
+                          </div>
+                          <div className="agent-goal-cascade-panel">
+                            <Typography.Text strong className="agent-goal-cascade-title">
+                              快捷描述模板
+                            </Typography.Text>
+                            <Typography.Text type="secondary" className="agent-goal-cascade-hint">
+                              一键追加典型段落，可在下一步继续改
+                            </Typography.Text>
+                            <Space wrap className="agent-goal-cascade-actions">
+                              {GOAL_INTENT_SNIPPETS.map((s) => (
+                                <Button key={s.key} size="small" type="dashed" onClick={() => appendGoalSnippet(s.text)}>
+                                  {s.label}
+                                </Button>
+                              ))}
+                            </Space>
+                          </div>
+                        </div>
+                        <div className="agent-goal-cascade-row agent-goal-cascade-row--last">
+                          <div className="agent-goal-cascade-rail" aria-hidden>
+                            <span className="agent-goal-cascade-dot">5</span>
+                          </div>
+                          <div className="agent-goal-cascade-panel">
+                            <Typography.Text strong className="agent-goal-cascade-title">
+                              目标描述（可编辑）
+                            </Typography.Text>
+                            <Typography.Text type="secondary" className="agent-goal-cascade-hint">
+                              汇总上述选择并补充约束；可直接以本框为主输入
+                            </Typography.Text>
+                            <Input.TextArea
+                              rows={4}
+                              className="agent-goal-cascade-textarea"
+                              value={intentText}
+                              onChange={(e) => setIntentText(e.target.value)}
+                              placeholder="描述训练/评估目标、业务场景与约束；也可仅通过上方选项与模板组合后再微调。"
+                            />
+                            <Space wrap className="agent-goal-cascade-actions" style={{ marginTop: 8 }}>
+                              <Button type="primary" size="small" loading={loading} onClick={() => void sendChat()}>
+                                {taskDraft && state === 'task_parsed' ? '重新解析目标' : '发送并解析'}
+                              </Button>
+                              <Button
+                                type="link"
+                                size="small"
+                                loading={autoTagLoading}
+                                style={{ paddingLeft: 0 }}
+                                onClick={() => void autoDetectOptions()}
+                              >
+                                Planning Agent 自动识别标签（写入目标描述）
+                              </Button>
+                            </Space>
+                          </div>
+                        </div>
+                      </div>
+                    </Card>
+                  )}
+
+                  {!isDataPrepPhase && flowModeConfirmed && state === 'task_parsed' && taskDraft && !taxonomyConfirmed && (
+                    <Card
+                      size="small"
+                      className="agent-orch-chat-phase-card"
+                      title={(
+                        <Space size={8} align="center">
+                          <span>阶段 2 · 任务流程</span>
+                          <OrchAgentTag agentKey="planning" />
+                        </Space>
+                      )}
+                      style={{ marginTop: 12 }}
+                    >
+                      <Typography.Paragraph type="secondary" style={{ marginBottom: 10, fontSize: 12 }}>
+                        点选芯片确认领域、模态与任务类型；可与 Planner 初判不一致。
+                      </Typography.Paragraph>
+                      <Typography.Text strong style={{ fontSize: 12 }}>领域</Typography.Text>
+                      <div style={{ marginTop: 6, marginBottom: 10 }}>
+                        <Space wrap>
+                          {['金融', '医疗', '法律', '电商', '教育', '通用'].map((x) => (
+                            <Button
+                              key={x}
+                              size="small"
+                              type={selectedDomain === x ? 'primary' : 'default'}
+                              onClick={() => setSelectedDomain(x)}
+                            >
+                              {x}
+                            </Button>
+                          ))}
+                        </Space>
+                      </div>
+                      <Typography.Text strong style={{ fontSize: 12 }}>模态</Typography.Text>
+                      <div style={{ marginTop: 6, marginBottom: 10 }}>
+                        <Space wrap>
+                          {MODALITY_TAGS.map((x) => (
+                            <Button
+                              key={x}
+                              size="small"
+                              type={selectedTaskType === x ? 'primary' : 'default'}
+                              disabled={x === '图文'}
+                              onClick={() => x !== '图文' && setSelectedTaskType(x)}
+                            >
+                              {x}{x === '图文' ? '（未开放）' : ''}
+                            </Button>
+                          ))}
+                        </Space>
+                      </div>
+                      <Typography.Text strong style={{ fontSize: 12 }}>任务类型</Typography.Text>
+                      <div style={{ marginTop: 6, marginBottom: 10 }}>
+                        <Space wrap>
+                          {GOAL_TASK_CHIPS.map((x) => (
+                            <Button
+                              key={x}
+                              size="small"
+                              type={selectedTaskName === x ? 'primary' : 'default'}
+                              onClick={() => setSelectedTaskName(x)}
+                            >
+                              {x}
+                            </Button>
+                          ))}
+                        </Space>
+                      </div>
+                      <Button type="primary" size="small" onClick={confirmTaxonomy}>
+                        确认流程
+                      </Button>
+                    </Card>
+                  )}
+
+                  {!isDataPrepPhase && flowModeConfirmed && taxonomyConfirmed && step === 1 && taskDraft && state === 'task_parsed' && (
+                    <Card
+                      size="small"
+                      className="agent-orch-chat-phase-card"
+                      title={(
+                        <Space size={8} align="center">
+                          <span>阶段 2 · 确认任务</span>
+                          <OrchAgentTag agentKey="planning" />
+                        </Space>
+                      )}
+                      style={{ marginTop: 12 }}
+                    >
+                      <Descriptions column={1} size="small" style={{ marginBottom: 10 }}>
                         <Descriptions.Item label="领域">{bilingual(taskDraft.domain, DOMAIN_CN_MAP)}</Descriptions.Item>
                         <Descriptions.Item label="模态">{bilingual(taskDraft.modality, MODALITY_CN_MAP)}</Descriptions.Item>
-                        <Descriptions.Item label="推荐训练方法">{bilingualList(taskDraft.candidate_methods, METHOD_CN_MAP)}</Descriptions.Item>
-                        <Descriptions.Item label="推荐指标">{bilingualList(taskDraft.recommended_metrics, METRIC_CN_MAP)}</Descriptions.Item>
+                        <Descriptions.Item label="任务类型">{bilingual(taskDraft.semantic_task_type, TASK_CN_MAP)}</Descriptions.Item>
+                        <Descriptions.Item label="推荐方法">{bilingualList(taskDraft.candidate_methods, METHOD_CN_MAP)}</Descriptions.Item>
+                      </Descriptions>
+                      <Space wrap>
+                        <Button type="primary" size="small" onClick={confirmTask}>
+                          确认任务
+                        </Button>
+                        <Button
+                          size="small"
+                          onClick={() => {
+                            setTaxonomyConfirmed(false);
+                            setStep(0);
+                          }}
+                        >
+                          返回修改流程
+                        </Button>
+                      </Space>
+                    </Card>
+                  )}
+
+                  {isDataPrepPhase && (
+                    <Card
+                      size="small"
+                      className="agent-orch-chat-phase-card"
+                      title={(
+                        <Space size={8} align="center">
+                          <span>数据准备（说明）</span>
+                          <OrchAgentTag agentKey="data" />
+                        </Space>
+                      )}
+                      style={{ marginTop: 12 }}
+                    >
+                      <Alert
+                        type="info"
+                        showIcon
+                        message="主操作在右侧「数据工作台」"
+                        description="上传、字段映射、schema 校验、切分与确认数据请在右侧完成；此处仅保留对话记录与提示。"
+                      />
+                      {state === 'data_validating' && (
+                        <Typography.Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 0, fontSize: 12 }}>
+                          正在校验数据时，请稍候并关注右侧校验结果区。
+                        </Typography.Paragraph>
+                      )}
+                    </Card>
+                  )}
+
+                  {hideEarlyGoalInput && flowModeConfirmed && state === 'data_ready' && (
+                    <Card
+                      size="small"
+                      className="agent-orch-chat-phase-card"
+                      title={(
+                        <Space size={8} align="center">
+                          <span>计划准备（说明）</span>
+                          <OrchAgentTag agentKey="planning" />
+                        </Space>
+                      )}
+                      style={{ marginTop: 12 }}
+                    >
+                      <Alert
+                        type="info"
+                        showIcon
+                        message="数据已就绪，下一步是「建议计划」"
+                        description="请先在右侧第 3 步点击「生成建议计划」。生成后右侧会进入训练计划工作台；此处仅说明，不在此编辑参数。"
+                      />
+                      <Button type="primary" size="small" style={{ marginTop: 10 }} onClick={() => void regeneratePlan()}>
+                        生成建议计划
+                      </Button>
+                    </Card>
+                  )}
+
+                  {hideEarlyGoalInput && flowModeConfirmed && isPlanWorkbenchPhase && (
+                    <Card
+                      size="small"
+                      className="agent-orch-chat-phase-card"
+                      title={(
+                        <Space size={8} align="center">
+                          <span>训练计划确认（说明）</span>
+                          <OrchAgentTag agentKey="planning" />
+                        </Space>
+                      )}
+                      style={{ marginTop: 12 }}
+                    >
+                      <Alert
+                        type="info"
+                        showIcon
+                        message="主操作在右侧「训练计划工作台」"
+                        description={
+                          state === 'plan_generating'
+                            ? '正在生成建议计划，请稍候。生成完成后请在右侧核对条目，再点击「确认计划并继续」将「建议计划」固化为「已确认计划」。'
+                            : '右侧为「建议计划」：可微调参数或使用「重新生成计划」。未点击确认前不会锁定 run，也不会进入执行阶段。确认后计划变为「已确认计划」并进入下一步工作台。'
+                        }
+                      />
+                      <Button
+                        type="default"
+                        size="small"
+                        style={{ marginTop: 10 }}
+                        loading={state === 'plan_generating'}
+                        onClick={() => void regeneratePlan()}
+                      >
+                        重新生成建议计划
+                      </Button>
+                    </Card>
+                  )}
+
+                  {flowModeConfirmed &&
+                    ['training_queued', 'training_running', 'training_succeeded'].includes(state) && (
+                      <Card
+                        size="small"
+                        className="agent-orch-chat-phase-card"
+                        title={(
+                          <Space size={8} align="center">
+                            <span>训练执行（说明）</span>
+                            <OrchAgentTag agentKey="training" />
+                          </Space>
+                        )}
+                        style={{ marginTop: 12 }}
+                      >
+                        <Alert
+                          type="info"
+                          showIcon
+                          message="Training Executor 在右侧工作台输出"
+                          description="概览、训练日志、MCP 消息与产物在右侧分栏查看；MCP 为多 Agent 侧信道，不进入下方对话流。"
+                        />
+                      </Card>
+                    )}
+
+                  {flowModeConfirmed && (state === 'evaluating' || (state === 'done' && step >= 5)) && (
+                    <Card
+                      size="small"
+                      className="agent-orch-chat-phase-card"
+                      title={(
+                        <Space size={8} align="center">
+                          <span>评估与结果（说明）</span>
+                          <OrchAgentTag agentKey="eval" />
+                        </Space>
+                      )}
+                      style={{ marginTop: 12 }}
+                    >
+                      <Alert
+                        type="info"
+                        showIcon
+                        message="Evaluation Agent 主导本步"
+                        description="指标与报告由评估侧汇总；Orchestrator 仅在阶段边界提示。请在右侧「评估与结果」步骤完成确认。"
+                      />
+                    </Card>
+                  )}
+                </>
+              ) : null}
+            </Card>
+          </div>
+
+          <div className="agent-orch-col agent-orch-col-workspace">
+            <Card
+              size="small"
+              className="step-card agent-orch-workspace-card"
+              title={(
+                <Space align="center" wrap size={8}>
+                  <span style={{ fontWeight: 600 }}>阶段工作台</span>
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    主责
+                  </Typography.Text>
+                  <OrchAgentTag agentKey={primaryOrchAgent} />
+                </Space>
+              )}
+            >
+              <div className="agent-orch-workspace-body">
+              {(step === 0 || step === 1) && ['draft', 'intent_submitted', 'task_parsed'].includes(state) && (
+                <Card size="small" title="编排摘要（只读）" style={{ marginBottom: 12 }} className="agent-orch-summary-card">
+                  <Descriptions column={1} size="small" bordered>
+                    <Descriptions.Item label="任务范围">
+                      {flowModeConfirmed && flowMode ? flowModeLabel(flowMode) : '未确认'}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="目标描述">{intentText?.trim() ? `${intentText.trim().slice(0, 120)}${intentText.trim().length > 120 ? '…' : ''}` : '—'}</Descriptions.Item>
+                    {taskDraft ? (
+                      <Descriptions.Item label="Planner 草案">{`${taskDraft.semantic_task_type} / ${taskDraft.domain} / ${taskDraft.modality}`}</Descriptions.Item>
+                    ) : (
+                      <Descriptions.Item label="Planner 草案">—</Descriptions.Item>
+                    )}
+                    <Descriptions.Item label="流程芯片">
+                      {taxonomyConfirmed ? '已确认' : state === 'task_parsed' && taskDraft ? '待中间栏确认' : '—'}
+                    </Descriptions.Item>
+                  </Descriptions>
+                  <Button
+                    type="link"
+                    size="small"
+                    icon={<DeleteOutlined />}
+                    onClick={clearSelectedPromptOptions}
+                    disabled={isLocked}
+                    style={{ paddingLeft: 0, marginTop: 8 }}
+                  >
+                    重置本轮编排
+                  </Button>
+                </Card>
+              )}
+
+              <Steps
+                current={step}
+                onChange={onStepClick}
+                items={[
+                  { title: '目标输入', description: 'Orchestrator / Planning' },
+                  { title: '任务确认', description: 'Planning Agent' },
+                  { title: '数据准备', description: 'Data Agent' },
+                  { title: '计划确认', description: 'Planning Agent' },
+                  { title: '训练执行', description: 'Training Executor' },
+                  { title: '评估与结果', description: 'Evaluation Agent' },
+                ]}
+                style={{ marginBottom: 16 }}
+              />
+              {isLocked && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  style={{ marginBottom: 12 }}
+                  message="当前为历史回看模式，内容已锁定不可编辑"
+                  action={
+                    <Button size="small" type="link" onClick={() => restartFromStep(step)}>
+                      从当前步骤重开流程
+                    </Button>
+                  }
+                />
+              )}
+
+                {step === 2 && state === 'task_confirmed' && taskSpec && (
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <Card
+                      size="small"
+                      title={(
+                        <Space size={8} align="center">
+                          <span>任务确认卡</span>
+                          <OrchAgentTag agentKey="planning" />
+                        </Space>
+                      )}
+                    >
+                      <Descriptions bordered column={1} size="small">
+                        <Descriptions.Item label="任务类型">{bilingual(taskSpec.semantic_task_type, TASK_CN_MAP)}</Descriptions.Item>
+                        <Descriptions.Item label="领域">{bilingual(taskSpec.domain, DOMAIN_CN_MAP)}</Descriptions.Item>
+                        <Descriptions.Item label="模态">{bilingual(taskSpec.modality, MODALITY_CN_MAP)}</Descriptions.Item>
+                        <Descriptions.Item label="推荐方法">{bilingualList(taskSpec.candidate_methods, METHOD_CN_MAP)}</Descriptions.Item>
+                        <Descriptions.Item label="推荐指标">{bilingualList(taskSpec.recommended_metrics, METRIC_CN_MAP)}</Descriptions.Item>
+                      </Descriptions>
+                      <Button type="primary" style={{ marginTop: 12 }} onClick={enterDataPreparation} disabled={isLocked}>
+                        进入数据准备
+                      </Button>
+                    </Card>
+                  </Space>
+                )}
+
+                {step === 2 && (state === 'data_selecting' || state === 'data_validating') && (
+                  <Space direction="vertical" style={{ width: '100%' }} className="agent-data-workbench">
+                    <Card
+                      size="small"
+                      title="数据工作台 · 当前任务"
+                      extra={
+                        <Space size={8} wrap align="center">
+                          <OrchAgentTag agentKey="data" />
+                          <Radio.Group
+                            buttonStyle="solid"
+                            size="small"
+                            value={dataWorkbenchMode}
+                            onChange={(e) => setDataWorkbenchMode(e.target.value)}
+                            disabled={isLocked}
+                          >
+                            <Radio.Button value="summary">摘要</Radio.Button>
+                            <Radio.Button value="edit">编辑</Radio.Button>
+                          </Radio.Group>
+                        </Space>
+                      }
+                    >
+                      <Descriptions bordered column={1} size="small">
+                        <Descriptions.Item label="领域">
+                          {taskSpec ? bilingual(taskSpec.domain, DOMAIN_CN_MAP) : '—'}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="模态">
+                          {taskSpec ? bilingual(taskSpec.modality, MODALITY_CN_MAP) : '—'}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="任务类型">
+                          {taskSpec ? bilingual(taskSpec.semantic_task_type, TASK_CN_MAP) : '—'}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="所需 schema">
+                          {schemaHintByTask(taskSpec?.semantic_task_type)}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="推荐指标">
+                          {taskSpec?.recommended_metrics?.join('，') || '—'}
+                        </Descriptions.Item>
                       </Descriptions>
                     </Card>
-                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                      <Button
-                        type="link"
-                        size="small"
-                        style={{ paddingRight: 0, color: 'rgba(0,0,0,0.45)' }}
-                        onClick={() => setShowAdvancedTaskEditor((v) => !v)}
-                      >
-                        {showAdvancedTaskEditor ? '收起高级编辑' : '高级编辑（可选）'}
-                      </Button>
-                    </div>
-                    {showAdvancedTaskEditor && (
-                      <Card size="small" title="高级编辑区">
-                        <Space direction="vertical" style={{ width: '100%' }}>
-                          <div>
-                            <Typography.Text strong>任务类型</Typography.Text>
-                            <Select
-                              style={{ width: '100%', marginTop: 6 }}
-                              value={taskDraft.semantic_task_type}
-                            disabled={isLocked}
-                              onChange={(v) => setTaskDraft({ ...taskDraft, semantic_task_type: v })}
-                              options={TASK_TYPE_OPTIONS.map((x) => ({ label: x, value: x }))}
-                            />
-                          </div>
-                          <div>
-                            <Typography.Text strong>领域</Typography.Text>
-                            <Select
-                              style={{ width: '100%', marginTop: 6 }}
-                              value={taskDraft.domain}
-                            disabled={isLocked}
-                              onChange={(v) => setTaskDraft({ ...taskDraft, domain: v })}
-                              options={DOMAIN_OPTIONS.map((x) => ({ label: x, value: x }))}
-                            />
-                          </div>
-                          <div>
-                            <Typography.Text strong>模态</Typography.Text>
-                            <Select
-                              style={{ width: '100%', marginTop: 6 }}
-                              value={taskDraft.modality}
-                            disabled={isLocked}
-                              onChange={(v) => setTaskDraft({ ...taskDraft, modality: v })}
-                              options={MODALITY_OPTIONS.map((x) => ({ label: x, value: x, disabled: x === 'image_text' }))}
-                            />
-                          </div>
-                          <div>
-                            <Typography.Text strong>方法建议（轻编辑）</Typography.Text>
-                            <Select
-                              mode="tags"
-                              style={{ width: '100%', marginTop: 6 }}
-                              value={taskDraft.candidate_methods}
-                            disabled={isLocked}
-                              onChange={(values) => setTaskDraft({ ...taskDraft, candidate_methods: values })}
-                              options={taskDraft.candidate_methods.map((x) => ({ label: x, value: x }))}
-                            />
-                          </div>
+
+                    {dataWorkbenchMode === 'summary' && (
+                      <Card size="small" title="数据工作台 · 摘要">
+                        <Descriptions bordered column={1} size="small">
+                          <Descriptions.Item label="数据来源">
+                            {datasetSourceMode === 'upload' && '上传符合 schema 的数据'}
+                            {datasetSourceMode === 'agent_convert' && '上传原始材料，由 Data Agent 转换'}
+                            {datasetSourceMode === 'agent_search' && '由 Data Agent 搜索公开数据集'}
+                          </Descriptions.Item>
+                          <Descriptions.Item label="已选数据集">
+                            {selectedDataset ? `${selectedDataset.name}${selectedDatasetId === MOCK_WORKSPACE_DATASET_ID ? '（本地 mock）' : ''}` : '未选择'}
+                          </Descriptions.Item>
+                          <Descriptions.Item label="待处理文件">
+                            {workspaceUploadList.length ? `${workspaceUploadList.length} 个` : '无'}
+                          </Descriptions.Item>
+                          <Descriptions.Item label="切分策略">
+                            {splitStrategy === 'preset' ? '预设（preset）' : '随机（random）'} · train/valid/test {tvSplit.train}:{tvSplit.valid}:{tvSplit.test}
+                          </Descriptions.Item>
+                          <Descriptions.Item label="Schema 校验">
+                            {datasetValidationReport?.schema_check || '未执行'}
+                          </Descriptions.Item>
+                        </Descriptions>
+                        <Space style={{ marginTop: 12 }}>
+                          <Button size="small" onClick={() => setDataWorkbenchMode('edit')} disabled={isLocked}>
+                            展开编辑
+                          </Button>
+                          <Button type="primary" onClick={confirmData} disabled={isLocked} loading={state === 'data_validating'}>
+                            确认数据
+                          </Button>
                         </Space>
                       </Card>
                     )}
-                    <Space>
-                      <Button onClick={() => goStep(0)} disabled={isLocked}>返回</Button>
-                      <Button type="primary" onClick={confirmTask} disabled={isLocked}>确认任务</Button>
-                    </Space>
+
+                    {dataWorkbenchMode === 'edit' && (
+                      <>
+                        <Card size="small" title="数据来源方式">
+                          <Space direction="vertical" style={{ width: '100%' }}>
+                            <Select
+                              value={datasetSourceMode}
+                              disabled={isLocked}
+                              onChange={setDatasetSourceMode}
+                              style={{ width: '100%' }}
+                              options={[
+                                { label: '上传符合 schema 的数据', value: 'upload' },
+                                { label: '上传原始材料，由 Data Agent 转换', value: 'agent_convert' },
+                                { label: '由 Data Agent 搜索公开数据集', value: 'agent_search' },
+                              ]}
+                            />
+                            {datasetSourceMode === 'agent_convert' && (
+                              <Alert type="info" showIcon message="（mock）Data Agent 转换链路为占位，可先上传文件并点击「应用模拟检测与校验」体验工作台。" />
+                            )}
+                            {datasetSourceMode === 'agent_search' && (
+                              <Alert type="info" showIcon message="（mock）公开数据集检索为占位，可使用下方按钮加入模拟检索结果。" />
+                            )}
+                          </Space>
+                        </Card>
+
+                        <Card size="small" title="上传入口">
+                          <Space direction="vertical" style={{ width: '100%' }}>
+                            <Upload.Dragger
+                              multiple
+                              maxCount={8}
+                              disabled={isLocked}
+                              fileList={workspaceUploadList}
+                              beforeUpload={() => false}
+                              onChange={({ fileList }) => setWorkspaceUploadList(fileList)}
+                            >
+                              <p className="ant-upload-drag-icon">
+                                <InboxOutlined />
+                              </p>
+                              <p className="ant-upload-text">拖拽文件到此处，或点击选择本地文件</p>
+                              <p className="ant-upload-hint">同一列表与下方 URL 导入合并展示；提交上传仅使用列表中第一个本地文件</p>
+                            </Upload.Dragger>
+                            <Divider orientation="left" plain style={{ margin: '4px 0 8px' }}>
+                              URL 导入（加入待处理列表）
+                            </Divider>
+                            <Space wrap style={{ width: '100%' }}>
+                              <Input
+                                style={{ width: 160 }}
+                                placeholder="数据集名称"
+                                value={importUrlName}
+                                onChange={(e) => setImportUrlName(e.target.value)}
+                                disabled={isLocked}
+                              />
+                              <Input
+                                style={{ minWidth: 220, flex: 1 }}
+                                placeholder="https://..."
+                                value={importUrlValue}
+                                onChange={(e) => setImportUrlValue(e.target.value)}
+                                disabled={isLocked}
+                              />
+                              <Button type="primary" icon={<LinkOutlined />} onClick={addUrlToWorkspaceStaging} disabled={isLocked}>
+                                加入列表
+                              </Button>
+                            </Space>
+                            <Space wrap align="center">
+                              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                上传到服务器（首个本地文件）：
+                              </Typography.Text>
+                              <Input
+                                style={{ width: 200 }}
+                                placeholder="数据集显示名称"
+                                value={realUploadDatasetName}
+                                onChange={(e) => setRealUploadDatasetName(e.target.value)}
+                                disabled={isLocked}
+                              />
+                              <Button icon={<UploadOutlined />} onClick={() => void submitRealDatasetUpload()} disabled={isLocked || loading}>
+                                提交上传
+                              </Button>
+                            </Space>
+                            {datasetSourceMode === 'agent_search' && (
+                              <Button onClick={mockAgentSearchStaging} disabled={isLocked}>
+                                （mock）模拟检索并加入列表
+                              </Button>
+                            )}
+                          </Space>
+                        </Card>
+
+                        <Card size="small" title="文件列表">
+                          <Table
+                            size="small"
+                            pagination={false}
+                            rowKey="uid"
+                            dataSource={workspaceUploadList}
+                            locale={{ emptyText: '暂无待处理文件' }}
+                            columns={[
+                              { title: '名称', dataIndex: 'name', ellipsis: true },
+                              {
+                                title: 'URL',
+                                dataIndex: 'url',
+                                ellipsis: true,
+                                render: (u: string | undefined) => u || '—',
+                              },
+                              {
+                                title: '操作',
+                                width: 72,
+                                render: (_, r: UploadFile) => (
+                                  <Button
+                                    type="link"
+                                    danger
+                                    size="small"
+                                    icon={<DeleteOutlined />}
+                                    disabled={isLocked}
+                                    onClick={() =>
+                                      setWorkspaceUploadList((prev) => prev.filter((x) => x.uid !== r.uid))
+                                    }
+                                  />
+                                ),
+                              },
+                            ]}
+                          />
+                        </Card>
+
+                        <Card size="small" title="选择已就绪数据集">
+                          <Select
+                            allowClear
+                            style={{ width: '100%' }}
+                            value={selectedDatasetId}
+                            disabled={isLocked}
+                            placeholder="从服务器列表选择，或使用下方 mock 校验生成本地就绪集"
+                            onChange={(id) => {
+                              setSelectedDatasetId(id);
+                              if (id !== MOCK_WORKSPACE_DATASET_ID) {
+                                setLocalMockDataset(null);
+                                setMockPreviewRows([]);
+                              }
+                            }}
+                            options={[
+                              ...(localMockDataset
+                                ? [{ label: `${localMockDataset.name}（工作台 mock）`, value: MOCK_WORKSPACE_DATASET_ID }]
+                                : []),
+                              ...datasets.map((d) => ({ label: `${d.name} (ID:${d.id})`, value: d.id })),
+                            ]}
+                          />
+                        </Card>
+
+                        <Card size="small" title="标准模板（可选）">
+                          <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 8 }}>
+                            按当前任务 schema 下载 CSV 模板，填写后再上传可降低格式错误。
+                          </Typography.Paragraph>
+                          <Button onClick={downloadTaskTemplate} disabled={isLocked}>
+                            下载任务模板
+                          </Button>
+                        </Card>
+
+                        <Card size="small" title="字段检测与映射">
+                          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                            输入原始列名后生成建议，或在表格中直接编辑映射。
+                          </Typography.Text>
+                          <Input.TextArea
+                            rows={2}
+                            style={{ marginTop: 8 }}
+                            value={rawColumnsInput}
+                            onChange={(e) => setRawColumnsInput(e.target.value)}
+                            placeholder="例如：sentence, sentiment_label"
+                            disabled={isLocked}
+                          />
+                          <Space style={{ marginTop: 8 }}>
+                            <Button onClick={generateAgentColumnMap} disabled={isLocked}>
+                              Agent 解析字段映射
+                            </Button>
+                            <Button onClick={() => setAgentColumnMap({})} disabled={isLocked}>
+                              清空映射
+                            </Button>
+                          </Space>
+                          <Table
+                            style={{ marginTop: 12 }}
+                            size="small"
+                            pagination={false}
+                            rowKey="target"
+                            dataSource={schemaHeadersByTask(taskSpec?.semantic_task_type).map((h) => ({ target: h }))}
+                            locale={{ emptyText: '无 schema 字段' }}
+                            columns={[
+                              { title: 'Schema 字段', dataIndex: 'target', width: 140 },
+                              {
+                                title: '映射到数据列',
+                                render: (_, row: { target: string }) => (
+                                  <Input
+                                    size="small"
+                                    value={agentColumnMap[row.target] ?? ''}
+                                    placeholder="列名"
+                                    disabled={isLocked}
+                                    onChange={(e) => updateAgentColumnMapField(row.target, e.target.value)}
+                                  />
+                                ),
+                              },
+                            ]}
+                          />
+                        </Card>
+
+                        <Card size="small" title="Schema 校验结果">
+                          <Descriptions bordered column={1} size="small">
+                            <Descriptions.Item label="字段检查">{datasetValidationReport?.field_check || '待检查'}</Descriptions.Item>
+                            <Descriptions.Item label="schema 检查">{datasetValidationReport?.schema_check || '待检查'}</Descriptions.Item>
+                            <Descriptions.Item label="样本数检查">{datasetValidationReport?.sample_count || '待检查'}</Descriptions.Item>
+                            <Descriptions.Item label="标签分布检查">{datasetValidationReport?.label_distribution || '待检查'}</Descriptions.Item>
+                          </Descriptions>
+                          <Button style={{ marginTop: 12 }} onClick={applyMockWorkspaceValidation} disabled={isLocked}>
+                            应用模拟检测与校验
+                          </Button>
+                        </Card>
+
+                        <Card size="small" title="Train / Valid / Test 切分">
+                          <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
+                            写入 run_spec：与策略字段拼接为 <Typography.Text code>tvt=…</Typography.Text>
+                          </Typography.Paragraph>
+                          <Radio.Group
+                            value={splitStrategy}
+                            onChange={(e) => setSplitStrategy(e.target.value)}
+                            disabled={isLocked}
+                            style={{ marginBottom: 12 }}
+                          >
+                            <Space direction="vertical">
+                              <Radio value="preset">预设切分（preset）</Radio>
+                              <Radio value="random">随机切分（random）</Radio>
+                            </Space>
+                          </Radio.Group>
+                          <Space wrap align="center">
+                            <Typography.Text>Train</Typography.Text>
+                            <InputNumber
+                              min={0}
+                              max={100}
+                              value={tvSplit.train}
+                              onChange={(v) => setTvSplit((s) => ({ ...s, train: Number(v) || 0 }))}
+                              disabled={isLocked}
+                            />
+                            <Typography.Text>Valid</Typography.Text>
+                            <InputNumber
+                              min={0}
+                              max={100}
+                              value={tvSplit.valid}
+                              onChange={(v) => setTvSplit((s) => ({ ...s, valid: Number(v) || 0 }))}
+                              disabled={isLocked}
+                            />
+                            <Typography.Text>Test</Typography.Text>
+                            <InputNumber
+                              min={0}
+                              max={100}
+                              value={tvSplit.test}
+                              onChange={(v) => setTvSplit((s) => ({ ...s, test: Number(v) || 0 }))}
+                              disabled={isLocked}
+                            />
+                            <Typography.Text type="secondary">合计须为 100</Typography.Text>
+                          </Space>
+                        </Card>
+
+                        <Card size="small" title="样本预览">
+                          <Table
+                            size="small"
+                            pagination={{ pageSize: 5 }}
+                            rowKey="__row"
+                            dataSource={mockPreviewRows.map((row, i) => ({ ...row, __row: i }))}
+                            locale={{ emptyText: '尚无预览：可先「应用模拟检测与校验」或选择服务器数据集' }}
+                            columns={
+                              mockPreviewRows[0]
+                                ? Object.keys(mockPreviewRows[0]).map((k) => ({
+                                    title: k,
+                                    dataIndex: k,
+                                    ellipsis: true,
+                                  }))
+                                : []
+                            }
+                          />
+                        </Card>
+
+                        <Space wrap>
+                          <Button
+                            onClick={() => {
+                              if (taskSpec) setTaskDraft(taskSpec);
+                              setState('task_confirmed');
+                              setStep(2);
+                            }}
+                            disabled={isLocked}
+                          >
+                            返回任务确认
+                          </Button>
+                          <Button type="primary" onClick={confirmData} disabled={isLocked} loading={state === 'data_validating'}>
+                            确认数据
+                          </Button>
+                        </Space>
+                      </>
+                    )}
                   </Space>
                 )}
 
-                {step === 2 && (
-                  <Space direction="vertical" style={{ width: '100%' }}>
-                    <Card size="small" title="固定任务卡">
-                      <Descriptions bordered column={1} size="small">
-                        <Descriptions.Item label="当前任务">
-                          {taskSpec ? `${taskSpec.domain} / ${taskSpec.semantic_task_type} / ${taskSpec.modality}` : '未确认'}
-                        </Descriptions.Item>
-                        <Descriptions.Item label="所需数据 schema">
-                          {schemaHintByTask(taskSpec?.semantic_task_type)}
-                        </Descriptions.Item>
-                        <Descriptions.Item label="默认指标">
-                          {taskSpec?.recommended_metrics?.join(', ') || '-'}
-                        </Descriptions.Item>
-                      </Descriptions>
+                {step === 3 && state === 'data_ready' && (
+                  <Space direction="vertical" style={{ width: '100%' }} className="agent-plan-workbench-prep">
+                    <Alert
+                      type="info"
+                      showIcon
+                      message="尚未生成建议计划"
+                      description="建议计划由系统根据当前任务与数据生成，生成后可在本页核对与微调。未确认前不会锁定配置，也不会进入执行阶段。"
+                    />
+                    <Card size="small" title="操作">
+                      <Button type="primary" onClick={() => void regeneratePlan()} disabled={isLocked}>
+                        生成建议计划
+                      </Button>
+                      <Button
+                        style={{ marginLeft: 8 }}
+                        onClick={() => {
+                          setState('data_selecting');
+                          setStep(2);
+                        }}
+                        disabled={isLocked}
+                      >
+                        返回数据准备
+                      </Button>
                     </Card>
+                  </Space>
+                )}
 
-                    <Card size="small" title="数据来源方式">
-                      <Space direction="vertical" style={{ width: '100%' }}>
-                        <Select
-                          value={datasetSourceMode}
-                          disabled={isLocked}
-                          onChange={setDatasetSourceMode}
-                          options={[
-                            { label: '上传符合 schema 的数据', value: 'upload' },
-                            { label: '上传原始材料，由 Data Agent 转换', value: 'agent_convert' },
-                            { label: '由 Data Agent 搜索公开数据集', value: 'agent_search' },
-                          ]}
-                        />
-                        <Space>
-                          <Button icon={<UploadOutlined />} onClick={() => setUploadOpen(true)} disabled={isLocked}>上传</Button>
-                          <Button icon={<LinkOutlined />} onClick={() => setImportOpen(true)} disabled={isLocked}>URL 导入</Button>
+                {step === 3 && isPlanWorkbenchPhase && (
+                  <Space direction="vertical" style={{ width: '100%' }} className="agent-plan-workbench">
+                    <Card
+                      size="small"
+                      title={(
+                        <Space size={8} align="center">
+                          <span>训练计划工作台</span>
+                          <OrchAgentTag agentKey="planning" />
                         </Space>
-                        <Select
-                          value={selectedDatasetId}
-                          disabled={isLocked}
-                          onChange={setSelectedDatasetId}
-                          options={datasets.map((d) => ({ label: `${d.name} (ID:${d.id})`, value: d.id }))}
-                          placeholder="选择已就绪数据集"
-                        />
-                        <Divider style={{ margin: '8px 0' }} />
-                        <Typography.Text strong>模式A：标准模板填充（推荐）</Typography.Text>
-                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                          根据当前任务 schema 生成标准模板（CSV，可用 Excel 打开填写），填写后再上传可降低格式错误。
-                        </Typography.Text>
-                        <Button onClick={downloadTaskTemplate} disabled={isLocked}>下载任务模板（Excel 可打开）</Button>
-
-                        <Divider style={{ margin: '8px 0' }} />
-                        <Typography.Text strong>模式B：Agent 协助字段解析</Typography.Text>
-                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                          输入你原始数据的字段名，Agent 先给出字段映射建议，再执行导入/转换。
-                        </Typography.Text>
-                        <Input.TextArea
-                          rows={2}
-                          value={rawColumnsInput}
-                          onChange={(e) => setRawColumnsInput(e.target.value)}
-                          placeholder="例如：sentence, sentiment_label, source_id"
-                          disabled={isLocked}
-                        />
-                        <Space>
-                          <Button onClick={generateAgentColumnMap} disabled={isLocked}>Agent 解析字段映射</Button>
-                          <Button onClick={() => setAgentColumnMap({})} disabled={isLocked}>清空映射</Button>
+                      )}
+                      extra={
+                        <Space size={4} wrap align="center">
+                          <Tag color="gold">建议计划</Tag>
+                          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                            确认前可改；确认后写入「已确认计划」
+                          </Typography.Text>
                         </Space>
-                        {Object.keys(agentColumnMap).length > 0 && (
-                          <Descriptions bordered size="small" column={1} title="字段映射建议（可用于导入）">
-                            {Object.entries(agentColumnMap).map(([target, raw]) => (
-                              <Descriptions.Item key={target} label={target}>
-                                {raw}
-                              </Descriptions.Item>
-                            ))}
-                          </Descriptions>
-                        )}
-                      </Space>
-                    </Card>
-
-                    <Card size="small" title="数据检查卡">
-                      <Descriptions bordered column={1} size="small">
-                        <Descriptions.Item label="字段检查">{datasetValidationReport?.field_check || '待检查'}</Descriptions.Item>
-                        <Descriptions.Item label="schema 检查">{datasetValidationReport?.schema_check || '待检查'}</Descriptions.Item>
-                        <Descriptions.Item label="样本数检查">{datasetValidationReport?.sample_count || '待检查'}</Descriptions.Item>
-                        <Descriptions.Item label="标签分布检查">{datasetValidationReport?.label_distribution || '待检查'}</Descriptions.Item>
-                      </Descriptions>
-                    </Card>
-
-                    <Card size="small" title="数据预览表">
-                      <Table
-                        size="small"
-                        rowKey="id"
-                        pagination={{ pageSize: 5 }}
-                        dataSource={datasets}
-                        columns={[
-                          { title: 'ID', dataIndex: 'id', width: 72 },
-                          { title: '名称', dataIndex: 'name' },
-                          { title: '样本数', dataIndex: 'row_count', width: 100, render: (v: number | null) => v ?? '-' },
-                          { title: '状态', dataIndex: 'status', width: 90 },
-                        ]}
+                      }
+                    >
+                      {state === 'plan_generating' && (
+                        <Alert type="info" showIcon style={{ marginBottom: 12 }} message="正在生成建议计划…" />
+                      )}
+                      <Alert
+                        type="info"
+                        showIcon
+                        message="与「已确认计划」的区别"
+                        description="当前为建议计划（provisional）：仅预览与编辑。点击「确认计划并继续」后，本页配置将锁定为已确认计划（plan_frozen）并进入下一阶段；不会自动开始训练。"
+                        style={{ marginBottom: 12 }}
                       />
                     </Card>
 
-                    <Space>
-                      <Button onClick={() => {
-                        if (taskSpec) setTaskDraft(taskSpec);
-                        setState('task_parsed');
-                        setStep(1);
-                      }} disabled={isLocked}>返回</Button>
-                      <Button type="primary" onClick={confirmData} disabled={isLocked}>检查并确认数据</Button>
-                    </Space>
-                  </Space>
-                )}
-
-                {step === 3 && (
-                  <Space direction="vertical" style={{ width: '100%' }}>
-                    <Alert type="warning" message="建议计划预览：确认前不会触发训练执行（provisional）" />
-                    <Card size="small" title="计划预览卡（系统建议）">
+                    <Card size="small" title="当前任务摘要">
                       <Descriptions bordered column={1} size="small">
-                        <Descriptions.Item label="当前任务">
-                          {taskSpec ? `${taskSpec.domain} / ${taskSpec.semantic_task_type} / ${taskSpec.modality}` : '-'}
+                        <Descriptions.Item label="领域">
+                          {taskSpec ? bilingual(taskSpec.domain, DOMAIN_CN_MAP) : '—'}
                         </Descriptions.Item>
-                        <Descriptions.Item label="数据集">
-                          {selectedDataset ? `${selectedDataset.name} (ID:${selectedDataset.id})` : '-'}
+                        <Descriptions.Item label="模态">
+                          {taskSpec ? bilingual(taskSpec.modality, MODALITY_CN_MAP) : '—'}
                         </Descriptions.Item>
-                        <Descriptions.Item label="推荐训练方法">
-                          {planSpec.training_method || taskSpec?.candidate_methods?.[0] || '-'}
+                        <Descriptions.Item label="任务类型">
+                          {taskSpec ? bilingual(taskSpec.semantic_task_type, TASK_CN_MAP) : '—'}
                         </Descriptions.Item>
-                        <Descriptions.Item label="推荐基座模型">
-                          {planSpec.base_model || DEFAULT_BASE_MODEL}
-                        </Descriptions.Item>
-                        <Descriptions.Item label="训练参数摘要">
-                          {`epochs=${planSpec.epochs}, batch_size=${planSpec.batch_size}, learning_rate=${planSpec.learning_rate}`}
-                        </Descriptions.Item>
-                        <Descriptions.Item label="评估方式">
-                          {planSpec.eval_strategy || 'per_epoch'}
+                        <Descriptions.Item label="任务 schema">
+                          {taskSpec ? taskSpec.task_schema_id : '—'}
                         </Descriptions.Item>
                       </Descriptions>
                     </Card>
 
-                    <Card size="small" title="参数高级设置（可小幅调整）">
+                    <Card size="small" title="当前数据摘要">
+                      <Descriptions bordered column={1} size="small">
+                        <Descriptions.Item label="数据集">
+                          {selectedDataset ? `${selectedDataset.name}（ID: ${selectedDataset.id}）` : '—'}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="样本数">
+                          {selectedDataset?.row_count ?? '—'}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="列数">
+                          {selectedDataset?.column_count ?? '—'}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="数据来源模式">{datasetSourceMode}</Descriptions.Item>
+                        <Descriptions.Item label="切分">
+                          {splitStrategy} · tvt {tvSplit.train}:{tvSplit.valid}:{tvSplit.test}
+                        </Descriptions.Item>
+                      </Descriptions>
+                    </Card>
+
+                    <Card size="small" title="建议训练配置（只读摘要）">
+                      <Descriptions bordered column={1} size="small">
+                        <Descriptions.Item label="推荐基座模型">
+                          {planSpec.base_model || DEFAULT_BASE_MODEL}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="推荐训练方法">
+                          {bilingual(planSpec.training_method || taskSpec?.candidate_methods?.[0], METHOD_CN_MAP)}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="epochs">{planSpec.epochs}</Descriptions.Item>
+                        <Descriptions.Item label="batch size">{planSpec.batch_size}</Descriptions.Item>
+                        <Descriptions.Item label="learning rate">{planSpec.learning_rate}</Descriptions.Item>
+                        <Descriptions.Item label="评估策略（运行节奏）">{planSpec.eval_strategy || 'per_epoch'}</Descriptions.Item>
+                        <Descriptions.Item label="预期评估指标">
+                          {taskSpec?.recommended_metrics?.length
+                            ? bilingualList(taskSpec.recommended_metrics, METRIC_CN_MAP)
+                            : '—'}
+                        </Descriptions.Item>
+                      </Descriptions>
+                    </Card>
+
+                    <Card size="small" title="调整建议参数（可选）">
                       <Space direction="vertical" style={{ width: '100%' }}>
                         <Input
-                          addonBefore="base model（基座模型）"
+                          addonBefore="基座模型"
                           value={planSpec.base_model}
-                          disabled={isLocked}
+                          disabled={isLocked || state === 'plan_generating'}
                           onChange={(e) => setPlanSpec({ ...planSpec, base_model: e.target.value })}
                         />
-                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                          基座模型：训练前使用的原始模型底座，通常参数越大能力越强、资源消耗越高。
-                        </Typography.Text>
-
                         <Input
-                          addonBefore="method（训练方法）"
+                          addonBefore="训练方法"
                           value={planSpec.training_method}
-                          disabled={isLocked}
+                          disabled={isLocked || state === 'plan_generating'}
                           onChange={(e) => setPlanSpec({ ...planSpec, training_method: e.target.value })}
                         />
-                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                          训练方法：如 LoRA / SFT，决定参数更新方式与训练成本。
-                        </Typography.Text>
-
                         <InputNumber
-                          addonBefore="epochs（训练轮数）"
+                          addonBefore="epochs"
                           value={planSpec.epochs}
-                          disabled={isLocked}
+                          disabled={isLocked || state === 'plan_generating'}
                           onChange={(v) => setPlanSpec({ ...planSpec, epochs: Number(v || 1) })}
                         />
                         <InputNumber
-                          addonBefore="batch size（批大小）"
+                          addonBefore="batch size"
                           value={planSpec.batch_size}
-                          disabled={isLocked}
+                          disabled={isLocked || state === 'plan_generating'}
                           onChange={(v) => setPlanSpec({ ...planSpec, batch_size: Number(v || 1) })}
                         />
                         <InputNumber
-                          addonBefore="learning rate（学习率）"
+                          addonBefore="learning rate"
                           value={planSpec.learning_rate}
-                          disabled={isLocked}
+                          disabled={isLocked || state === 'plan_generating'}
                           step={0.00001}
                           onChange={(v) => setPlanSpec({ ...planSpec, learning_rate: Number(v || 0.00002) })}
                         />
                         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                          小白建议：先使用默认参数直接跑通；仅在效果不佳时再小幅调整（例如学习率减半、epochs +1）。
+                          微调后仍属于「建议计划」；确认后才会写入已确认计划。
                         </Typography.Text>
                       </Space>
                     </Card>
-                    <Space>
-                      <Button onClick={() => void regeneratePlan()} disabled={isLocked}>重新生成计划</Button>
-                      <Button onClick={() => {
-                        setState('data_selecting');
-                        setStep(2);
-                      }} disabled={isLocked}>返回修改任务/数据</Button>
-                      <Button type="primary" onClick={freezePlan} disabled={isLocked}>确认并冻结计划</Button>
+
+                    <Space wrap>
+                      <Button
+                        icon={<SyncOutlined />}
+                        onClick={() => void regeneratePlan()}
+                        disabled={isLocked || state === 'plan_generating'}
+                      >
+                        重新生成计划
+                      </Button>
+                      <Button
+                        onClick={() => {
+                          setState('data_selecting');
+                          setStep(2);
+                        }}
+                        disabled={isLocked || state === 'plan_generating'}
+                      >
+                        返回修改数据
+                      </Button>
+                      <Button
+                        type="primary"
+                        onClick={freezePlan}
+                        disabled={isLocked || state === 'plan_generating'}
+                      >
+                        确认计划并继续
+                      </Button>
                     </Space>
                   </Space>
                 )}
 
-                {step === 4 && (
-                  <Space direction="vertical" style={{ width: '100%' }}>
-                    <Alert type={state === 'done' ? 'success' : 'info'} message={state === 'done' ? '本次 Run 已完成' : '执行阶段：按当前 run 查看完整闭环'} />
-                    <Card size="small" title="当前 Run 状态卡">
-                      <Descriptions bordered column={1} size="small">
-                        <Descriptions.Item label="run_id">{runSpec?.run_id || pipeline?.id || '-'}</Descriptions.Item>
-                        <Descriptions.Item label="任务">{taskSpec ? `${taskSpec.domain} / ${taskSpec.semantic_task_type}` : '-'}</Descriptions.Item>
-                        <Descriptions.Item label="数据">{selectedDataset?.name || '-'}</Descriptions.Item>
-                        <Descriptions.Item label="方法">{planSpec.training_method || '-'}</Descriptions.Item>
-                        <Descriptions.Item label="模型">{pipeline?.model_id || planSpec.base_model || '-'}</Descriptions.Item>
-                        <Descriptions.Item label="当前阶段">{pipeline?.current_step || state}</Descriptions.Item>
-                      </Descriptions>
-                    </Card>
-
-                    <Card size="small" title="Timeline（Run 全链路）">
-                      <Timeline
+                {step === 4 && isTrainingExecutionView && (
+                  <div className="agent-train-exec-workbench">
+                    <Card
+                      size="small"
+                      title={(
+                        <Space size={8} align="center">
+                          <span>训练执行工作台</span>
+                          <OrchAgentTag agentKey="training" />
+                        </Space>
+                      )}
+                      extra={
+                        <Space size={6} wrap align="center">
+                          <OrchAgentTag agentKey="orchestrator" />
+                          <Tag color="processing">{state}</Tag>
+                          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                            pipeline #{pipeline?.id ?? '—'}
+                          </Typography.Text>
+                        </Space>
+                      }
+                    >
+                      <Typography.Paragraph type="secondary" style={{ marginBottom: 12, fontSize: 12 }}>
+                        Training Executor 已接管训练侧执行；Orchestrator 负责阶段编排。请用下方分栏查看概览、日志、MCP
+                        消息与产物（MCP 为各 Agent 侧信道，不进入中间对话）。
+                      </Typography.Paragraph>
+                      <Tabs
                         items={[
-                          { color: taskDraft ? 'green' : 'gray', children: '任务已解析（规划完成）' },
-                          { color: state === 'data_ready' || !!pipeline ? 'green' : 'gray', children: '数据已就绪（校验通过）' },
-                          { color: pipeline?.current_step === 'train' || state === 'done' ? 'blue' : 'gray', children: '训练已启动' },
-                          { color: pipeline?.model_id ? 'blue' : 'gray', children: '模型检查点已保存' },
-                          { color: state === 'done' ? 'green' : 'gray', children: '评估已完成' },
+                          {
+                            key: 'overview',
+                            label: '概览',
+                            children: (
+                              <Space direction="vertical" style={{ width: '100%' }} size="middle">
+                                {runSpec?.plan_spec && (
+                                  <Descriptions bordered column={1} size="small" title="已确认计划（快照）">
+                                    <Descriptions.Item label="基座模型">{runSpec.plan_spec.base_model}</Descriptions.Item>
+                                    <Descriptions.Item label="训练方法">{runSpec.plan_spec.training_method}</Descriptions.Item>
+                                    <Descriptions.Item label="epochs / batch / lr">
+                                      {runSpec.plan_spec.epochs} / {runSpec.plan_spec.batch_size} / {runSpec.plan_spec.learning_rate}
+                                    </Descriptions.Item>
+                                  </Descriptions>
+                                )}
+                                <Descriptions bordered column={1} size="small" title="Run 状态">
+                                  <Descriptions.Item label="run_id">{runSpec?.run_id || pipeline?.id || '-'}</Descriptions.Item>
+                                  <Descriptions.Item label="任务">
+                                    {taskSpec ? `${taskSpec.domain} / ${taskSpec.semantic_task_type}` : '-'}
+                                  </Descriptions.Item>
+                                  <Descriptions.Item label="数据">{selectedDataset?.name || '-'}</Descriptions.Item>
+                                  <Descriptions.Item label="当前阶段">{pipeline?.current_step || state}</Descriptions.Item>
+                                  <Descriptions.Item label="metrics 速览">
+                                    acc {pipeline?.metrics?.accuracy ?? '—'} · f1 {pipeline?.metrics?.f1 ?? '—'} · loss{' '}
+                                    {pipeline?.metrics?.loss ?? '—'}
+                                  </Descriptions.Item>
+                                </Descriptions>
+                                <Timeline
+                                  items={[
+                                    {
+                                      color: taskDraft ? 'green' : 'gray',
+                                      children: 'Planning：任务已解析（规划完成）',
+                                    },
+                                    {
+                                      color: state === 'data_ready' || !!pipeline ? 'green' : 'gray',
+                                      children: 'Data Agent：数据已就绪（校验通过）',
+                                    },
+                                    {
+                                      color: pipeline?.current_step === 'train' || state === 'done' ? 'blue' : 'gray',
+                                      children: 'Training Executor：训练已启动',
+                                    },
+                                    {
+                                      color: pipeline?.model_id ? 'blue' : 'gray',
+                                      children: 'Training Executor：模型检查点已保存',
+                                    },
+                                    {
+                                      color: state === 'done' ? 'green' : 'gray',
+                                      children: 'Evaluation Agent：评估已完成',
+                                    },
+                                  ]}
+                                />
+                                <Alert
+                                  type={pipeline?.error_message ? 'error' : 'info'}
+                                  showIcon
+                                  message={pipeline?.error_message || '暂无错误信息'}
+                                />
+                                <Space wrap>
+                                  <Button
+                                    type="default"
+                                    icon={<SyncOutlined />}
+                                    onClick={() => {
+                                      if (!pipeline?.id) return;
+                                      void axios
+                                        .get(`${API_BASE}/pipelines/${pipeline.id}`)
+                                        .then((res) => setPipeline(res.data))
+                                        .catch(() => {});
+                                    }}
+                                  >
+                                    刷新状态
+                                  </Button>
+                                  {state === 'training_succeeded' && (
+                                    <Button
+                                      type="primary"
+                                      onClick={() => {
+                                        setStep(5);
+                                        setState('evaluating');
+                                        setChatMessages((prev) => [
+                                          ...prev,
+                                          {
+                                            id: `msg_${Date.now()}`,
+                                            role: 'agent',
+                                            stage: 'eval_confirm',
+                                            content: '训练已成功，请确认评估策略后执行评估。',
+                                            timestamp: new Date().toLocaleTimeString('zh-CN'),
+                                          },
+                                        ]);
+                                      }}
+                                    >
+                                      进入评估确认
+                                    </Button>
+                                  )}
+                                </Space>
+                              </Space>
+                            ),
+                          },
+                          {
+                            key: 'logs',
+                            label: '训练日志',
+                            children: (
+                              <>
+                              <Alert
+                                type="info"
+                                showIcon
+                                style={{ marginBottom: 10 }}
+                                message="日志来源：Training Executor"
+                                description="以下为训练进程标准输出（示例/后端推送）；与 Orchestrator 对话流相互独立。"
+                              />
+                              <List
+                                size="small"
+                                style={{
+                                  maxHeight: 320,
+                                  overflowY: 'auto',
+                                  border: '1px solid #f0f0f0',
+                                  borderRadius: 6,
+                                  padding: 8,
+                                }}
+                                dataSource={runLogs}
+                                locale={{
+                                  emptyText: pipeline?.id
+                                    ? '当前 run 暂无日志输出（可能后端尚未返回日志流）'
+                                    : '等待 pipeline 信息…',
+                                }}
+                                renderItem={(line) => (
+                                  <List.Item style={{ padding: '4px 0', border: 'none', fontFamily: 'monospace', fontSize: 12 }}>
+                                    {line}
+                                  </List.Item>
+                                )}
+                              />
+                              </>
+                            ),
+                          },
+                          {
+                            key: 'mcp',
+                            label: 'MCP 消息',
+                            children: (
+                              <>
+                                <Alert
+                                  type="info"
+                                  showIcon
+                                  style={{ marginBottom: 10 }}
+                                  message="多 Agent 侧信道"
+                                  description="每行对应某一角色经 MCP Server 发起的动作；与中间「编排对话」分离，便于对照 Planning / Data / Training / Evaluation / Orchestrator。"
+                                />
+                                <Table
+                                  size="small"
+                                  pagination={{ pageSize: 6 }}
+                                  rowKey="id"
+                                  scroll={{ x: 900 }}
+                                  dataSource={trainExecutionMcpRows}
+                                  columns={[
+                                    { title: '时间', dataIndex: 'time', width: 100, ellipsis: true },
+                                    { title: 'Agent（角色）', dataIndex: 'agent', width: 148, ellipsis: true },
+                                    { title: 'MCP Server', dataIndex: 'mcpServer', width: 100 },
+                                    { title: 'Action', dataIndex: 'action', width: 160, ellipsis: true },
+                                    {
+                                      title: '状态',
+                                      dataIndex: 'status',
+                                      width: 88,
+                                      render: (s: string) => {
+                                        const color =
+                                          s === 'success'
+                                            ? 'success'
+                                            : s === 'running'
+                                              ? 'processing'
+                                              : s === 'failed'
+                                                ? 'error'
+                                                : 'default';
+                                        return <Tag color={color}>{s}</Tag>;
+                                      },
+                                    },
+                                    { title: '输出摘要', dataIndex: 'outputSummary', ellipsis: true },
+                                  ]}
+                                />
+                              </>
+                            ),
+                          },
+                          {
+                            key: 'artifacts',
+                            label: 'Checkpoint / 产物',
+                            children: (
+                              <Space direction="vertical" style={{ width: '100%' }}>
+                                <Alert
+                                  type="info"
+                                  showIcon
+                                  message="产物来源：Training Executor"
+                                  description="checkpoint 与 adapter 由训练侧写入；下载链接来自 pipeline 产物（若有）。"
+                                />
+                                <Space wrap>
+                                  <Button disabled={!pipeline?.artifacts?.model_url} href={pipeline?.artifacts?.model_url} target="_blank">
+                                    下载模型产物
+                                  </Button>
+                                  <Button disabled={!pipeline?.artifacts?.metrics_url} href={pipeline?.artifacts?.metrics_url} target="_blank">
+                                    下载 metrics.json
+                                  </Button>
+                                  <Button
+                                    disabled={!pipeline?.artifacts?.eval_report_url}
+                                    href={pipeline?.artifacts?.eval_report_url}
+                                    target="_blank"
+                                  >
+                                    下载 eval_report.json
+                                  </Button>
+                                </Space>
+                                <Table
+                                  size="small"
+                                  pagination={false}
+                                  rowKey="key"
+                                  dataSource={[
+                                    {
+                                      key: 'ckpt-mock-1',
+                                      name: 'checkpoint-400（示例）',
+                                      path: '/outputs/mock/ckpt-400',
+                                      note: '占位：接入后端后展示真实 checkpoint 列表',
+                                    },
+                                    {
+                                      key: 'ckpt-mock-2',
+                                      name: 'adapter-latest（示例）',
+                                      path: '/outputs/mock/adapter',
+                                      note: '—',
+                                    },
+                                  ]}
+                                  columns={[
+                                    { title: '名称', dataIndex: 'name' },
+                                    { title: '路径', dataIndex: 'path', ellipsis: true },
+                                    { title: '说明', dataIndex: 'note', ellipsis: true },
+                                  ]}
+                                />
+                              </Space>
+                            ),
+                          },
+                          {
+                            key: 'eval',
+                            label: '评测结果',
+                            children: (
+                              <Space direction="vertical" style={{ width: '100%' }}>
+                                <Alert
+                                  type="info"
+                                  showIcon
+                                  message="Evaluation Agent · 评测结果（占位）"
+                                  description="正式流程中由 Evaluation Agent 汇总验证/测试指标；当前为静态示意，完整评估在「评估与结果」步骤确认。"
+                                />
+                                <Descriptions bordered column={2} size="small">
+                                  <Descriptions.Item label="accuracy">{pipeline?.metrics?.accuracy ?? '—'}</Descriptions.Item>
+                                  <Descriptions.Item label="f1">{pipeline?.metrics?.f1 ?? '—'}</Descriptions.Item>
+                                  <Descriptions.Item label="loss">{pipeline?.metrics?.loss ?? '—'}</Descriptions.Item>
+                                  <Descriptions.Item label="状态">{pipeline?.status ?? '—'}</Descriptions.Item>
+                                </Descriptions>
+                              </Space>
+                            ),
+                          },
                         ]}
                       />
                     </Card>
+                  </div>
+                )}
 
-                    <Card size="small" title="结果区">
-                      <Typography.Text strong>metrics</Typography.Text>
-                      <Descriptions bordered column={2} size="small" style={{ marginTop: 8, marginBottom: 12 }}>
-                        <Descriptions.Item label="accuracy">{pipeline?.metrics?.accuracy ?? '-'}</Descriptions.Item>
-                        <Descriptions.Item label="f1">{pipeline?.metrics?.f1 ?? '-'}</Descriptions.Item>
-                        <Descriptions.Item label="loss">{pipeline?.metrics?.loss ?? '-'}</Descriptions.Item>
-                        <Descriptions.Item label="status">{pipeline?.status || '-'}</Descriptions.Item>
+                {step === 4 && !isTrainingExecutionView && (
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <Alert
+                      type="info"
+                      message="执行阶段（Orchestrator 调度）"
+                      description="确认计划后由你触发启动；随后 Training Executor 接管训练侧，右侧切换为分栏工作台。Evaluation Agent 在后续评估步骤介入。"
+                    />
+                    {runSpec?.plan_spec && (
+                      <Card size="small" title="已确认计划（快照）" extra={<Tag color="success">已锁定</Tag>}>
+                        <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 8 }}>
+                          以下为确认计划并继续后写入 run_spec 的配置，与右侧曾展示的「建议计划」对应；执行需单独发起。
+                        </Typography.Paragraph>
+                        <Descriptions bordered column={1} size="small">
+                          <Descriptions.Item label="基座模型">{runSpec.plan_spec.base_model}</Descriptions.Item>
+                          <Descriptions.Item label="训练方法">{runSpec.plan_spec.training_method}</Descriptions.Item>
+                          <Descriptions.Item label="epochs">{runSpec.plan_spec.epochs}</Descriptions.Item>
+                          <Descriptions.Item label="batch size">{runSpec.plan_spec.batch_size}</Descriptions.Item>
+                          <Descriptions.Item label="learning rate">{runSpec.plan_spec.learning_rate}</Descriptions.Item>
+                          <Descriptions.Item label="评估策略">{runSpec.plan_spec.eval_strategy}</Descriptions.Item>
+                          <Descriptions.Item label="预期产出">
+                            {(runSpec.plan_spec.expected_outputs || []).join('，')}
+                          </Descriptions.Item>
+                        </Descriptions>
+                      </Card>
+                    )}
+                    <Card size="small" title="当前 Run 状态卡">
+                      <Descriptions bordered column={1} size="small">
+                        <Descriptions.Item label="run_id">{runSpec?.run_id || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="任务">{taskSpec ? `${taskSpec.domain} / ${taskSpec.semantic_task_type}` : '-'}</Descriptions.Item>
+                        <Descriptions.Item label="数据">{selectedDataset?.name || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="方法">{planSpec.training_method || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="模型">{planSpec.base_model || '-'}</Descriptions.Item>
+                        <Descriptions.Item label="当前阶段">{state}</Descriptions.Item>
                       </Descriptions>
-
-                      <Typography.Text strong>产物下载</Typography.Text>
-                      <div style={{ marginTop: 8 }}>
-                        <Space wrap>
-                          <Button disabled={!pipeline?.artifacts?.model_url} href={pipeline?.artifacts?.model_url} target="_blank">
-                            下载模型产物
-                          </Button>
-                          <Button disabled={!pipeline?.artifacts?.metrics_url} href={pipeline?.artifacts?.metrics_url} target="_blank">
-                            下载 metrics.json
-                          </Button>
-                          <Button disabled={!pipeline?.artifacts?.eval_report_url} href={pipeline?.artifacts?.eval_report_url} target="_blank">
-                            下载 eval_report.json
-                          </Button>
-                        </Space>
-                      </div>
-
-                      <Divider style={{ margin: '12px 0' }} />
-                      <Typography.Text strong>日志</Typography.Text>
-                      <List
-                        size="small"
-                        style={{ marginTop: 8, maxHeight: 180, overflowY: 'auto', border: '1px solid #f0f0f0', borderRadius: 6, padding: 8 }}
-                        dataSource={runLogs}
-                        locale={{ emptyText: pipeline?.id ? '当前 run 暂无日志输出（可能后端尚未返回日志流）' : '尚未启动 run，暂无日志' }}
-                        renderItem={(line) => <List.Item style={{ padding: '4px 0', border: 'none' }}>{line}</List.Item>}
-                      />
-
-                      <Divider style={{ margin: '12px 0' }} />
-                      <Typography.Text strong>错误回放</Typography.Text>
-                      <Alert
-                        style={{ marginTop: 8 }}
-                        type={pipeline?.error_message ? 'error' : 'info'}
-                        message={pipeline?.error_message || '暂无错误'}
-                        showIcon
+                    </Card>
+                    <Card size="small" title="Timeline（Run 全链路）">
+                      <Timeline
+                        items={[
+                          { color: taskDraft ? 'green' : 'gray', children: 'Planning：任务已解析（规划完成）' },
+                          { color: state === 'data_ready' ? 'green' : 'gray', children: 'Data Agent：数据已就绪（校验通过）' },
+                          { color: 'gray', children: 'Training Executor：训练已启动（待触发）' },
+                          { color: 'gray', children: 'Training Executor：模型检查点' },
+                          { color: 'gray', children: 'Evaluation Agent：评估' },
+                        ]}
                       />
                     </Card>
-                    <Space>
+                    <Space wrap>
                       <Button
                         type="primary"
                         icon={<PlayCircleOutlined />}
@@ -1776,42 +3033,20 @@ const AgentCanvas: React.FC = () => {
                       >
                         启动执行
                       </Button>
-                      <Button type="default"
-                        icon={<SyncOutlined />}
-                        onClick={() => {
-                          if (!pipeline?.id) return;
-                          void axios.get(`${API_BASE}/pipelines/${pipeline.id}`).then((res) => setPipeline(res.data)).catch(() => {});
-                        }}
-                      >
-                        刷新状态
-                      </Button>
                     </Space>
-                    {state === 'training_succeeded' && (
-                      <Button
-                        type="primary"
-                        onClick={() => {
-                          setStep(5);
-                          setState('evaluating');
-                          setChatMessages((prev) => [
-                            ...prev,
-                            {
-                              id: `msg_${Date.now()}`,
-                              role: 'agent',
-                              stage: 'eval_confirm',
-                              content: '训练已成功，请确认评估策略后执行评估。',
-                              timestamp: new Date().toLocaleTimeString('zh-CN'),
-                            },
-                          ]);
-                        }}
-                      >
-                        进入评估确认
-                      </Button>
-                    )}
                   </Space>
                 )}
                 {step === 5 && (
                   <Space direction="vertical" style={{ width: '100%' }}>
-                    <Card size="small" title="评估确认">
+                    <Card
+                      size="small"
+                      title={(
+                        <Space size={8} align="center">
+                          <span>评估确认</span>
+                          <OrchAgentTag agentKey="eval" />
+                        </Space>
+                      )}
+                    >
                       <Descriptions bordered column={1} size="small">
                         <Descriptions.Item label="评估策略">{planSpec.eval_strategy || 'per_epoch'}</Descriptions.Item>
                         <Descriptions.Item label="评估指标">{taskSpec?.recommended_metrics?.join(', ') || '-'}</Descriptions.Item>
@@ -1840,7 +3075,15 @@ const AgentCanvas: React.FC = () => {
                         <Button onClick={() => setStep(4)}>返回训练阶段</Button>
                       </Space>
                     </Card>
-                    <Card size="small" title="评估结果（Run 视图）">
+                    <Card
+                      size="small"
+                      title={(
+                        <Space size={8} align="center">
+                          <span>评估结果（Run 视图）</span>
+                          <OrchAgentTag agentKey="eval" />
+                        </Space>
+                      )}
+                    >
                       <Descriptions bordered column={2} size="small">
                         <Descriptions.Item label="评估状态">{evalConfirmed ? '已完成' : '待确认'}</Descriptions.Item>
                         <Descriptions.Item label="run_id">{runSpec?.run_id || '-'}</Descriptions.Item>
@@ -1850,34 +3093,45 @@ const AgentCanvas: React.FC = () => {
                     </Card>
                   </Space>
                 )}
-              </Card>
-            </Col>
-
-            <Col xs={24} lg={6}>
-              <Card title="运行时间线" className="mcp-card compact-run-card">
-                <Button type="link" style={{ paddingLeft: 0 }} onClick={() => setMcpDrawerOpen(true)}>
-                  查看 MCP 信息窗口
-                </Button>
-                <div style={{ marginTop: 12 }}>
+              {!(step === 4 && isTrainingExecutionView) && (
+                <>
+                  <Divider style={{ margin: '16px 0' }} />
+                  <Button type="link" style={{ paddingLeft: 0 }} onClick={() => setMcpDrawerOpen(true)}>
+                    打开 MCP 侧信道（多 Agent）
+                  </Button>
+                  <Typography.Text strong style={{ display: 'block', marginTop: 12, marginBottom: 8 }}>
+                    运行时间线
+                  </Typography.Text>
                   <Timeline
-                    style={{ marginTop: 8 }}
                     items={[
-                      { color: taskDraft ? 'green' : 'gray', children: '任务已解析（规划完成）' },
-                      { color: state === 'data_ready' || !!pipeline ? 'green' : 'gray', children: '数据已就绪（校验通过）' },
-                      { color: pipeline?.current_step === 'train' || state === 'done' ? 'blue' : 'gray', children: '训练已启动' },
-                      { color: pipeline?.model_id ? 'blue' : 'gray', children: '模型检查点已保存' },
-                      { color: state === 'done' ? 'green' : 'gray', children: '评估已完成' },
+                      { color: taskDraft ? 'green' : 'gray', children: 'Planning：任务已解析（规划完成）' },
+                      {
+                        color: state === 'data_ready' || !!pipeline ? 'green' : 'gray',
+                        children: 'Data Agent：数据已就绪（校验通过）',
+                      },
+                      {
+                        color: pipeline?.current_step === 'train' || state === 'done' ? 'blue' : 'gray',
+                        children: 'Training Executor：训练已启动',
+                      },
+                      {
+                        color: pipeline?.model_id ? 'blue' : 'gray',
+                        children: 'Training Executor：模型检查点已保存',
+                      },
+                      { color: state === 'done' ? 'green' : 'gray', children: 'Evaluation Agent：评估已完成' },
                     ]}
                   />
-                  {state === 'done' && <Alert type="success" icon={<CheckCircleOutlined />} message="已完成" />}
-                </div>
+                  {state === 'done' && (
+                    <Alert type="success" icon={<CheckCircleOutlined />} message="已完成" style={{ marginTop: 8 }} />
+                  )}
+                </>
+              )}
+              </div>
               </Card>
-            </Col>
-          </Row>
+          </div>
         </div>
       </div>
       <Drawer
-        title="MCP 信息窗口（示例）"
+        title="MCP 侧信道 · 多 Agent（示例）"
         open={mcpDrawerOpen}
         onClose={() => setMcpDrawerOpen(false)}
         width={460}
@@ -1891,18 +3145,31 @@ const AgentCanvas: React.FC = () => {
                 <List
                   size="small"
                   dataSource={mcpEvents}
-                  renderItem={(evt) => (
-                    <List.Item>
-                      <div>
-                        <Typography.Text strong>{evt.server}.{evt.tool}</Typography.Text>
-                        <Tag style={{ marginLeft: 8 }} color={evt.status === 'success' ? 'success' : evt.status === 'failed' ? 'error' : 'processing'}>
-                          {evt.status}
-                        </Tag>
-                        <div style={{ marginTop: 4, fontSize: 12 }}>{evt.summary}</div>
-                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>{evt.timestamp}</Typography.Text>
-                      </div>
-                    </List.Item>
-                  )}
+                  renderItem={(evt) => {
+                    const row = mcpEventToTrainExecutionRow(evt);
+                    return (
+                      <List.Item>
+                        <div>
+                          <Space size={6} wrap>
+                            <Typography.Text strong>{row.agent}</Typography.Text>
+                            <Typography.Text type="secondary">{row.mcpServer}</Typography.Text>
+                            <Typography.Text code style={{ fontSize: 11 }}>{row.action}</Typography.Text>
+                            <Tag
+                              color={
+                                row.status === 'success' ? 'success' : row.status === 'failed' ? 'error' : 'processing'
+                              }
+                            >
+                              {row.status}
+                            </Tag>
+                          </Space>
+                          <div style={{ marginTop: 4, fontSize: 12 }}>{row.outputSummary}</div>
+                          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                            {row.time}
+                          </Typography.Text>
+                        </div>
+                      </List.Item>
+                    );
+                  }}
                 />
               ),
             },
@@ -1928,57 +3195,61 @@ const AgentCanvas: React.FC = () => {
         />
       </Drawer>
 
-      <Modal title="上传训练数据" open={uploadOpen} onCancel={() => setUploadOpen(false)} onOk={() => uploadForm.submit()}>
-        <Form
-          form={uploadForm}
-          layout="vertical"
-          onFinish={async (values) => {
-            if (!fileList.length) return message.warning('请选择文件');
-            await datasetService.uploadDataset(fileList[0].originFileObj as File, values.name, values.type || 'text', 'training');
-            setUploadOpen(false);
-            setFileList([]);
-            uploadForm.resetFields();
-            await refreshReadyDatasets();
-          }}
-        >
-          <Form.Item label="文件" required>
-            <Upload beforeUpload={() => false} fileList={fileList} onChange={({ fileList: f }) => setFileList(f)} maxCount={1}>
-              <Button icon={<UploadOutlined />}>选择文件</Button>
-            </Upload>
-          </Form.Item>
-          <Form.Item name="name" label="名称" rules={[{ required: true }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="type" label="类型" initialValue="text">
-            <Select options={[{ label: '文本', value: 'text' }]} />
-          </Form.Item>
-        </Form>
+      <Modal
+        title="重命名 Run"
+        open={runListRenameOpen}
+        okText="确定"
+        cancelText="取消"
+        onOk={() => {
+          const t = runListRenameTitle.trim();
+          if (!t || !runListRenameId) {
+            setRunListRenameOpen(false);
+            return;
+          }
+          setChatSessions((prev) =>
+            prev.map((s) => (s.id === runListRenameId ? { ...s, title: t } : s))
+          );
+          setRunListRenameOpen(false);
+          message.success('已更新标题');
+        }}
+        onCancel={() => setRunListRenameOpen(false)}
+        destroyOnClose
+      >
+        <Input
+          value={runListRenameTitle}
+          onChange={(e) => setRunListRenameTitle(e.target.value)}
+          placeholder="Run 标题"
+          maxLength={120}
+          showCount
+        />
       </Modal>
 
-      <Modal title="从 URL 导入" open={importOpen} onCancel={() => setImportOpen(false)} onOk={() => importForm.submit()}>
-        <Form
-          form={importForm}
-          layout="vertical"
-          onFinish={async (values) => {
-            await datasetService.importFromUrl({
-              name: values.name,
-              url: values.url,
-              type: 'text',
-              usage: 'training',
-              column_map: Object.keys(agentColumnMap).length > 0 ? agentColumnMap : undefined,
-            });
-            setImportOpen(false);
-            importForm.resetFields();
-            setTimeout(() => void refreshReadyDatasets(), 1200);
-          }}
-        >
-          <Form.Item name="name" label="名称" rules={[{ required: true }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="url" label="URL" rules={[{ required: true }, { type: 'url' }]}>
-            <Input />
-          </Form.Item>
-        </Form>
+      <Modal
+        title="规划阶段时间线"
+        open={planTimelineOpen}
+        onCancel={() => setPlanTimelineOpen(false)}
+        footer={null}
+      >
+        <Timeline
+          items={[
+            {
+              color: flowModeConfirmed ? 'green' : 'gray',
+              children: 'Orchestrator：已确认流程模式（全流程 / 仅训练 / 仅评估）',
+            },
+            {
+              color: taxonomyConfirmed ? 'green' : 'gray',
+              children: 'Planning Agent：已确认领域-类型-任务',
+            },
+            {
+              color: chatMessages.some((m) => m.stage === 'plan_confirm') ? 'blue' : 'gray',
+              children: 'Planning Agent：已输出建议/确认计划',
+            },
+            {
+              color: mcpEvents.length > 0 ? 'blue' : 'gray',
+              children: '多 Agent MCP 侧信道已接入数据控制台',
+            },
+          ]}
+        />
       </Modal>
     </div>
   );

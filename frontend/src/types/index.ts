@@ -170,6 +170,8 @@ export interface RunSpec {
   run_id: string;
   task_spec: TaskSpec;
   dataset_spec: DatasetSpec;
+  /** 数据确认后写入的结构化校验摘要（前端 mock / 本地状态，可与后端对齐） */
+  dataset_validation_report?: Record<string, string>;
   plan_spec: PlanSpec;
   current_state: RunCurrentState;
   created_at: string;

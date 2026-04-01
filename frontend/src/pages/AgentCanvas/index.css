@@ -20,6 +20,13 @@
   overflow-y: auto;
 }
 
+/* 编排页：整页不滚动，三栏各自内部滚动 */
+.canvas-main--orchestration {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .canvas-header {
   margin-bottom: 32px;
   display: flex;
@@ -1188,6 +1195,10 @@
   min-height: 74px;
 }
 
+.agent-run-list-item-meta {
+  word-break: break-word;
+}
+
 .agent-proto-session-item:hover {
   border-color: #b7d7ff;
   background: #f4f9ff;
@@ -1207,7 +1218,7 @@
   border-radius: 4px;
 }
 
-.agent-proto-session-delete {
+.agent-proto-session-more {
   position: absolute !important;
   right: 2px;
   top: -2px;
@@ -1217,7 +1228,7 @@
   border-radius: 6px;
 }
 
-.agent-proto-session-delete:hover {
+.agent-proto-session-more:hover {
   background: rgba(0, 0, 0, 0.06);
   color: rgba(0, 0, 0, 0.58);
 }
@@ -1273,4 +1284,193 @@
 .agent-proto-bubble-user {
   background: #eaf4ff;
   border-color: #cfe6ff;
+}
+
+/* 三栏编排：顶栏 + 左会话 / 中对话 / 右阶段工作台 */
+.agent-orch-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.agent-orch-toolbar-left {
+  min-width: 0;
+  flex: 1 1 240px;
+}
+
+.agent-orch-toolbar-right {
+  flex: 0 1 auto;
+  justify-content: flex-end;
+}
+
+.agent-orch-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 1fr;
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+@media (min-width: 992px) {
+  .agent-orch-grid {
+    grid-template-columns: minmax(200px, 260px) minmax(280px, 1fr) minmax(300px, 38%);
+  }
+}
+
+.agent-orch-col {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.agent-orch-col .ant-card {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.agent-orch-col .ant-card .ant-card-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.agent-orch-session-card .ant-card-body {
+  overflow-y: auto;
+}
+
+.agent-orch-workspace-card .ant-card-body {
+  overflow: hidden;
+  padding-top: 12px;
+}
+
+.agent-orch-workspace-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.agent-orch-chat-stream {
+  /* 不占满整列高度，避免挤压下方阶段卡片（训练目标等）被父级 overflow:hidden 裁切 */
+  flex: 0 1 auto;
+  min-height: 120px;
+  max-height: min(44vh, 420px);
+  overflow-y: auto;
+}
+
+/* 中间对话栏：整块可滚动，确保阶段表单 + 文本框完整可见 */
+.agent-orch-col-chat > .ant-card > .ant-card-body {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.agent-orch-chat-phase-card.ant-card {
+  border-color: #e8e8e8;
+  background: #fafafa;
+}
+
+.agent-orch-chat-phase-card .ant-card-head {
+  min-height: 36px;
+  padding: 0 12px;
+}
+
+.agent-orch-chat-phase-card .ant-card-head-title {
+  padding: 8px 0;
+  font-size: 13px;
+}
+
+.agent-orch-chat-phase-card .ant-card-body {
+  padding: 12px;
+}
+
+.agent-orch-summary-card.ant-card .ant-descriptions-item-label {
+  width: 88px;
+}
+
+/* 阶段 1 · 训练目标：自上而下流程图式层级（节点 + 垂直连线） */
+.agent-goal-cascade {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+}
+
+.agent-goal-cascade-row {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 10px 12px;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.agent-goal-cascade-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 36px;
+  flex-shrink: 0;
+  min-height: 0;
+}
+
+.agent-goal-cascade-dot {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #1677ff 0%, #4096ff 100%);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 28px;
+  text-align: center;
+  box-shadow: 0 2px 6px rgba(22, 119, 255, 0.28);
+}
+
+.agent-goal-cascade-line {
+  flex: 1 1 auto;
+  width: 2px;
+  min-height: 14px;
+  margin: 5px 0 2px;
+  border-radius: 1px;
+  background: linear-gradient(180deg, #91caff 0%, #bae0ff 55%, #e6f4ff 100%);
+}
+
+.agent-goal-cascade-panel {
+  min-width: 0;
+  padding-bottom: 14px;
+}
+
+.agent-goal-cascade-row--last .agent-goal-cascade-panel {
+  padding-bottom: 0;
+}
+
+.agent-goal-cascade-title {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+
+.agent-goal-cascade-hint {
+  display: block;
+  font-size: 11px;
+  line-height: 1.45;
+  margin-bottom: 8px;
+}
+
+.agent-goal-cascade-actions {
+  width: 100%;
+}
+
+.agent-goal-cascade-textarea {
+  margin-top: 2px;
 }

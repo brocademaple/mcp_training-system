@@ -7,6 +7,7 @@ export interface AgentChatMessage {
     | 'goal_input'
     | 'task_confirm'
     | 'data_prepare'
+    | 'plan_prepare'
     | 'plan_confirm'
     | 'train_execute'
     | 'eval_confirm'
@@ -23,6 +24,71 @@ export interface McpEvent {
   status: 'success' | 'running' | 'failed';
   timestamp: string;
 }
+
+/** 训练执行工作台 · MCP 消息表（独立展示，不混入主聊天流） */
+export type TrainExecutionMcpStatus = 'success' | 'running' | 'failed' | 'pending';
+
+export interface TrainExecutionMcpRow {
+  id: string;
+  time: string;
+  agent: string;
+  mcpServer: string;
+  action: string;
+  status: TrainExecutionMcpStatus;
+  outputSummary: string;
+}
+
+/** MCP 行展示用：与编排中的多 Agent 角色对齐 */
+const MCP_SERVER_AGENT: Record<McpEvent['server'], string> = {
+  registry: 'Planning Agent',
+  data: 'Data Agent',
+  training: 'Training Executor',
+  evaluation: 'Evaluation Agent',
+  trace: 'Orchestrator',
+};
+
+export function mcpEventToTrainExecutionRow(e: McpEvent): TrainExecutionMcpRow {
+  return {
+    id: e.id,
+    time: e.timestamp,
+    agent: MCP_SERVER_AGENT[e.server] ?? 'Orchestrator',
+    mcpServer: e.server,
+    action: e.tool,
+    status: e.status,
+    outputSummary: e.summary,
+  };
+}
+
+/** 训练启动后的示例 MCP 流（可与真实 mcpEvents 合并展示） */
+export const MOCK_TRAIN_EXECUTION_MCP_STREAM: TrainExecutionMcpRow[] = [
+  {
+    id: 'mock_tx_1',
+    time: '—',
+    agent: 'Orchestrator',
+    mcpServer: 'trace',
+    action: 'run.append_event',
+    status: 'success',
+    outputSummary: '记录阶段 train.start（示例）',
+  },
+  {
+    id: 'mock_tx_2',
+    time: '—',
+    agent: 'Training Executor',
+    mcpServer: 'training',
+    action: 'trainer.prepare_env',
+    status: 'success',
+    outputSummary: '校验 CUDA / 依赖与输出目录（示例）',
+  },
+  {
+    id: 'mock_tx_3',
+    time: '—',
+    agent: 'Training Executor',
+    mcpServer: 'training',
+    action: 'trainer.train_step',
+    status: 'running',
+    outputSummary: 'step 120/800 · loss 下降中（示例）',
+  },
+];
 
 export interface SampleScenario {
   id: string;
@@ -51,7 +117,7 @@ export const SAMPLE_AGENT_CONVERSATION: AgentChatMessage[] = [
     role: 'agent',
     stage: 'task_confirm',
     content:
-      '我已解析目标：任务=summarization / 文本摘要，领域=legal / 法律，模态=text。建议指标：rougeL、bert_score。请确认任务定义。',
+      '【Planning Agent】我已解析目标：任务=summarization / 文本摘要，领域=legal / 法律，模态=text。建议指标：rougeL、bert_score。请确认任务定义。',
     timestamp: '2026-04-01 10:00:06',
   },
   {
