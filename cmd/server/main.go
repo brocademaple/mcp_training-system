@@ -169,6 +169,7 @@ func main() {
 		api.GET("/datasets", datasetHandler.GetDatasets)
 		api.GET("/datasets/:id", datasetHandler.GetDatasetDetail)
 		api.GET("/datasets/:id/preview", datasetHandler.GetDatasetPreview)
+		api.POST("/datasets/:id/analyze", datasetHandler.AnalyzeDataset)
 		api.POST("/datasets/:id/retry-clean", datasetHandler.RetryCleanDataset)
 		api.POST("/datasets/:id/split", datasetHandler.SplitDataset)
 		api.PATCH("/datasets/:id", datasetHandler.UpdateDatasetName)

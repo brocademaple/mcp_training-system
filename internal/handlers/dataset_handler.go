@@ -318,6 +318,32 @@ func (h *DatasetHandler) GetDatasetPreview(c *gin.Context) {
 	})
 }
 
+// AnalyzeDataset 调用 Data Agent 对「已清洗」数据集做统计分析（Python analyze_data.py）
+// POST /api/v1/datasets/:id/analyze
+func (h *DatasetHandler) AnalyzeDataset(c *gin.Context) {
+	id := c.Param("id")
+	var datasetID int
+	if _, err := fmt.Sscanf(id, "%d", &datasetID); err != nil {
+		c.JSON(400, gin.H{"code": 400, "message": "Invalid dataset id"})
+		return
+	}
+	dataset, err := models.GetDatasetByID(h.db, datasetID)
+	if err != nil || dataset == nil {
+		c.JSON(404, gin.H{"code": 404, "message": "Dataset not found"})
+		return
+	}
+	if dataset.Status != "ready" {
+		c.JSON(400, gin.H{"code": 400, "message": "仅支持对已清洗完成（status=ready）的数据集进行分析，请先完成上传与清洗"})
+		return
+	}
+	result, err := h.dataAgent.AnalyzeData(datasetID)
+	if err != nil {
+		c.JSON(400, gin.H{"code": 400, "message": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"code": 200, "message": "success", "data": result})
+}
+
 // RetryCleanDataset re-runs data cleaning for a dataset that is in "error" state.
 // POST /datasets/:id/retry-clean
 func (h *DatasetHandler) RetryCleanDataset(c *gin.Context) {

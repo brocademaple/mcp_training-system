@@ -72,6 +72,7 @@ flowchart TB
 ## 文档索引
 
 规范、协作方式与全项目文档导航见 **[docs/SPEC_CODING.md](docs/SPEC_CODING.md)**（推荐 AI 协作者与人类开发者从此入口查阅 PRD、API、部署与 2.0 规划等）。  
+**Data Agent HTTP 接口与阿里云部署说明**见 **[docs/DATA_AGENT_API.md](docs/DATA_AGENT_API.md)**。  
 > 说明：`docs/LEARNING.md` 为**本地学习笔记**（默认不入库）；你可自行创建并维护。
 
 ## 快速开始（推荐：本机运行，训练使用本机 GPU）

@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Button,
   Card,
+  Collapse,
   Descriptions,
   Divider,
   Drawer,
@@ -45,7 +46,6 @@ import { DEFAULT_BASE_MODEL } from '@/constants/baseModels';
 import type { Dataset, DatasetSpec, PlanSpec, RunCurrentState, RunSpec, TaskSpec } from '@/types';
 import {
   MOCK_TRAIN_EXECUTION_MCP_STREAM,
-  SAMPLE_AGENT_CONVERSATION,
   SAMPLE_MCP_EVENTS,
   SAMPLE_SCENARIOS,
   mcpEventToTrainExecutionRow,
@@ -378,6 +378,10 @@ const AgentCanvas: React.FC = () => {
   const [autoTagLoading, setAutoTagLoading] = useState(false);
   const [state, setState] = useState<FlowState>('draft');
 
+  // 中间「编排对话」上下分栏：拖拽调整对话流与输入确认区高度
+  const [chatSplitterTop, setChatSplitterTop] = useState(360);
+  const chatSplitterRef = useRef<HTMLDivElement | null>(null);
+
   const [intentText, setIntentText] = useState('');
   const [uiSelectedTags, setUiSelectedTags] = useState<string[]>([]);
   const [modalityHint, setModalityHint] = useState('text');
@@ -410,8 +414,9 @@ const AgentCanvas: React.FC = () => {
   const [runSpec, setRunSpec] = useState<RunSpec | null>(null);
   const [pipeline, setPipeline] = useState<any>(null);
   const [runLogs, setRunLogs] = useState<string[]>([]);
-  const [chatMessages, setChatMessages] = useState<AgentChatMessage[]>(SAMPLE_AGENT_CONVERSATION.slice(0, 2));
-  const [mcpEvents, setMcpEvents] = useState<McpEvent[]>(SAMPLE_MCP_EVENTS.slice(0, 2));
+  // 默认从“空对话/空 MCP”开始，避免 sample 场景固定 respond 语句影响真实效果展示
+  const [chatMessages, setChatMessages] = useState<AgentChatMessage[]>([]);
+  const [mcpEvents, setMcpEvents] = useState<McpEvent[]>([]);
   const [mcpDrawerOpen, setMcpDrawerOpen] = useState(false);
   const [evalConfirmed, setEvalConfirmed] = useState(false);
   const [flowMode, setFlowMode] = useState<FlowMode | null>(null);
@@ -456,7 +461,7 @@ const AgentCanvas: React.FC = () => {
       updatedAt: new Date().toISOString(),
     },
   ]);
-  const [activeSessionId, setActiveSessionId] = useState('scenario_finance_full');
+  const [activeSessionId, setActiveSessionId] = useState('live_new');
   const [runListRenameOpen, setRunListRenameOpen] = useState(false);
   const [runListRenameId, setRunListRenameId] = useState<string | null>(null);
   const [runListRenameTitle, setRunListRenameTitle] = useState('');
@@ -583,6 +588,35 @@ const AgentCanvas: React.FC = () => {
     goStep(target);
   };
 
+  const onChatSplitterMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const container = chatSplitterRef.current;
+    if (!container) return;
+
+    const rect = container.getBoundingClientRect();
+    const containerHeight = rect.height;
+    const startY = e.clientY;
+    const startTop = chatSplitterTop;
+
+    const minTop = 220;
+    const minBottom = 220;
+    const maxTop = Math.max(minTop, containerHeight - minBottom);
+
+    const onMove = (ev: MouseEvent) => {
+      const delta = ev.clientY - startY;
+      const next = Math.max(minTop, Math.min(maxTop, startTop + delta));
+      setChatSplitterTop(next);
+    };
+
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
   const appendSingleTagToIntent = (
     tag: string,
     groupTags: string[],
@@ -613,6 +647,80 @@ const AgentCanvas: React.FC = () => {
 
   const allDomainTags = useMemo(() => [...DOMAIN_TAGS, ...customDomainTags], [customDomainTags]);
 
+  /** 根据当前描述 / 解析结果对模板做简单排序，优先展示更相关的推荐 */
+  const recommendedGoalSnippets = useMemo(() => {
+    const t = `${intentText} ${selectedDomainTag || ''} ${uiSelectedTags.join(' ')}`;
+    const rank = (s: (typeof GOAL_INTENT_SNIPPETS)[number]) => {
+      let score = 0;
+      if (/金融|财报|情感/.test(t) && s.key === 'fin_cls') score += 5;
+      if (/教育|知识点/.test(t) && s.key === 'edu_cls') score += 5;
+      if (/法律|合同/.test(t) && s.key === 'legal_sum') score += 5;
+      if (/医学|医疗|实体|NER/.test(t) && s.key === 'med_ner') score += 5;
+      if (/商品|检索|排序|电商/.test(t) && s.key === 'ecom_rerank') score += 5;
+      if (taskDraft?.domain === 'finance' && s.key === 'fin_cls') score += 3;
+      if (taskDraft?.domain === 'education' && s.key === 'edu_cls') score += 3;
+      if (taskDraft?.domain === 'legal' && s.key === 'legal_sum') score += 3;
+      if (taskDraft?.domain === 'medical' && s.key === 'med_ner') score += 3;
+      if (taskDraft?.domain === 'ecommerce' && s.key === 'ecom_rerank') score += 3;
+      return score;
+    };
+    return [...GOAL_INTENT_SNIPPETS].sort((a, b) => rank(b) - rank(a));
+  }, [intentText, selectedDomainTag, uiSelectedTags, taskDraft]);
+
+  const [goalManualOpen, setGoalManualOpen] = useState(false);
+
+  const goalParseChipRows = (
+    <>
+      <div className="agent-goal-parse-row">
+        <Typography.Text className="agent-goal-parse-label">应用领域</Typography.Text>
+        <Space wrap className="agent-goal-parse-chips">
+          {allDomainTags.map((x) => (
+            <Button
+              key={x}
+              size="small"
+              type={selectedDomainTag === x ? 'primary' : 'default'}
+              onClick={() => appendSingleTagToIntent(x, allDomainTags, setSelectedDomainTag)}
+            >
+              {x}
+            </Button>
+          ))}
+        </Space>
+      </div>
+      <div className="agent-goal-parse-row">
+        <Typography.Text className="agent-goal-parse-label">你想让模型完成什么任务</Typography.Text>
+        <Space wrap className="agent-goal-parse-chips">
+          {GOAL_TASK_CHIPS.map((x) => (
+            <Button
+              key={x}
+              size="small"
+              type={uiSelectedTags.includes(x) ? 'primary' : 'default'}
+              onClick={() => appendSingleTagToIntent(x, GOAL_TASK_CHIPS)}
+            >
+              {x}
+            </Button>
+          ))}
+        </Space>
+      </div>
+      <div className="agent-goal-parse-row">
+        <Typography.Text className="agent-goal-parse-label">输入数据形式</Typography.Text>
+        <Space wrap className="agent-goal-parse-chips">
+          {MODALITY_TAGS.map((x) => (
+            <Button
+              key={x}
+              size="small"
+              type={uiSelectedTags.includes(x) ? 'primary' : 'default'}
+              disabled={x === '图文'}
+              onClick={() => x !== '图文' && appendSingleTagToIntent(x, MODALITY_TAGS)}
+            >
+              {x}
+              {x === '图文' ? '（未开放）' : ''}
+            </Button>
+          ))}
+        </Space>
+      </div>
+    </>
+  );
+
   const clearSelectedPromptOptions = () => {
     setSelectedDomainTag(undefined);
     setUiSelectedTags([]);
@@ -641,6 +749,7 @@ const AgentCanvas: React.FC = () => {
     setImportUrlName('');
     setImportUrlValue('');
     setRealUploadDatasetName('');
+    setGoalManualOpen(false);
   };
 
   const restartFromStep = (target: number) => {
@@ -870,26 +979,68 @@ const AgentCanvas: React.FC = () => {
         const res = await axios.get(`${API_BASE}/pipelines/${pipeline.id}`);
         const next = res.data;
         setPipeline(next);
-        if (next.status === 'queued') setState('training_queued');
-        if (next.status === 'running') {
-          if (next.current_step === 'evaluate') {
-            setState('training_succeeded');
-            setState('evaluating');
-          } else {
-            setState('training_running');
-          }
+        const orchState = `${next?.orchestration_state || ''}`.toUpperCase();
+
+        if (next.status === 'completed') {
+          setState('done');
+          setStep(stepByState('done'));
+          return;
         }
-        if (next.status === 'completed') setState('done');
         if (next.status === 'failed') {
-          if (state === 'evaluating') setState('training_succeeded');
-          else setState('plan_frozen');
+          setState('plan_frozen');
+          setStep(stepByState('plan_frozen'));
+          return;
+        }
+
+        // 优先使用后端回填的 orchestration_state，以确保顺序展示：Plan -> Data -> Training -> Evaluation
+        switch (orchState) {
+          case 'DATA_VALIDATED':
+            setState('data_ready');
+            setStep(stepByState('data_ready'));
+            return;
+          case 'TRAINING_RUNNING':
+            setState('training_running');
+            setStep(stepByState('training_running'));
+            return;
+          case 'TRAINING_FINISHED':
+            setState('training_succeeded');
+            setStep(stepByState('training_succeeded'));
+            return;
+          case 'EVALUATING':
+            setState('evaluating');
+            setStep(stepByState('evaluating'));
+            return;
+          case 'COMPLETED':
+            setState('done');
+            setStep(stepByState('done'));
+            return;
+          default:
+            break;
+        }
+
+        // fallback：老字段 current_step / status 映射（当 orchestration_state 为空时）
+        if (next.current_step === 'clean_data') {
+          setState('data_validating');
+          setStep(stepByState('data_validating'));
+          return;
+        }
+        if (next.current_step === 'train') {
+          // 训练未开始之前 job_id 可能还未就绪，这里先显示 training_running
+          setState('training_running');
+          setStep(stepByState('training_running'));
+          return;
+        }
+        if (next.current_step === 'evaluate') {
+          setState('evaluating');
+          setStep(stepByState('evaluating'));
+          return;
         }
       } catch {
         // ignore poll errors
       }
     }, 2500);
     return () => clearInterval(timer);
-  }, [pipeline, state]);
+  }, [pipeline]);
 
   useEffect(() => {
     if (!pipeline?.id) return;
@@ -1282,22 +1433,13 @@ const AgentCanvas: React.FC = () => {
         run_spec: runSpec,
       };
 
-      setState('training_queued');
+      // MCP 流程内会先跑 Data Agent（clean_data），再进入 Training/Evaluation
+      setState('data_validating');
       const res = await axios.post(`${API_BASE}/pipelines`, payload);
       setPipeline(res.data);
-      setState('training_running');
-      setMcpEvents((prev) => [
-        ...prev,
-        {
-          id: `mcp_${Date.now()}`,
-          server: 'training',
-          tool: 'trainer.start_job',
-          summary: `提交训练任务成功，pipeline_id=${res.data?.id || '-'}`,
-          status: 'running',
-          timestamp: new Date().toLocaleTimeString('zh-CN'),
-        },
-      ]);
-      message.success('训练已启动');
+      // 后续状态由轮询 pipeline.orchestration_state 驱动
+      setState('data_validating');
+      message.success('流程已启动：开始 Data Agent 数据清洗');
     } catch (e: any) {
       setState('plan_frozen');
       message.error(e?.message || '启动失败');
@@ -1350,7 +1492,7 @@ const AgentCanvas: React.FC = () => {
 
   const sendChat = async () => {
     const text = intentText.trim();
-    if (!text) return message.warning('请输入内容');
+    if (!text) return message.warning('请先输入训练目标描述');
     if (!flowModeConfirmed) {
       message.warning('请先在对话区上方确认任务范围（全流程 / 仅训练 / 仅评估）');
       return;
@@ -1615,34 +1757,41 @@ const AgentCanvas: React.FC = () => {
                 </div>
               )}
             >
-              <div className="agent-proto-chat-stream agent-orch-chat-stream">
-                <List
-                  dataSource={chatMessages}
-                  renderItem={(m) => (
-                    <List.Item className={`agent-proto-chat-row ${m.role === 'user' ? 'agent-proto-chat-row-user' : 'agent-proto-chat-row-agent'}`}>
-                      <div className={`agent-proto-bubble ${m.role === 'agent' ? 'agent-proto-bubble-agent' : 'agent-proto-bubble-user'}`}>
-                        <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 4 }}>
-                          {m.role === 'agent' ? (
-                            <Space size={6} align="center" wrap>
-                              <span>来自</span>
-                              <OrchAgentTag agentKey={chatStageToAgentKey(m.stage)} />
-                              <span>· {m.timestamp}</span>
-                            </Space>
-                          ) : m.role === 'user' ? (
-                            <>你 · {m.timestamp}</>
-                          ) : (
-                            <>系统 · {m.timestamp}</>
-                          )}
-                        </div>
-                        <div>{m.content}</div>
-                      </div>
-                    </List.Item>
-                  )}
-                />
-              </div>
-              {!isLocked ? (
-                <>
-                  <Divider style={{ margin: '12px 0' }} />
+              <div className="agent-orch-chat-splitter" ref={chatSplitterRef}>
+                  <div className="agent-proto-chat-stream agent-orch-chat-stream" style={{ height: chatSplitterTop }}>
+                    <List
+                      dataSource={chatMessages}
+                      renderItem={(m) => (
+                        <List.Item
+                          className={`agent-proto-chat-row ${m.role === 'user' ? 'agent-proto-chat-row-user' : 'agent-proto-chat-row-agent'}`}
+                        >
+                          <div
+                            className={['agent-proto-bubble', m.role === 'agent' ? 'agent-proto-bubble-agent' : 'agent-proto-bubble-user'].join(
+                              ' '
+                            )}
+                          >
+                            <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 4 }}>
+                              {m.role === 'agent' ? (
+                                <Space size={6} align="center" wrap>
+                                  <span>来自</span>
+                                  <OrchAgentTag agentKey={chatStageToAgentKey(m.stage)} />
+                                  <span>· {m.timestamp}</span>
+                                </Space>
+                              ) : m.role === 'user' ? (
+                                <>你 · {m.timestamp}</>
+                              ) : (
+                                <>系统 · {m.timestamp}</>
+                              )}
+                            </div>
+                            <div>{m.content}</div>
+                          </div>
+                        </List.Item>
+                      )}
+                    />
+                  </div>
+                <div className="agent-orch-chat-splitter-gutter" onMouseDown={onChatSplitterMouseDown} />
+                {!isLocked ? (
+                  <div className="agent-orch-chat-phase-stack">
                   {!isDataPrepPhase && !flowModeConfirmed && (
                     <Card
                       size="small"
@@ -1688,138 +1837,109 @@ const AgentCanvas: React.FC = () => {
                       style={{ marginTop: 12 }}
                     >
                       <Typography.Paragraph type="secondary" style={{ marginBottom: 12, fontSize: 12 }}>
-                        自上而下逐级选择（流程图式）；任一步可回看修改，文本框可自由编辑，阶段 2 前可反复解析。
+                        先写清目标，Planning Agent 会解析出领域、任务与数据形式；解析结果可手动修正；确认后再进入「阶段 2」对齐流程。
                       </Typography.Paragraph>
-                      <div className="agent-goal-cascade">
-                        <div className="agent-goal-cascade-row">
-                          <div className="agent-goal-cascade-rail" aria-hidden>
-                            <span className="agent-goal-cascade-dot">1</span>
-                            <span className="agent-goal-cascade-line" />
-                          </div>
-                          <div className="agent-goal-cascade-panel">
-                            <Typography.Text strong className="agent-goal-cascade-title">
-                              领域
-                            </Typography.Text>
-                            <Typography.Text type="secondary" className="agent-goal-cascade-hint">
-                              行业或通用场景，写入目标描述供 Planning Agent 审查
-                            </Typography.Text>
-                            <Space wrap className="agent-goal-cascade-actions">
-                              {allDomainTags.map((x) => (
-                                <Button
-                                  key={x}
-                                  size="small"
-                                  type={selectedDomainTag === x ? 'primary' : 'default'}
-                                  onClick={() => appendSingleTagToIntent(x, allDomainTags, setSelectedDomainTag)}
-                                >
-                                  {x}
-                                </Button>
-                              ))}
-                            </Space>
-                          </div>
-                        </div>
-                        <div className="agent-goal-cascade-row">
-                          <div className="agent-goal-cascade-rail" aria-hidden>
-                            <span className="agent-goal-cascade-dot">2</span>
-                            <span className="agent-goal-cascade-line" />
-                          </div>
-                          <div className="agent-goal-cascade-panel">
-                            <Typography.Text strong className="agent-goal-cascade-title">
-                              任务类型
-                            </Typography.Text>
-                            <Typography.Text type="secondary" className="agent-goal-cascade-hint">
-                              分类、生成、提取等与模型形态相关的目标
-                            </Typography.Text>
-                            <Space wrap className="agent-goal-cascade-actions">
-                              {GOAL_TASK_CHIPS.map((x) => (
-                                <Button key={x} size="small" onClick={() => appendSingleTagToIntent(x, GOAL_TASK_CHIPS)}>
-                                  {x}
-                                </Button>
-                              ))}
-                            </Space>
-                          </div>
-                        </div>
-                        <div className="agent-goal-cascade-row">
-                          <div className="agent-goal-cascade-rail" aria-hidden>
-                            <span className="agent-goal-cascade-dot">3</span>
-                            <span className="agent-goal-cascade-line" />
-                          </div>
-                          <div className="agent-goal-cascade-panel">
-                            <Typography.Text strong className="agent-goal-cascade-title">
-                              模态
-                            </Typography.Text>
-                            <Typography.Text type="secondary" className="agent-goal-cascade-hint">
-                              当前以文本为主；图文能力未开放时仍选文本
-                            </Typography.Text>
-                            <Space wrap className="agent-goal-cascade-actions">
-                              {MODALITY_TAGS.map((x) => (
-                                <Button
-                                  key={x}
-                                  size="small"
-                                  type={uiSelectedTags.includes(x) ? 'primary' : 'default'}
-                                  disabled={x === '图文'}
-                                  onClick={() => x !== '图文' && appendSingleTagToIntent(x, MODALITY_TAGS)}
-                                >
-                                  {x}
-                                  {x === '图文' ? '（未开放）' : ''}
-                                </Button>
-                              ))}
-                            </Space>
-                          </div>
-                        </div>
-                        <div className="agent-goal-cascade-row">
-                          <div className="agent-goal-cascade-rail" aria-hidden>
-                            <span className="agent-goal-cascade-dot">4</span>
-                            <span className="agent-goal-cascade-line" />
-                          </div>
-                          <div className="agent-goal-cascade-panel">
-                            <Typography.Text strong className="agent-goal-cascade-title">
-                              快捷描述模板
-                            </Typography.Text>
-                            <Typography.Text type="secondary" className="agent-goal-cascade-hint">
-                              一键追加典型段落，可在下一步继续改
-                            </Typography.Text>
-                            <Space wrap className="agent-goal-cascade-actions">
-                              {GOAL_INTENT_SNIPPETS.map((s) => (
-                                <Button key={s.key} size="small" type="dashed" onClick={() => appendGoalSnippet(s.text)}>
-                                  {s.label}
-                                </Button>
-                              ))}
-                            </Space>
-                          </div>
-                        </div>
-                        <div className="agent-goal-cascade-row agent-goal-cascade-row--last">
-                          <div className="agent-goal-cascade-rail" aria-hidden>
-                            <span className="agent-goal-cascade-dot">5</span>
-                          </div>
-                          <div className="agent-goal-cascade-panel">
-                            <Typography.Text strong className="agent-goal-cascade-title">
-                              目标描述（可编辑）
-                            </Typography.Text>
-                            <Typography.Text type="secondary" className="agent-goal-cascade-hint">
-                              汇总上述选择并补充约束；可直接以本框为主输入
-                            </Typography.Text>
-                            <Input.TextArea
-                              rows={4}
-                              className="agent-goal-cascade-textarea"
-                              value={intentText}
-                              onChange={(e) => setIntentText(e.target.value)}
-                              placeholder="描述训练/评估目标、业务场景与约束；也可仅通过上方选项与模板组合后再微调。"
-                            />
-                            <Space wrap className="agent-goal-cascade-actions" style={{ marginTop: 8 }}>
-                              <Button type="primary" size="small" loading={loading} onClick={() => void sendChat()}>
-                                {taskDraft && state === 'task_parsed' ? '重新解析目标' : '发送并解析'}
-                              </Button>
+                      <div className="agent-goal-panel">
+                        <div className="agent-goal-panel-section agent-goal-panel-section--primary">
+                          <Typography.Title level={5} className="agent-goal-panel-heading">
+                            请用一句话描述你的训练目标
+                          </Typography.Title>
+                            <div className="agent-goal-primary-input-row">
+                              <Input.TextArea
+                                rows={3}
+                                className="agent-goal-primary-textarea"
+                                value={intentText}
+                                onChange={(e) => setIntentText(e.target.value)}
+                                placeholder="例：我想训练一个用于法律合同条款分类的中文文本模型"
+                                showCount
+                                maxLength={2000}
+                              />
                               <Button
-                                type="link"
                                 size="small"
+                                type="default"
+                                className="agent-goal-intent-btn"
                                 loading={autoTagLoading}
-                                style={{ paddingLeft: 0 }}
+                                disabled={isLocked || !intentText.trim()}
                                 onClick={() => void autoDetectOptions()}
                               >
-                                Planning Agent 自动识别标签（写入目标描述）
+                                意图识别
                               </Button>
+                            </div>
+                        </div>
+
+                        <Card
+                          size="small"
+                          className="agent-goal-parse-card"
+                          title={(
+                            <Space size={8}>
+                              <RobotOutlined />
+                              <span>Planning Agent 识别结果</span>
+                              {taskDraft && state === 'task_parsed' ? <Tag color="processing">可编辑</Tag> : null}
                             </Space>
-                          </div>
+                          )}
+                        >
+                          <Typography.Paragraph type="secondary" style={{ marginBottom: 10, fontSize: 12 }}>
+                            {taskDraft && state === 'task_parsed'
+                              ? '以下为解析草稿，可直接点选标签修正；若改动较大，可再次点击「生成任务配置」重新解析。'
+                              : '尚未解析或解析结果未就绪。可先点击「自动识别」；有目标描述时标签会直接展示在下方；无描述时可展开「手动配置」点选标签。'}
+                          </Typography.Paragraph>
+                          {intentText.trim() ? (
+                            goalParseChipRows
+                          ) : (
+                            <Collapse
+                              ghost
+                              bordered={false}
+                              className="agent-goal-manual-collapse"
+                              activeKey={goalManualOpen ? ['manual'] : []}
+                              onChange={(keys) => {
+                                const arr = Array.isArray(keys) ? keys : [keys];
+                                setGoalManualOpen(arr.includes('manual'));
+                              }}
+                              items={[
+                                {
+                                  key: 'manual',
+                                  label: (
+                                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                      手动配置（无目标描述时展开）
+                                    </Typography.Text>
+                                  ),
+                                  children: (
+                                    <>
+                                      <Typography.Paragraph type="secondary" style={{ marginBottom: 10, fontSize: 12 }}>
+                                        点选标签后，可配合「自动识别」写入描述，或自行在上方输入框补充自然语言后再解析。
+                                      </Typography.Paragraph>
+                                      {goalParseChipRows}
+                                    </>
+                                  ),
+                                },
+                              ]}
+                            />
+                          )}
+                        </Card>
+
+                        <div className="agent-goal-panel-section agent-goal-panel-section--templates">
+                          <Typography.Text type="secondary" className="agent-goal-templates-title">
+                            推荐描述模板（点击写入目标描述）
+                          </Typography.Text>
+                          <Space wrap className="agent-goal-cascade-actions">
+                            {recommendedGoalSnippets.map((s) => (
+                              <Button
+                                key={s.key}
+                                size="small"
+                                type="default"
+                                className="agent-goal-template-btn"
+                                onClick={() => appendGoalSnippet(s.text)}
+                              >
+                                {s.label}
+                              </Button>
+                            ))}
+                          </Space>
+                        </div>
+
+                        <div className="agent-goal-panel-actions">
+                          <Button type="primary" size="middle" loading={loading} onClick={() => void sendChat()}>
+                            {taskDraft && state === 'task_parsed' ? '生成任务配置' : '解析并继续'}
+                          </Button>
                         </div>
                       </div>
                     </Card>
@@ -1838,9 +1958,9 @@ const AgentCanvas: React.FC = () => {
                       style={{ marginTop: 12 }}
                     >
                       <Typography.Paragraph type="secondary" style={{ marginBottom: 10, fontSize: 12 }}>
-                        点选芯片确认领域、模态与任务类型；可与 Planner 初判不一致。
+                        点选芯片确认应用领域、输入数据形式与任务类型；可与 Planner 初判不一致。
                       </Typography.Paragraph>
-                      <Typography.Text strong style={{ fontSize: 12 }}>领域</Typography.Text>
+                      <Typography.Text strong style={{ fontSize: 12 }}>应用领域</Typography.Text>
                       <div style={{ marginTop: 6, marginBottom: 10 }}>
                         <Space wrap>
                           {['金融', '医疗', '法律', '电商', '教育', '通用'].map((x) => (
@@ -1855,7 +1975,7 @@ const AgentCanvas: React.FC = () => {
                           ))}
                         </Space>
                       </div>
-                      <Typography.Text strong style={{ fontSize: 12 }}>模态</Typography.Text>
+                      <Typography.Text strong style={{ fontSize: 12 }}>输入数据形式</Typography.Text>
                       <div style={{ marginTop: 6, marginBottom: 10 }}>
                         <Space wrap>
                           {MODALITY_TAGS.map((x) => (
@@ -1871,7 +1991,7 @@ const AgentCanvas: React.FC = () => {
                           ))}
                         </Space>
                       </div>
-                      <Typography.Text strong style={{ fontSize: 12 }}>任务类型</Typography.Text>
+                      <Typography.Text strong style={{ fontSize: 12 }}>你想让模型完成什么任务</Typography.Text>
                       <div style={{ marginTop: 6, marginBottom: 10 }}>
                         <Space wrap>
                           {GOAL_TASK_CHIPS.map((x) => (
@@ -2053,8 +2173,9 @@ const AgentCanvas: React.FC = () => {
                       />
                     </Card>
                   )}
-                </>
+                </div>
               ) : null}
+              </div>
             </Card>
           </div>
 
@@ -2073,6 +2194,38 @@ const AgentCanvas: React.FC = () => {
               )}
             >
               <div className="agent-orch-workspace-body">
+              {!(step === 4 && isTrainingExecutionView) && (
+                <>
+                  <Divider style={{ margin: '16px 0' }} />
+                  <Button type="link" style={{ paddingLeft: 0 }} onClick={() => setMcpDrawerOpen(true)}>
+                    打开 MCP 侧信道（多 Agent）
+                  </Button>
+                  <Typography.Text strong style={{ display: 'block', marginTop: 12, marginBottom: 8 }}>
+                    运行时间线
+                  </Typography.Text>
+                  <Timeline
+                    items={[
+                      { color: taskDraft ? 'green' : 'gray', children: 'Planning：任务已解析（规划完成）' },
+                      {
+                        color: state === 'data_ready' || !!pipeline ? 'green' : 'gray',
+                        children: 'Data Agent：数据已就绪（校验通过）',
+                      },
+                      {
+                        color: pipeline?.current_step === 'train' || state === 'done' ? 'blue' : 'gray',
+                        children: 'Training Executor：训练已启动',
+                      },
+                      {
+                        color: pipeline?.model_id ? 'blue' : 'gray',
+                        children: 'Training Executor：模型检查点已保存',
+                      },
+                      { color: state === 'done' ? 'green' : 'gray', children: 'Evaluation Agent：评估已完成' },
+                    ]}
+                  />
+                  {state === 'done' && (
+                    <Alert type="success" icon={<CheckCircleOutlined />} message="已完成" style={{ marginTop: 8 }} />
+                  )}
+                </>
+              )}
               {(step === 0 || step === 1) && ['draft', 'intent_submitted', 'task_parsed'].includes(state) && (
                 <Card size="small" title="编排摘要（只读）" style={{ marginBottom: 12 }} className="agent-orch-summary-card">
                   <Descriptions column={1} size="small" bordered>
@@ -2753,23 +2906,53 @@ const AgentCanvas: React.FC = () => {
                                   items={[
                                     {
                                       color: taskDraft ? 'green' : 'gray',
-                                      children: 'Planning：任务已解析（规划完成）',
+                                      children: taskDraft ? 'Planning：任务解析完成' : 'Planning：等待解析',
                                     },
                                     {
-                                      color: state === 'data_ready' || !!pipeline ? 'green' : 'gray',
-                                      children: 'Data Agent：数据已就绪（校验通过）',
+                                      color:
+                                        state === 'data_ready' || pipeline?.orchestration_state === 'DATA_VALIDATED'
+                                          ? 'green'
+                                          : state === 'data_validating' || pipeline?.current_step === 'clean_data'
+                                            ? 'blue'
+                                            : 'gray',
+                                      children:
+                                        state === 'data_ready' || pipeline?.orchestration_state === 'DATA_VALIDATED'
+                                          ? 'Data Agent：数据就绪（清洗完成）'
+                                          : state === 'data_validating' || pipeline?.current_step === 'clean_data'
+                                            ? 'Data Agent：数据清洗中'
+                                            : 'Data Agent：等待清洗',
                                     },
                                     {
-                                      color: pipeline?.current_step === 'train' || state === 'done' ? 'blue' : 'gray',
-                                      children: 'Training Executor：训练已启动',
+                                      color:
+                                        state === 'training_succeeded'
+                                          ? 'green'
+                                          : state === 'training_running' || pipeline?.current_step === 'train'
+                                            ? 'blue'
+                                            : 'gray',
+                                      children:
+                                        state === 'training_succeeded'
+                                          ? 'Training Executor：训练完成'
+                                          : state === 'training_running' || pipeline?.current_step === 'train'
+                                            ? 'Training Executor：训练中'
+                                            : 'Training Executor：等待训练',
                                     },
                                     {
                                       color: pipeline?.model_id ? 'blue' : 'gray',
-                                      children: 'Training Executor：模型检查点已保存',
+                                      children: pipeline?.model_id ? 'Training Executor：模型检查点已保存' : 'Training Executor：模型检查点（待生成）',
                                     },
                                     {
-                                      color: state === 'done' ? 'green' : 'gray',
-                                      children: 'Evaluation Agent：评估已完成',
+                                      color:
+                                        state === 'done' || pipeline?.orchestration_state === 'COMPLETED'
+                                          ? 'green'
+                                          : state === 'evaluating' || pipeline?.current_step === 'evaluate'
+                                            ? 'blue'
+                                            : 'gray',
+                                      children:
+                                        state === 'done' || pipeline?.orchestration_state === 'COMPLETED'
+                                          ? 'Evaluation Agent：评估完成'
+                                          : state === 'evaluating' || pipeline?.current_step === 'evaluate'
+                                            ? 'Evaluation Agent：评估中'
+                                            : 'Evaluation Agent：等待评估',
                                     },
                                   ]}
                                 />
@@ -3015,11 +3198,56 @@ const AgentCanvas: React.FC = () => {
                     <Card size="small" title="Timeline（Run 全链路）">
                       <Timeline
                         items={[
-                          { color: taskDraft ? 'green' : 'gray', children: 'Planning：任务已解析（规划完成）' },
-                          { color: state === 'data_ready' ? 'green' : 'gray', children: 'Data Agent：数据已就绪（校验通过）' },
-                          { color: 'gray', children: 'Training Executor：训练已启动（待触发）' },
-                          { color: 'gray', children: 'Training Executor：模型检查点' },
-                          { color: 'gray', children: 'Evaluation Agent：评估' },
+                          {
+                            color: taskDraft ? 'green' : 'gray',
+                            children: taskDraft ? 'Planning：任务解析完成' : 'Planning：等待解析',
+                          },
+                          {
+                            color:
+                              state === 'data_ready' || pipeline?.orchestration_state === 'DATA_VALIDATED'
+                                ? 'green'
+                                : state === 'data_validating' || pipeline?.current_step === 'clean_data'
+                                  ? 'blue'
+                                  : 'gray',
+                            children:
+                              state === 'data_ready' || pipeline?.orchestration_state === 'DATA_VALIDATED'
+                                ? 'Data Agent：数据就绪（清洗完成）'
+                                : state === 'data_validating' || pipeline?.current_step === 'clean_data'
+                                  ? 'Data Agent：数据清洗中'
+                                  : 'Data Agent：等待清洗',
+                          },
+                          {
+                            color:
+                              state === 'training_succeeded'
+                                ? 'green'
+                                : state === 'training_running' || pipeline?.current_step === 'train'
+                                  ? 'blue'
+                                  : 'gray',
+                            children:
+                              state === 'training_succeeded'
+                                ? 'Training Executor：训练完成'
+                                : state === 'training_running' || pipeline?.current_step === 'train'
+                                  ? 'Training Executor：训练中'
+                                  : 'Training Executor：等待训练',
+                          },
+                          {
+                            color: pipeline?.model_id ? 'blue' : 'gray',
+                            children: pipeline?.model_id ? 'Training Executor：模型检查点已保存' : 'Training Executor：模型检查点（待生成）',
+                          },
+                          {
+                            color:
+                              state === 'done' || pipeline?.orchestration_state === 'COMPLETED'
+                                ? 'green'
+                                : state === 'evaluating' || pipeline?.current_step === 'evaluate'
+                                  ? 'blue'
+                                  : 'gray',
+                            children:
+                              state === 'done' || pipeline?.orchestration_state === 'COMPLETED'
+                                ? 'Evaluation Agent：评估完成'
+                                : state === 'evaluating' || pipeline?.current_step === 'evaluate'
+                                  ? 'Evaluation Agent：评估中'
+                                  : 'Evaluation Agent：等待评估',
+                          },
                         ]}
                       />
                     </Card>
@@ -3028,7 +3256,7 @@ const AgentCanvas: React.FC = () => {
                         type="primary"
                         icon={<PlayCircleOutlined />}
                         loading={loading}
-                        disabled={state === 'training_queued' || state === 'training_running' || state === 'done'}
+                        disabled={['data_validating', 'data_ready', 'training_queued', 'training_running', 'training_succeeded', 'evaluating', 'done'].includes(state)}
                         onClick={() => void startRun()}
                       >
                         启动执行
@@ -3093,38 +3321,7 @@ const AgentCanvas: React.FC = () => {
                     </Card>
                   </Space>
                 )}
-              {!(step === 4 && isTrainingExecutionView) && (
-                <>
-                  <Divider style={{ margin: '16px 0' }} />
-                  <Button type="link" style={{ paddingLeft: 0 }} onClick={() => setMcpDrawerOpen(true)}>
-                    打开 MCP 侧信道（多 Agent）
-                  </Button>
-                  <Typography.Text strong style={{ display: 'block', marginTop: 12, marginBottom: 8 }}>
-                    运行时间线
-                  </Typography.Text>
-                  <Timeline
-                    items={[
-                      { color: taskDraft ? 'green' : 'gray', children: 'Planning：任务已解析（规划完成）' },
-                      {
-                        color: state === 'data_ready' || !!pipeline ? 'green' : 'gray',
-                        children: 'Data Agent：数据已就绪（校验通过）',
-                      },
-                      {
-                        color: pipeline?.current_step === 'train' || state === 'done' ? 'blue' : 'gray',
-                        children: 'Training Executor：训练已启动',
-                      },
-                      {
-                        color: pipeline?.model_id ? 'blue' : 'gray',
-                        children: 'Training Executor：模型检查点已保存',
-                      },
-                      { color: state === 'done' ? 'green' : 'gray', children: 'Evaluation Agent：评估已完成' },
-                    ]}
-                  />
-                  {state === 'done' && (
-                    <Alert type="success" icon={<CheckCircleOutlined />} message="已完成" style={{ marginTop: 8 }} />
-                  )}
-                </>
-              )}
+              
               </div>
               </Card>
           </div>

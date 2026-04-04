@@ -1,0 +1,10 @@
+{
+  "task_family": "Classification",
+  "domain": "sentiment_analysis",
+  "scale": 100,
+  "requirements": {
+    "min_samples": 50,
+    "max_label_imbalance": 5,
+    "languages": ["zh", "en"]
+  }
+}

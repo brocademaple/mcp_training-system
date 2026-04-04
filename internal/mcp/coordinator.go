@@ -89,6 +89,11 @@ func (c *Coordinator) handleDataAgentMessage(msg *MCPMessage) error {
 		datasetID := int(msg.Payload["dataset_id"].(float64))
 		_, err := c.dataAgent.AnalyzeData(datasetID)
 		return err
+	case "validate_quality":
+		filePath := msg.Payload["file_path"].(string)
+		taskFamily := msg.Payload["task_family"].(string)
+		_, _, err := c.dataAgent.ValidateQuality(filePath, taskFamily)
+		return err
 	default:
 		return fmt.Errorf("unknown action: %s", msg.Action)
 	}
@@ -140,7 +145,7 @@ func (c *Coordinator) RunPipeline(datasetID int, trainConfig map[string]interfac
 		return nil, fmt.Errorf("failed to create pipeline instance: %v", err)
 	}
 
-	go c.executePipelineAsync(pipelineID, sessionID, datasetID, trainConfig, dataAgentPrompt, agentFlow)
+	go c.executePipelineAsync(pipelineID, sessionID, datasetID, trainConfig, dataAgentPrompt, agentFlow, pipelineRunSpec)
 
 	pipeline := &models.PipelineInstance{
 		ID:                 pipelineID,
@@ -157,7 +162,7 @@ func (c *Coordinator) RunPipeline(datasetID int, trainConfig map[string]interfac
 	return pipeline, nil
 }
 
-func (c *Coordinator) executePipelineAsync(pipelineID int, sessionID string, datasetID int, trainConfig map[string]interface{}, dataAgentPrompt string, agentFlow string) {
+func (c *Coordinator) executePipelineAsync(pipelineID int, sessionID string, datasetID int, trainConfig map[string]interface{}, dataAgentPrompt string, agentFlow string, pipelineRunSpec []byte) {
 	flow := strings.ToLower(strings.TrimSpace(agentFlow))
 	defer func() {
 		if r := recover(); r != nil {
@@ -165,6 +170,9 @@ func (c *Coordinator) executePipelineAsync(pipelineID int, sessionID string, dat
 			c.updatePipelineFailed(pipelineID, "clean_data", fmt.Sprintf("panic: %v", r), orchestrator.FailTaskParse)
 		}
 	}()
+
+	// 检查并释放超时任务
+	c.dataAgent.CheckTaskTimeout()
 
 	c.setOrchestrationState(pipelineID, orchestrator.StateMethodSelected, "")
 
@@ -178,6 +186,65 @@ func (c *Coordinator) executePipelineAsync(pipelineID int, sessionID string, dat
 		c.updatePipelineFailed(pipelineID, "clean_data", err.Error(), orchestrator.FailDataSchema)
 		return
 	}
+
+	// Step 1.5: Quality validation（Data Agent：validate_quality）
+	// 将 run_spec 中的语义任务类型映射为 validate_quality.py 需要的 task_family：
+	// Classification / SequenceTagging / Generation / Alignment
+	taskFamily := func() string {
+		var rs map[string]interface{}
+		// pipelineRunSpec 可能为前端 RunSpec 结构（未必严格匹配 internal/models.RunSpec），因此使用容错解析
+		if err := json.Unmarshal(pipelineRunSpec, &rs); err != nil {
+			return "Classification"
+		}
+		taskSpec, ok := rs["task_spec"].(map[string]interface{})
+		if !ok {
+			return "Classification"
+		}
+		raw, ok := taskSpec["semantic_task_type"].(string)
+		if !ok {
+			return "Classification"
+		}
+		t := strings.ToLower(raw)
+		if strings.Contains(t, "ner") {
+			return "SequenceTagging"
+		}
+		if strings.Contains(t, "summar") {
+			return "Generation"
+		}
+		if strings.Contains(t, "preference") || strings.Contains(t, "alignment") {
+			return "Alignment"
+		}
+		return "Classification"
+	}()
+
+	var cleanedPath sql.NullString
+	if err := c.db.QueryRow(
+		"SELECT cleaned_file_path FROM datasets WHERE id = $1",
+		datasetID,
+	).Scan(&cleanedPath); err != nil {
+		c.updatePipelineFailed(pipelineID, "clean_data", fmt.Sprintf("query cleaned_file_path failed: %v", err), orchestrator.FailDataSchema)
+		return
+	}
+	if !cleanedPath.Valid || cleanedPath.String == "" {
+		c.updatePipelineFailed(pipelineID, "clean_data", "cleaned_file_path is empty; skip validate_quality", orchestrator.FailDataSchema)
+		return
+	}
+
+	valid, result, err := c.dataAgent.ValidateQuality(cleanedPath.String, taskFamily)
+	if err != nil {
+		c.updatePipelineFailed(pipelineID, "clean_data", fmt.Sprintf("validate_quality error: %v", err), orchestrator.FailDataSchema)
+		return
+	}
+	if !valid {
+		c.updatePipelineFailed(
+			pipelineID,
+			"clean_data",
+			fmt.Sprintf("validate_quality failed: %v", result["summary"]),
+			orchestrator.FailDataSchema,
+		)
+		return
+	}
+
 	c.setOrchestrationState(pipelineID, orchestrator.StateDataValidated, "")
 
 	// Step 2: Create and train

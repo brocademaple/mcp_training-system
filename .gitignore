@@ -33,6 +33,7 @@ docs/*
 !docs/style.css
 !docs/images/
 !docs/images/**
+!docs/DATA_AGENT_API.md
 
 # IDE
 .vscode/

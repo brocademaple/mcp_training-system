@@ -1360,23 +1360,71 @@
   padding-right: 2px;
 }
 
+/* 中间「编排对话」卡片：上方对话流优先占高，下方阶段面板限高内滚动 */
+.agent-orch-chat-card.ant-card {
+  min-height: 0;
+}
+
+.agent-orch-chat-card .ant-card-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.agent-orch-chat-splitter {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.agent-orch-chat-splitter-gutter {
+  height: 8px;
+  cursor: ns-resize;
+  background: rgba(0, 0, 0, 0.04);
+  margin: 2px 0;
+  border-radius: 4px;
+}
+
+.agent-orch-chat-splitter-gutter:hover {
+  background: rgba(22, 119, 255, 0.12);
+}
+
 .agent-orch-chat-stream {
-  /* 不占满整列高度，避免挤压下方阶段卡片（训练目标等）被父级 overflow:hidden 裁切 */
-  flex: 0 1 auto;
-  min-height: 120px;
-  max-height: min(44vh, 420px);
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
   overflow-y: auto;
 }
 
-/* 中间对话栏：整块可滚动，确保阶段表单 + 文本框完整可见 */
-.agent-orch-col-chat > .ant-card > .ant-card-body {
+.agent-orch-chat-splitter .agent-orch-chat-stream {
+  /* 拖拽分栏时由 style={{height}} 控制，不要再被 flex:1 拉伸 */
+  flex: 0 0 auto;
+}
+
+/* 阶段说明 / 训练目标等：整体限高，避免挤占对话流可视区域 */
+.agent-orch-chat-phase-stack {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow-x: hidden;
   overflow-y: auto;
+  padding-right: 2px;
+}
+
+/* 中间对话栏：外层卡片 body 不滚动，由内部分区各自滚动 */
+.agent-orch-col-chat > .ant-card > .ant-card-body {
+  overflow: hidden;
   overflow-x: hidden;
 }
 
 .agent-orch-chat-phase-card.ant-card {
   border-color: #e8e8e8;
   background: #fafafa;
+  /* 让阶段卡片按内容撑开，避免被中间列 flex + overflow:hidden 裁切 */
+  flex: 0 0 auto;
 }
 
 .agent-orch-chat-phase-card .ant-card-head {
@@ -1391,86 +1439,156 @@
 
 .agent-orch-chat-phase-card .ant-card-body {
   padding: 12px;
+  /* 允许卡片内部内容在需要时正常显示（由父级滚动容器负责滚动） */
+  overflow: visible;
 }
 
 .agent-orch-summary-card.ant-card .ant-descriptions-item-label {
   width: 88px;
 }
 
-/* 阶段 1 · 训练目标：自上而下流程图式层级（节点 + 垂直连线） */
-.agent-goal-cascade {
+/* 压缩“编排摘要（只读）”卡片的高度占用 */
+.agent-orch-summary-card.ant-card .ant-card-body {
+  padding: 8px 10px !important;
+}
+
+.agent-orch-summary-card.ant-card .ant-descriptions-row > td {
+  padding: 6px 8px !important;
+}
+
+.agent-orch-summary-card.ant-card .ant-descriptions-item-label,
+.agent-orch-summary-card.ant-card .ant-descriptions-item-content {
+  padding-top: 6px !important;
+  padding-bottom: 6px !important;
+}
+
+/* 覆盖组件内联 style={{ marginTop: 8 }}，让“重置本轮编排”更紧凑 */
+.agent-orch-summary-card.ant-card .ant-btn-link {
+  margin-top: 4px !important;
+}
+
+/* 阶段 1 · 训练目标：先输入目标 → 识别结果卡片 → 推荐模板 → 主操作 */
+.agent-goal-panel {
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: 14px;
   min-width: 0;
 }
 
-.agent-goal-cascade-row {
-  display: grid;
-  grid-template-columns: 36px minmax(0, 1fr);
-  gap: 10px 12px;
-  align-items: stretch;
-  min-width: 0;
-}
-
-.agent-goal-cascade-rail {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  width: 36px;
-  flex-shrink: 0;
-  min-height: 0;
-}
-
-.agent-goal-cascade-dot {
-  flex-shrink: 0;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: linear-gradient(145deg, #1677ff 0%, #4096ff 100%);
-  color: #fff;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 28px;
-  text-align: center;
-  box-shadow: 0 2px 6px rgba(22, 119, 255, 0.28);
-}
-
-.agent-goal-cascade-line {
-  flex: 1 1 auto;
-  width: 2px;
-  min-height: 14px;
-  margin: 5px 0 2px;
-  border-radius: 1px;
-  background: linear-gradient(180deg, #91caff 0%, #bae0ff 55%, #e6f4ff 100%);
-}
-
-.agent-goal-cascade-panel {
-  min-width: 0;
-  padding-bottom: 14px;
-}
-
-.agent-goal-cascade-row--last .agent-goal-cascade-panel {
-  padding-bottom: 0;
-}
-
-.agent-goal-cascade-title {
-  display: block;
-  font-size: 13px;
+.agent-goal-panel-section--primary {
   margin-bottom: 2px;
 }
 
-.agent-goal-cascade-hint {
-  display: block;
-  font-size: 11px;
-  line-height: 1.45;
-  margin-bottom: 8px;
+.agent-goal-panel-heading {
+  margin: 0 0 8px !important;
+  font-size: 15px !important;
+  font-weight: 600 !important;
 }
 
-.agent-goal-cascade-actions {
+.agent-goal-primary-textarea.ant-input {
+  font-size: 14px;
+  line-height: 1.55;
+  min-height: 72px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border-color: #d9d9d9;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.agent-goal-primary-input-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.agent-goal-primary-input-row .agent-goal-primary-textarea.ant-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.agent-goal-intent-btn {
+  margin-top: 10px;
+  white-space: nowrap;
+}
+
+.agent-goal-primary-textarea.ant-input:focus,
+.agent-goal-primary-textarea.ant-input-focused {
+  border-color: #1677ff;
+  box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.12);
+}
+
+.agent-goal-parse-card.ant-card {
+  border-color: #e8e8e8;
+  background: #fafafa;
+}
+
+.agent-goal-parse-card .ant-card-head {
+  min-height: 36px;
+  padding: 0 12px;
+}
+
+.agent-goal-parse-card .ant-card-body {
+  padding: 12px;
+}
+
+.agent-goal-parse-row {
+  margin-bottom: 10px;
+}
+
+.agent-goal-parse-row:last-child {
+  margin-bottom: 0;
+}
+
+.agent-goal-parse-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.75);
+  margin-bottom: 6px;
+}
+
+.agent-goal-parse-chips {
   width: 100%;
 }
 
-.agent-goal-cascade-textarea {
-  margin-top: 2px;
+.agent-goal-manual-collapse .ant-collapse-header {
+  padding: 0 0 8px !important;
+}
+
+.agent-goal-manual-collapse .ant-collapse-content-box {
+  padding-bottom: 0 !important;
+}
+
+.agent-goal-panel-section--templates {
+  padding: 0 2px;
+}
+
+.agent-goal-templates-title {
+  display: block;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.agent-goal-template-btn {
+  border-style: dashed !important;
+  color: rgba(0, 0, 0, 0.55) !important;
+  font-weight: 400 !important;
+}
+
+.agent-goal-template-btn:hover {
+  color: #1677ff !important;
+  border-color: #91caff !important;
+}
+
+.agent-goal-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding-top: 4px;
+}
+
+/* 旧版模板区仍复用该类名 */
+.agent-goal-cascade-actions {
+  width: 100%;
 }
