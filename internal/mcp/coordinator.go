@@ -14,6 +14,13 @@ import (
 	"mcp-training-system/internal/utils"
 )
 
+func projectIDToNullInt64(p *int) sql.NullInt64 {
+	if p == nil {
+		return sql.NullInt64{}
+	}
+	return sql.NullInt64{Int64: int64(*p), Valid: true}
+}
+
 // Coordinator coordinates communication between agents
 type Coordinator struct {
 	db              *sql.DB
@@ -127,7 +134,7 @@ func (c *Coordinator) handleEvaluationAgentMessage(msg *MCPMessage) error {
 
 // RunPipeline executes a pipeline: 默认 clean -> train -> evaluate；agentFlow=train_only 时在训练完成后结束，不跑评估。
 // pipelineRunSpec 可选：整条流水线的 RunSpec JSON；dataAgentPrompt 为用户在前端设定的 Data Agent 规划偏好。
-func (c *Coordinator) RunPipeline(datasetID int, trainConfig map[string]interface{}, dataAgentPrompt, planID, planSummary string, pipelineRunSpec []byte, agentFlow string) (*models.PipelineInstance, error) {
+func (c *Coordinator) RunPipeline(datasetID int, projectID *int, trainConfig map[string]interface{}, dataAgentPrompt, planID, planSummary string, pipelineRunSpec []byte, agentFlow string) (*models.PipelineInstance, error) {
 	sessionID := uuid.New().String()
 	utils.Info("MCP Coordinator: Starting pipeline for dataset %d, session: %s", datasetID, sessionID)
 
@@ -137,10 +144,10 @@ func (c *Coordinator) RunPipeline(datasetID int, trainConfig map[string]interfac
 		runSpecArg = pipelineRunSpec
 	}
 	err := c.db.QueryRow(`
-		INSERT INTO pipeline_instances (session_id, dataset_id, status, current_step, orchestration_state, data_agent_prompt, plan_id, plan_summary, run_spec)
-		VALUES ($1, $2, 'running', 'clean_data', $6, NULLIF(TRIM($3), ''), NULLIF(TRIM($4), ''), NULLIF(TRIM($5), ''), $7)
+		INSERT INTO pipeline_instances (session_id, project_id, dataset_id, status, current_step, orchestration_state, data_agent_prompt, plan_id, plan_summary, run_spec)
+		VALUES ($1, $2, $3, 'running', 'clean_data', $7, NULLIF(TRIM($4), ''), NULLIF(TRIM($5), ''), NULLIF(TRIM($6), ''), $8)
 		RETURNING id
-	`, sessionID, datasetID, dataAgentPrompt, planID, planSummary, orchestrator.StateTaskIdentified, runSpecArg).Scan(&pipelineID)
+	`, sessionID, projectIDToNullInt64(projectID), datasetID, dataAgentPrompt, planID, planSummary, orchestrator.StateTaskIdentified, runSpecArg).Scan(&pipelineID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create pipeline instance: %v", err)
 	}
@@ -149,6 +156,7 @@ func (c *Coordinator) RunPipeline(datasetID int, trainConfig map[string]interfac
 
 	pipeline := &models.PipelineInstance{
 		ID:                 pipelineID,
+		ProjectID:          projectID,
 		SessionID:          sessionID,
 		DatasetID:          datasetID,
 		Status:             "running",
@@ -332,6 +340,7 @@ func (c *Coordinator) executeStep(pipelineID int, sessionID, action string, targ
 	return err
 }
 
+// createTrainingJob 流水线内创建训练任务；Skill+MCP 演进时可改为经 MCP 调用训练工具，占位映射见 skills/SKILL_REGISTRY.yaml。
 func (c *Coordinator) createTrainingJob(datasetID int, config map[string]interface{}) (int, error) {
 	modelType := "text_classification"
 	if mt, ok := config["model_type"].(string); ok && mt != "" {
@@ -433,15 +442,20 @@ func (c *Coordinator) updatePipelineEvalID(pipelineID, evalID int) {
 // GetPipelineStatus retrieves pipeline status
 func (c *Coordinator) GetPipelineStatus(pipelineID int) (*models.PipelineInstance, error) {
 	var p models.PipelineInstance
+	var pID sql.NullInt64
 	var orch, fail sql.NullString
 	var runSpecBytes []byte
 	err := c.db.QueryRow(`
-		SELECT id, session_id, dataset_id, status, current_step, orchestration_state, failure_code, run_spec,
+		SELECT id, project_id, session_id, dataset_id, status, current_step, orchestration_state, failure_code, run_spec,
 			job_id, model_id, eval_id, error_msg, data_agent_prompt, plan_id, plan_summary, created_at, updated_at
 		FROM pipeline_instances WHERE id = $1
-	`, pipelineID).Scan(&p.ID, &p.SessionID, &p.DatasetID, &p.Status, &p.CurrentStep, &orch, &fail, &runSpecBytes, &p.JobID, &p.ModelID, &p.EvalID, &p.ErrorMsg, &p.DataAgentPrompt, &p.PlanID, &p.PlanSummary, &p.CreatedAt, &p.UpdatedAt)
+	`, pipelineID).Scan(&p.ID, &pID, &p.SessionID, &p.DatasetID, &p.Status, &p.CurrentStep, &orch, &fail, &runSpecBytes, &p.JobID, &p.ModelID, &p.EvalID, &p.ErrorMsg, &p.DataAgentPrompt, &p.PlanID, &p.PlanSummary, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		return nil, err
+	}
+	if pID.Valid {
+		v := int(pID.Int64)
+		p.ProjectID = &v
 	}
 	if orch.Valid {
 		p.OrchestrationState = orch.String

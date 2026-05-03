@@ -11,6 +11,15 @@ const api = axios.create({
 // Request interceptor
 api.interceptors.request.use(
   (config) => {
+    if (typeof window !== 'undefined') {
+      const sessionID = window.localStorage.getItem('mcp_session_id');
+      if (sessionID) {
+        config.headers = config.headers ?? {};
+        if (!('X-Session-ID' in config.headers)) {
+          config.headers['X-Session-ID'] = sessionID;
+        }
+      }
+    }
     return config;
   },
   (error) => {

@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"mcp-training-system/internal/agents"
+	"mcp-training-system/internal/mcp"
 	"mcp-training-system/internal/models"
 	"mcp-training-system/internal/registry"
 	"mcp-training-system/internal/services"
@@ -17,13 +20,17 @@ import (
 type TrainingHandler struct {
 	db            *sql.DB
 	trainingAgent *agents.TrainingAgent
+	evalAgent     *agents.EvaluationAgent
+	mcpStore      *mcp.Store
 }
 
 // NewTrainingHandler creates a new training handler
-func NewTrainingHandler(db *sql.DB, trainingAgent *agents.TrainingAgent) *TrainingHandler {
+func NewTrainingHandler(db *sql.DB, trainingAgent *agents.TrainingAgent, evalAgent *agents.EvaluationAgent, mcpStore *mcp.Store) *TrainingHandler {
 	return &TrainingHandler{
 		db:            db,
 		trainingAgent: trainingAgent,
+		evalAgent:     evalAgent,
+		mcpStore:      mcpStore,
 	}
 }
 
@@ -32,9 +39,11 @@ func (h *TrainingHandler) CreateJob(c *gin.Context) {
 	var req struct {
 		Name        string                 `json:"name"`
 		DatasetID   int                    `json:"dataset_id"`
+		ProjectID   *int                   `json:"project_id"`
 		ModelType   string                 `json:"model_type"`
 		Hyperparams map[string]interface{} `json:"hyperparams"`
 		RunSpec     map[string]interface{} `json:"run_spec"`
+		SessionID   string                 `json:"session_id"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -44,6 +53,15 @@ func (h *TrainingHandler) CreateJob(c *gin.Context) {
 
 	if req.Hyperparams == nil {
 		req.Hyperparams = map[string]interface{}{}
+	}
+	sessionID := extractSessionID(c, req.SessionID)
+
+	if sessionID != "" && h.mcpStore != nil {
+		if ctx, err := h.mcpStore.GetContext(sessionID); err == nil && ctx != nil && strings.TrimSpace(ctx.TaskType) != "" {
+			if strings.TrimSpace(req.ModelType) == "" || req.ModelType == "text_classification" {
+				req.ModelType = modelTypeFromTaskType(ctx.TaskType)
+			}
+		}
 	}
 
 	var runSpecJSON []byte
@@ -84,9 +102,12 @@ func (h *TrainingHandler) CreateJob(c *gin.Context) {
 	}
 	req.Hyperparams["epochs"] = float64(epochs)
 
+	// Skill+MCP 演进：落库的 model_type（req.ModelType）与 skills/SKILL_REGISTRY.yaml、internal/skillmcp 中 execution 路由占位一致；后续可在此拦截改为 MCP 下发训练工具。
+
 	datasetID := req.DatasetID
 	job := &models.TrainingJob{
 		UserID:      1, // Default user
+		ProjectID:   req.ProjectID,
 		Name:        req.Name,
 		DatasetID:   &datasetID,
 		ModelType:   req.ModelType,
@@ -103,22 +124,183 @@ func (h *TrainingHandler) CreateJob(c *gin.Context) {
 		return
 	}
 
+	phTrain := 2
+	if sessionID != "" && h.mcpStore != nil {
+		trainReq := mcp.NewRequest("orchestrator", "training-agent", "train", map[string]interface{}{
+			"job_id":      float64(job.ID),
+			"dataset_id":  float64(req.DatasetID),
+			"model_type":  req.ModelType,
+			"total_epochs": float64(epochs),
+		})
+		_, _ = h.mcpStore.AppendSessionEvent(sessionID, mcp.SessionEvent{
+			Kind:  mcp.SessionEventSystem,
+			Phase: &phTrain,
+			Text:  fmt.Sprintf("状态：训练执行阶段 · 训练任务 #%d 已提交（queued），MCP 请求已记录", job.ID),
+		})
+		_, _ = h.mcpStore.AppendSessionEvent(sessionID, mcp.SessionEvent{
+			Kind:  mcp.SessionEventMCP,
+			Phase: &phTrain,
+			MCP:   mcp.MCPWireFromMessage(trainReq),
+		})
+	}
+
 	// Start training in background；若 Train 返回错误（如数据集未就绪、Python 启动失败），将任务标为失败并写入原因
-	go func() {
-		if err := h.trainingAgent.Train(job.ID); err != nil {
-			fmt.Printf("Training failed for job %d: %v\n", job.ID, err)
-			_ = models.UpdateTrainingJobStatus(h.db, job.ID, "failed", err.Error())
+	go func(sid string, jobID int) {
+		trErr := h.trainingAgent.Train(jobID)
+		if sid != "" && h.mcpStore != nil {
+			ph2 := 2
+			respPayload := map[string]interface{}{"job_id": float64(jobID), "status": "success"}
+			if trErr != nil {
+				respPayload = map[string]interface{}{
+					"job_id": float64(jobID), "status": "error", "error": trErr.Error(),
+				}
+			}
+			resp := mcp.NewResponse("training-agent", "orchestrator", "train", respPayload)
+			_, _ = h.mcpStore.AppendSessionEvent(sid, mcp.SessionEvent{
+				Kind:  mcp.SessionEventMCP,
+				Phase: &ph2,
+				MCP:   mcp.MCPWireFromMessage(resp),
+			})
+			if trErr != nil {
+				_, _ = h.mcpStore.AppendSessionEvent(sid, mcp.SessionEvent{
+					Kind:  mcp.SessionEventSystem,
+					Phase: &ph2,
+					Text:  fmt.Sprintf("状态：训练失败 · job_id=%d · %v", jobID, trErr),
+				})
+			} else {
+				_, _ = h.mcpStore.AppendSessionEvent(sid, mcp.SessionEvent{
+					Kind:  mcp.SessionEventSystem,
+					Phase: &ph2,
+					Text:  fmt.Sprintf("状态：训练脚本执行完成 · job_id=%d", jobID),
+				})
+			}
 		}
-	}()
+		if trErr != nil {
+			fmt.Printf("Training failed for job %d: %v\n", jobID, trErr)
+			_ = models.UpdateTrainingJobStatus(h.db, jobID, "failed", trErr.Error())
+			return
+		}
+
+		if sid != "" && h.mcpStore != nil {
+			_ = h.mcpStore.UpdateContext(sid, map[string]interface{}{
+				"training_job_id": int64(jobID),
+			})
+		}
+		_ = h.triggerAutoEvaluation(sid, jobID, req.ProjectID)
+	}(sessionID, job.ID)
+
+	if sessionID != "" && h.mcpStore != nil {
+		_ = h.mcpStore.UpdateContext(sessionID, map[string]interface{}{
+			"dataset_id":      int64(req.DatasetID),
+			"training_job_id": int64(job.ID),
+		})
+		if req.ProjectID != nil {
+			_ = h.mcpStore.UpdateContext(sessionID, map[string]interface{}{
+				"project_id": int64(*req.ProjectID),
+			})
+		}
+	}
 
 	c.JSON(200, gin.H{
 		"code":    200,
 		"message": "success",
 		"data": gin.H{
-			"job_id": job.ID,
-			"status": "queued",
+			"job_id":     job.ID,
+			"status":     "queued",
+			"session_id": sessionID,
+			"project_id": req.ProjectID,
 		},
 	})
+}
+
+func modelTypeFromTaskType(taskType string) string {
+	switch strings.ToLower(strings.TrimSpace(taskType)) {
+	case "text_generation", "summarization":
+		return "sft_finetune"
+	case "named_entity_recognition":
+		return "token_classification"
+	default:
+		return "text_classification"
+	}
+}
+
+func (h *TrainingHandler) triggerAutoEvaluation(sessionID string, jobID int, projectID *int) error {
+	if h.evalAgent == nil {
+		return nil
+	}
+	var modelID int
+	if err := h.db.QueryRow("SELECT id FROM models WHERE job_id = $1 ORDER BY id DESC LIMIT 1", jobID).Scan(&modelID); err != nil {
+		return err
+	}
+
+	evalName := fmt.Sprintf("auto-eval-job-%d-%s", jobID, time.Now().Format("20060102-150405"))
+	placeholder := &models.Evaluation{
+		ProjectID: projectID,
+		ModelID:  modelID,
+		Name:     evalName,
+		Accuracy: 0, Precision: 0, Recall: 0, F1Score: 0,
+		Status: "running",
+	}
+	if err := placeholder.Create(h.db); err != nil {
+		return err
+	}
+	evalID := placeholder.ID
+	if sessionID != "" && h.mcpStore != nil {
+		_ = h.mcpStore.UpdateContext(sessionID, map[string]interface{}{
+			"eval_job_id": int64(evalID),
+		})
+	}
+
+	go func(modelID, evalID int, sid string) {
+		ph3 := 3
+		if sid != "" && h.mcpStore != nil {
+			eReq := mcp.NewRequest("orchestrator", "evaluation-agent", "evaluate", map[string]interface{}{
+				"model_id": float64(modelID),
+				"eval_id":  float64(evalID),
+			})
+			_, _ = h.mcpStore.AppendSessionEvent(sid, mcp.SessionEvent{
+				Kind:  mcp.SessionEventMCP,
+				Phase: &ph3,
+				MCP:   mcp.MCPWireFromMessage(eReq),
+			})
+			_, _ = h.mcpStore.AppendSessionEvent(sid, mcp.SessionEvent{
+				Kind:  mcp.SessionEventSystem,
+				Phase: &ph3,
+				Text:  fmt.Sprintf("状态：结果分析阶段 · 评估任务 #%d 已启动（running）", evalID),
+			})
+		}
+		if err := h.evalAgent.Evaluate(modelID, 0, evalID); err != nil {
+			if sid != "" && h.mcpStore != nil {
+				resp := mcp.NewResponse("evaluation-agent", "orchestrator", "evaluate", map[string]interface{}{
+					"eval_id": float64(evalID), "status": "error", "error": err.Error(),
+				})
+				_, _ = h.mcpStore.AppendSessionEvent(sid, mcp.SessionEvent{
+					Kind:  mcp.SessionEventMCP,
+					Phase: &ph3,
+					MCP:   mcp.MCPWireFromMessage(resp),
+				})
+			}
+			_ = models.UpdateEvaluationStatus(h.db, evalID, "failed", err.Error())
+			return
+		}
+		if sid != "" && h.mcpStore != nil {
+			resp := mcp.NewResponse("evaluation-agent", "orchestrator", "evaluate", map[string]interface{}{
+				"eval_id": float64(evalID), "status": "success",
+			})
+			_, _ = h.mcpStore.AppendSessionEvent(sid, mcp.SessionEvent{
+				Kind:  mcp.SessionEventMCP,
+				Phase: &ph3,
+				MCP:   mcp.MCPWireFromMessage(resp),
+			})
+			_, _ = h.mcpStore.AppendSessionEvent(sid, mcp.SessionEvent{
+				Kind:  mcp.SessionEventSystem,
+				Phase: &ph3,
+				Text:  fmt.Sprintf("状态：评估脚本执行完成 · eval_id=%d", evalID),
+			})
+		}
+	}(modelID, evalID, sessionID)
+
+	return nil
 }
 
 // checkQueuedJobDatasetReady 检查排队中任务对应的数据集是否已就绪（有可训练路径：清洗后或原始）；若不就绪则将该任务标为失败并写入原因
@@ -156,7 +338,19 @@ func (h *TrainingHandler) GetJobs(c *gin.Context) {
 			userID = p
 		}
 	}
-	jobs, err := models.GetTrainingJobsByUserID(h.db, userID)
+	projectID := 0
+	if pid := strings.TrimSpace(c.Query("project_id")); pid != "" {
+		if p, err := strconv.Atoi(pid); err == nil && p > 0 {
+			projectID = p
+		}
+	}
+	var jobs []*models.TrainingJob
+	var err error
+	if projectID > 0 {
+		jobs, err = models.GetTrainingJobsByUserProject(h.db, userID, projectID)
+	} else {
+		jobs, err = models.GetTrainingJobsByUserID(h.db, userID)
+	}
 	if err != nil {
 		c.JSON(500, gin.H{"code": 500, "message": fmt.Sprintf("Failed to get jobs: %v", err)})
 		return
@@ -166,7 +360,11 @@ func (h *TrainingHandler) GetJobs(c *gin.Context) {
 		h.checkQueuedJobDatasetReady(j)
 	}
 	// 若有状态被修正，重新拉取列表以返回最新状态
-	jobs, err = models.GetTrainingJobsByUserID(h.db, userID)
+	if projectID > 0 {
+		jobs, err = models.GetTrainingJobsByUserProject(h.db, userID, projectID)
+	} else {
+		jobs, err = models.GetTrainingJobsByUserID(h.db, userID)
+	}
 	if err != nil {
 		c.JSON(500, gin.H{"code": 500, "message": fmt.Sprintf("Failed to get jobs: %v", err)})
 		return
@@ -216,11 +414,11 @@ func (h *TrainingHandler) GetJobStatus(c *gin.Context) {
 		"name":           job.Name,
 		"status":         job.Status,
 		"progress":       job.Progress,
-		"current_epoch": job.CurrentEpoch,
+		"current_epoch":  job.CurrentEpoch,
 		"total_epochs":   job.TotalEpochs,
 		"error_message":  errMsg,
 		"redis_progress": progress,
-		"log_lines":       logLines,
+		"log_lines":      logLines,
 		"model_type":     job.ModelType,
 		"hyperparams":    job.Hyperparams,
 	}

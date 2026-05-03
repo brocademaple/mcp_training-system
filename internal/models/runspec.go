@@ -227,6 +227,7 @@ func MergeRunSpecIntoHyperparams(h map[string]interface{}, rs *RunSpec) map[stri
 }
 
 // ExecutionModelType 将 RunSpec 映射为现有训练脚本路由键（兼容旧 model_type）。
+// Skill+MCP：该字符串与 skills/SKILL_REGISTRY.yaml 中 execution_model_types、internal/skillmcp 占位一致。
 func ExecutionModelType(rs *RunSpec) string {
 	if rs == nil {
 		return "text_classification"

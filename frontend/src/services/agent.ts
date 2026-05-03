@@ -15,7 +15,6 @@ export interface AgentFallbackAction {
   description: string;
 }
 
-/** POST /agent/resolve-intent 与 PlanResult.intent_resolution 结构一致 */
 export interface IntentResolveResult {
   inferred_intent: string;
   train_mode: 'classic_clf' | 'sft_lora' | string;
@@ -31,7 +30,6 @@ export interface AgentPlan {
   goal: string;
   inferred_intent: string;
   train_mode?: 'classic_clf' | 'sft_lora' | string;
-  /** 规则引擎解析说明（与 resolve-intent 一致） */
   intent_resolution?: IntentResolveResult;
   task_spec?: {
     problem_family: string;
@@ -42,12 +40,40 @@ export interface AgentPlan {
   };
   selected_dataset_candidates: Array<{ id: number; name: string; status: string }>;
   train_config: Record<string, unknown>;
-  /** 后端规则规划器生成的 RunSpec（语义任务 + 方法 + 领域） */
   run_spec?: RunSpec;
   data_agent_prompt?: string;
   steps: AgentPlanStep[];
   fallback_actions: AgentFallbackAction[];
   estimated_duration_minutes?: number;
+}
+
+export interface DataAgentReport {
+  task_type: string;
+  confidence: number;
+  trainability: 'high' | 'medium' | 'low' | string;
+  reliability: 'high' | 'medium' | 'low' | string;
+  issues: string[];
+  summary: string;
+  recommendations: string[];
+  stats: {
+    row_count?: number;
+    empty_text_ratio?: number;
+    duplicate_ratio?: number;
+    label_distribution?: Record<string, number>;
+    [key: string]: unknown;
+  };
+  explanation_source?: string;
+  [key: string]: unknown;
+}
+
+export interface EvaluationAdvice {
+  effect: 'good' | 'fair' | 'poor' | string;
+  summary: string;
+  possible_issues: string[];
+  recommendations: string[];
+  signals?: Record<string, unknown>;
+  explanation_source?: string;
+  [key: string]: unknown;
 }
 
 export const agentService = {
@@ -66,6 +92,21 @@ export const agentService = {
   }): Promise<AgentPlan> => {
     const res = await api.post('/agent/plan', payload) as any;
     return (res.plan ?? res) as AgentPlan;
+  },
+
+  analyzeDataset: async (datasetId: number): Promise<DataAgentReport> => {
+    const res = await api.post(`/agent/datasets/${datasetId}/analyze`) as any;
+    return (res.data ?? res) as DataAgentReport;
+  },
+
+  getDatasetReport: async (datasetId: number): Promise<DataAgentReport | null> => {
+    const res = await api.get(`/agent/datasets/${datasetId}/report`) as any;
+    return (res.data ?? res ?? null) as DataAgentReport | null;
+  },
+
+  getEvaluationAdvice: async (evaluationId: number): Promise<EvaluationAdvice> => {
+    const res = await api.get(`/agent/evaluations/${evaluationId}/advice`) as any;
+    return (res.data ?? res) as EvaluationAdvice;
   },
 };
 

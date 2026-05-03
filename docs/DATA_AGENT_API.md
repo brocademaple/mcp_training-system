@@ -19,7 +19,7 @@
   - `ALIYUN_DASHSCOPE_BASE_URL`（可选，默认 `https://dashscope.aliyuncs.com/compatible-mode/v1`）
 - **Data Agent** 的数据处理仍走本地 Python；若你在**阿里云 ECS** 上部署本服务，只需把服务监听在 `0.0.0.0:端口`，并对安全组/SLB 放行，即可从外网或同 VPC 调用下方 API。
 
-## 与 Data Agent 相关的主要 HTTP 接口（`BASE_URL` = 如 `http://<ECS公网或内网IP>:8080`）
+## 与 Data Agent / Agent 工作流相关的主要 HTTP 接口（`BASE_URL` = 如 `http://<ECS公网或内网IP>:8080`）
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -27,9 +27,14 @@
 | POST | `/api/v1/datasets/from-url` | 从 URL 导入；成功后异步清洗 |
 | POST | `/api/v1/datasets/:id/retry-clean` | 失败数据集重试清洗 |
 | POST | `/api/v1/datasets/:id/analyze` | **Data Agent 分析**（要求数据集已 `ready`，即已清洗） |
+| POST | `/api/v1/agent/datasets/:id/analyze` | Agent 版完整数据分析链（deterministic + 模板 + 可选 LLM） |
+| GET | `/api/v1/agent/datasets/:id/report` | 读取已落库的 Agent 数据分析结果 |
 | POST | `/api/v1/datasets/:id/split` | 划分训练/测试集（调用 `SplitDataset`） |
 | GET | `/api/v1/datasets/:id/preview` | 预览 CSV 前几行 |
 | GET | `/api/v1/datasets/:id` | 数据集详情 |
+| GET | `/api/v1/agent/evaluations/:id/advice` | 读取 Evaluation Agent 的解释与建议 |
+| GET | `/api/v1/projects` | 列出项目（用于 Agent 左侧项目管理） |
+| POST | `/api/v1/projects` | 创建项目并生成 `session_root` |
 
 流水线（Coordinator + Data Agent 步骤）见：
 
@@ -50,4 +55,11 @@ curl -sS -X POST "$BASE_URL/api/v1/datasets/1/analyze" \
 1. 在 **Agent 画布** 中完成流程确认与数据准备，进入 **数据工作台**（上传、校验、确认数据）。
 2. 在 **经典版**「数据集」页上传 CSV，待状态变为 `ready` 后，可通过上述 API 或后续 UI 扩展触发分析。
 
-若你希望「画布内一键展示 Data Agent 分析结果」，可在前端 `datasetService` 中增加对 `POST /datasets/:id/analyze` 的封装并在数据工作台挂载展示（当前变更以 **API 暴露 + 文档** 为主）。
+## Agent 扩展字段（数据库）
+
+- `datasets.ai_analysis`（迁移 015）：上传阶段 AI 推断元数据
+- `datasets.agent_data_report`（迁移 016）：Data Agent 结构化分析结果
+- `evaluations.agent_advice`（迁移 016）：Evaluation Agent 解释与优化建议
+- `training_jobs.project_id` / `evaluations.project_id` / `pipeline_instances.project_id`（迁移 017）：项目隔离
+
+当前 Agent 画布已直接消费上述 API 与字段，不再只是“预留接口”。

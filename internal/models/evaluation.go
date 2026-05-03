@@ -16,20 +16,21 @@ func nullIfEmpty(s string) interface{} {
 
 // Evaluation represents an evaluation result in the system
 type Evaluation struct {
-	ID                   int                    `json:"id"`
-	ModelID              int                    `json:"model_id"`
-	Name                 string                 `json:"name"` // 任务名，列表展示用
-	Accuracy             float64                `json:"accuracy"`
-	Precision            float64                `json:"precision"`
-	Recall               float64                `json:"recall"`
-	F1Score              float64                `json:"f1_score"`
-	Metrics              map[string]interface{} `json:"metrics"`
-	ConfusionMatrixPath  string                 `json:"confusion_matrix_path"`
-	ROCCurvePath         string                 `json:"roc_curve_path"`
-	ReportPath           string                 `json:"report_path"`
-	Status       string    `json:"status"`        // running | completed | failed
-	ErrorMessage string    `json:"error_message"` // 失败时原因，库中 NULL 查时用 COALESCE 成空串
-	CreatedAt    time.Time `json:"created_at"`
+	ID                  int                    `json:"id"`
+	ProjectID           *int                   `json:"project_id,omitempty"`
+	ModelID             int                    `json:"model_id"`
+	Name                string                 `json:"name"` // 任务名，列表展示用
+	Accuracy            float64                `json:"accuracy"`
+	Precision           float64                `json:"precision"`
+	Recall              float64                `json:"recall"`
+	F1Score             float64                `json:"f1_score"`
+	Metrics             map[string]interface{} `json:"metrics"`
+	ConfusionMatrixPath string                 `json:"confusion_matrix_path"`
+	ROCCurvePath        string                 `json:"roc_curve_path"`
+	ReportPath          string                 `json:"report_path"`
+	Status              string                 `json:"status"`        // running | completed | failed
+	ErrorMessage        string                 `json:"error_message"` // 失败时原因，库中 NULL 查时用 COALESCE 成空串
+	CreatedAt           time.Time              `json:"created_at"`
 }
 
 // Create creates a new evaluation in the database
@@ -41,13 +42,14 @@ func (e *Evaluation) Create(db *sql.DB) error {
 	}
 	// 优先写入 006/007 列（name/status/error_message），失败则回退到 001 基础列（兼容旧库）
 	queryNew := `
-		INSERT INTO evaluations (model_id, name, accuracy, precision, recall, f1_score, metrics,
+		INSERT INTO evaluations (project_id, model_id, name, accuracy, precision, recall, f1_score, metrics,
 		                         confusion_matrix_path, roc_curve_path, report_path, status, error_message)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		RETURNING id, created_at
 	`
 	err = db.QueryRow(
 		queryNew,
+		datasetIDToNullInt64(e.ProjectID),
 		e.ModelID,
 		e.Name,
 		e.Accuracy,
@@ -94,13 +96,15 @@ func GetEvaluationByID(db *sql.DB, id int) (*Evaluation, error) {
 
 	// 优先读取 006/007 列（name/status/error_message），失败则回退到 001 基础列（兼容旧库）
 	queryNew := `
-		SELECT id, model_id, COALESCE(name,''), accuracy, precision, recall, f1_score, metrics,
+		SELECT id, project_id, model_id, COALESCE(name,''), accuracy, precision, recall, f1_score, metrics,
 		       confusion_matrix_path, roc_curve_path, report_path,
 		       COALESCE(status,''), COALESCE(error_message,''), created_at
 		FROM evaluations WHERE id = $1
 	`
+	var pID sql.NullInt64
 	err := db.QueryRow(queryNew, id).Scan(
 		&eval.ID,
+		&pID,
 		&eval.ModelID,
 		&eval.Name,
 		&eval.Accuracy,
@@ -141,6 +145,10 @@ func GetEvaluationByID(db *sql.DB, id int) (*Evaluation, error) {
 		} else {
 			return nil, err
 		}
+	}
+	if pID.Valid {
+		v := int(pID.Int64)
+		eval.ProjectID = &v
 	}
 	inferStatusFromResult(eval)
 
@@ -244,7 +252,7 @@ func DeleteEvaluation(db *sql.DB, id int) error {
 func GetEvaluationsAll(db *sql.DB) ([]*Evaluation, error) {
 	// 优先查新列；失败（列不存在）则回退旧列
 	queryNew := `
-		SELECT id, model_id, COALESCE(name,''), accuracy, precision, recall, f1_score, metrics,
+		SELECT id, project_id, model_id, COALESCE(name,''), accuracy, precision, recall, f1_score, metrics,
 		       confusion_matrix_path, roc_curve_path, report_path,
 		       COALESCE(status,''), COALESCE(error_message,''), created_at
 		FROM evaluations
@@ -272,8 +280,10 @@ func GetEvaluationsAll(db *sql.DB) ([]*Evaluation, error) {
 		e := &Evaluation{}
 		var metricsJSON []byte
 		if useNew {
+			var pID sql.NullInt64
 			if err := rows.Scan(
 				&e.ID,
+				&pID,
 				&e.ModelID,
 				&e.Name,
 				&e.Accuracy,
@@ -289,6 +299,10 @@ func GetEvaluationsAll(db *sql.DB) ([]*Evaluation, error) {
 				&e.CreatedAt,
 			); err != nil {
 				return nil, err
+			}
+			if pID.Valid {
+				v := int(pID.Int64)
+				e.ProjectID = &v
 			}
 		} else {
 			if err := rows.Scan(
@@ -308,6 +322,58 @@ func GetEvaluationsAll(db *sql.DB) ([]*Evaluation, error) {
 			}
 		}
 
+		inferStatusFromResult(e)
+		if len(metricsJSON) > 0 {
+			_ = json.Unmarshal(metricsJSON, &e.Metrics)
+		}
+		list = append(list, e)
+	}
+	return list, rows.Err()
+}
+
+// GetEvaluationsByProject returns evaluations in one project, newest first.
+func GetEvaluationsByProject(db *sql.DB, projectID int) ([]*Evaluation, error) {
+	rows, err := db.Query(`
+		SELECT id, project_id, model_id, COALESCE(name,''), accuracy, precision, recall, f1_score, metrics,
+		       confusion_matrix_path, roc_curve_path, report_path,
+		       COALESCE(status,''), COALESCE(error_message,''), created_at
+		FROM evaluations
+		WHERE project_id = $1
+		ORDER BY created_at DESC
+	`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	list := make([]*Evaluation, 0, 32)
+	for rows.Next() {
+		e := &Evaluation{}
+		var metricsJSON []byte
+		var pID sql.NullInt64
+		if err := rows.Scan(
+			&e.ID,
+			&pID,
+			&e.ModelID,
+			&e.Name,
+			&e.Accuracy,
+			&e.Precision,
+			&e.Recall,
+			&e.F1Score,
+			&metricsJSON,
+			&e.ConfusionMatrixPath,
+			&e.ROCCurvePath,
+			&e.ReportPath,
+			&e.Status,
+			&e.ErrorMessage,
+			&e.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if pID.Valid {
+			v := int(pID.Int64)
+			e.ProjectID = &v
+		}
 		inferStatusFromResult(e)
 		if len(metricsJSON) > 0 {
 			_ = json.Unmarshal(metricsJSON, &e.Metrics)
@@ -353,4 +419,13 @@ func GetEvaluationByModelID(db *sql.DB, modelID int) (*Evaluation, error) {
 	}
 
 	return eval, nil
+}
+
+// UpdateEvaluationAgentAdvice updates evaluations.agent_advice JSON payload.
+func UpdateEvaluationAgentAdvice(db *sql.DB, id int, advice json.RawMessage) error {
+	_, err := db.Exec(`UPDATE evaluations SET agent_advice = $1, error_message = COALESCE(error_message, ''), status = COALESCE(NULLIF(status,''), 'completed') WHERE id = $2`, advice, id)
+	if err != nil && strings.Contains(err.Error(), "does not exist") {
+		return nil
+	}
+	return err
 }

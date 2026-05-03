@@ -23,4 +23,18 @@ export default defineConfig({
       },
     },
   },
+  // vite preview 默认不继承 server.proxy，不配置则 /api/* 会打到静态服务导致 404
+  preview: {
+    port: 4173,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      '/ws': {
+        target: 'http://localhost:8080',
+        ws: true,
+      },
+    },
+  },
 })

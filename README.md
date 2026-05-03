@@ -16,7 +16,7 @@
 - **双版本数据互通**：同一套 PostgreSQL / Redis，Agent 与经典版生成的结果可互相查看。
 - **可扩展的模型训练**：支持分类头训练与 SFT/LoRA/QLoRA/DPO 等（`model_type` 与 **RunSpec** 双轨兼容）。
 - **三层解耦（语义任务 / 训练方法 / 领域）**：注册表见仓库根目录 `task_registry/`、`method_registry/`、`domain_registry/`；API `GET /api/v1/registry` 供前端加载；训练任务可写 `run_spec` JSON（见 `examples/`）。
-- **Agent 意图识别（规则引擎）**：一句话描述经 `intent_registry/intent_patterns.yaml` 匹配默认任务类型与领域；扩展规则见 `docs/SPEC_CODING.md`「四之一」一节。
+- **Agent 意图识别（规则引擎 + 通义可选）**：一句话描述经 `intent_registry/intent_patterns.yaml` 匹配默认任务类型与领域，也可在页面内配置 DashScope 模型 API。
 
 ## 系统设计概要（调用流）
 
@@ -71,14 +71,15 @@ flowchart TB
 
 ## 文档索引
 
-规范、协作方式与全项目文档导航见 **[docs/SPEC_CODING.md](docs/SPEC_CODING.md)**（推荐 AI 协作者与人类开发者从此入口查阅 PRD、API、部署与 2.0 规划等）。  
-**Data Agent HTTP 接口与阿里云部署说明**见 **[docs/DATA_AGENT_API.md](docs/DATA_AGENT_API.md)**。  
-> 说明：`docs/LEARNING.md` 为**本地学习笔记**（默认不入库）；你可自行创建并维护。
+- **Data Agent / Agent API 说明**：**[docs/DATA_AGENT_API.md](docs/DATA_AGENT_API.md)**  
+- **部署与迁移说明**：**[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**  
+- 说明：`docs/LEARNING.md` 为**本地学习笔记**（默认不入库）；你可自行创建并维护。
 
 ## 快速开始（推荐：本机运行，训练使用本机 GPU）
 
 本机运行后端与 Python 脚本，**训练可使用本机显卡（如 RTX 3060/4060）**；Docker 只用来跑 PostgreSQL 和 Redis。  
-数据库补跑迁移（006～013 等）请直接对照目录 **`internal/database/migrations/`**（按文件名顺序执行）；也可参考 `docs/DEPLOYMENT.md`。
+数据库补跑迁移请直接对照目录 **`internal/database/migrations/`**（按文件名顺序执行）；也可参考 `docs/DEPLOYMENT.md`。  
+当前 Agent 关键迁移包括：`015_add_dataset_ai_analysis.sql`（`datasets.ai_analysis`）、`016_add_agent_analysis_columns.sql`（`datasets.agent_data_report` / `evaluations.agent_advice`）、`017_add_projects_and_scope.sql`（`projects` 与 `project_id` 隔离字段）。
 
 **示例 RunSpec 与样例数据**：[`examples/README.md`](examples/README.md)。
 
@@ -112,6 +113,8 @@ Get-Content internal/database/migrations/003_add_job_name.sql | docker exec -i p
 
 若数据库是**旧版**（曾有过 users 表），需先执行一次：  
 `Get-Content internal/database/migrations/005_remove_users.sql | docker exec -i postgres-mcp-training psql -U mcp_user -d mcp_training`
+
+说明：`Get-Content ... | docker exec -i postgres-mcp-training psql -U mcp_user -d mcp_training` 的含义是：把本机 SQL 文件内容通过标准输入送入 Docker 容器 `postgres-mcp-training` 内的 `mcp_training` 数据库执行；同一条迁移在同一个数据库里只需执行一次。
 
 **步骤 3：安装 Python 依赖（本机，用于数据清洗与训练，可使用 GPU）**
 
@@ -244,7 +247,7 @@ npm run dev
   安装完成后重启后端（`go run cmd/server/main.go`），再对报错的数据集点击「重试清洗」即可。
 
 - **训练任务无法成功 / 一直失败**  
-  请按 [训练任务成功运行指南](docs/TRAINING_SETUP.md) 操作：确认 Python 与依赖、数据集已清洗、CSV 含有 `text` 与 `label`/`labels` 列等。
+  请先确认：1) Python 与 `python_scripts/requirements.txt` 依赖已安装；2) 数据集状态为 `ready`；3) CSV 含有 `text` 与 `label`/`labels` 列；4) 查看 `GET /api/v1/training/jobs/:id` 返回的 `error_message`。
 
 ## API 使用示例
 
@@ -399,10 +402,9 @@ mcp-training-system/
 本项目严格按照PRD文档实现，包含完整的数据库设计、Agent架构、API接口和Web前端界面。
 
 ### 技术文档
-- **文档总索引与协作约定**：`docs/SPEC_CODING.md`
+- **Data Agent / Agent API 说明**：`docs/DATA_AGENT_API.md`
+- **部署与迁移文档**：`docs/DEPLOYMENT.md`
 - **本地学习笔记（可选，不入库）**：`docs/LEARNING.md`
-- 详细API文档：`docs/API.md`
-- 部署文档：`docs/DEPLOYMENT.md`
 - 前端文档：`frontend/README.md`
 - 产品需求文档：`PRD.md`
 

@@ -7,6 +7,7 @@ import (
 
 type PipelineInstance struct {
 	ID                  int             `json:"id" db:"id"`
+	ProjectID           *int            `json:"project_id,omitempty" db:"project_id"`
 	SessionID           string          `json:"session_id" db:"session_id"`
 	DatasetID           int             `json:"dataset_id" db:"dataset_id"`
 	Status              string          `json:"status" db:"status"` // pending, running, completed, failed

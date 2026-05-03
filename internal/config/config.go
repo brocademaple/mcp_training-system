@@ -10,12 +10,13 @@ import (
 
 // Config holds all configuration for the application
 type Config struct {
-	Server   ServerConfig
-	Database DatabaseConfig
-	Redis    RedisConfig
-	Storage  StorageConfig
-	Python   PythonConfig
-	Agent    AgentConfig
+	Server          ServerConfig
+	Database        DatabaseConfig
+	Redis           RedisConfig
+	Storage         StorageConfig
+	Python          PythonConfig
+	Agent           AgentConfig
+	LLMSettingsPath string
 }
 
 // ServerConfig holds server configuration
@@ -107,6 +108,7 @@ func LoadConfig() (*Config, error) {
 			AliyunIntentModel:      getEnv("ALIYUN_INTENT_MODEL", "qwen-turbo"),
 			AliyunDashScopeBaseURL: stringsTrimRightSlash(getEnv("ALIYUN_DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")),
 		},
+		LLMSettingsPath: getEnv("LLM_SETTINGS_PATH", "./data/llm_settings.json"),
 	}
 
 	return config, nil

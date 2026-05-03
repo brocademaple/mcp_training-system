@@ -2,21 +2,24 @@ package handlers
 
 import (
 	"database/sql"
+	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"mcp-training-system/internal/config"
+	"mcp-training-system/internal/mcp"
 	"mcp-training-system/internal/services"
 )
 
 type AgentHandler struct {
-	db       *sql.DB
-	agentCfg *config.AgentConfig
+	db         *sql.DB
+	agentStore *config.AgentStore
+	mcpStore   *mcp.Store
 }
 
-func NewAgentHandler(db *sql.DB, agentCfg *config.AgentConfig) *AgentHandler {
-	return &AgentHandler{db: db, agentCfg: agentCfg}
+func NewAgentHandler(db *sql.DB, agentStore *config.AgentStore, mcpStore *mcp.Store) *AgentHandler {
+	return &AgentHandler{db: db, agentStore: agentStore, mcpStore: mcpStore}
 }
 
 type PlanAPIRequest struct {
@@ -62,7 +65,7 @@ func (h *AgentHandler) CreatePlan(c *gin.Context) {
 		DataAgentPrompt:   req.DataAgentPrompt,
 		TrainMode:         req.TrainMode,
 		DatasetCandidates: candidates,
-	}, h.agentCfg)
+	}, agentCfgPtr(h.agentStore))
 
 	c.JSON(http.StatusOK, gin.H{
 		"plan": plan,
@@ -80,6 +83,53 @@ func (h *AgentHandler) ResolveIntent(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	r := services.ResolveIntentUnified(strings.TrimSpace(req.Goal), h.agentCfg)
+	sessionID := extractSessionID(c, "")
+	ph0 := 0
+	if sessionID != "" && h.mcpStore != nil {
+		_, _ = h.mcpStore.AppendSessionEvent(sessionID, mcp.SessionEvent{
+			Kind:  mcp.SessionEventSystem,
+			Phase: &ph0,
+			Text:  "状态：任务理解阶段 · 开始解析训练意图（MCP 会话事件已写入 Redis）",
+		})
+	}
+	cfg := h.agentStore.Snapshot()
+	r := services.ResolveIntentUnified(strings.TrimSpace(req.Goal), &cfg)
+	if sessionID != "" && h.mcpStore != nil {
+		reqMsg := mcp.NewRequest("orchestrator", "intent-resolver", "resolve_intent", map[string]interface{}{
+			"goal_preview": truncateRunes(strings.TrimSpace(req.Goal), 120),
+		})
+		respMsg := mcp.NewResponse("intent-resolver", "orchestrator", "resolve_intent", map[string]interface{}{
+			"inferred_intent": r.InferredIntent,
+			"train_mode":      r.TrainMode,
+			"confidence":      r.Confidence,
+		})
+		h.mcpStore.AppendMCPPair(sessionID, 0, reqMsg, respMsg, "")
+		_, _ = h.mcpStore.AppendSessionEvent(sessionID, mcp.SessionEvent{
+			Kind:  mcp.SessionEventSystem,
+			Phase: &ph0,
+			Text: fmt.Sprintf("状态：任务理解完成 · 推断意图=%s 训练模式=%s 置信度=%s",
+				r.InferredIntent, r.TrainMode, r.Confidence),
+		})
+	}
 	c.JSON(http.StatusOK, gin.H{"result": r})
+}
+
+func truncateRunes(s string, max int) string {
+	s = strings.TrimSpace(s)
+	if max <= 0 || s == "" {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "…"
+}
+
+func agentCfgPtr(store *config.AgentStore) *config.AgentConfig {
+	if store == nil {
+		return nil
+	}
+	c := store.Snapshot()
+	return &c
 }

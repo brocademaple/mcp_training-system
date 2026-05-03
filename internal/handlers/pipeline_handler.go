@@ -25,6 +25,7 @@ func NewPipelineHandler(db *sql.DB, coordinator *mcp.Coordinator) *PipelineHandl
 }
 
 type CreatePipelineRequest struct {
+	ProjectID       *int                   `json:"project_id"`
 	DatasetID       int                    `json:"dataset_id" binding:"required"`
 	TrainConfig     map[string]interface{} `json:"train_config"`
 	DataAgentPrompt string                 `json:"data_agent_prompt"` // 用户在前端设定的 Data Agent 规划偏好（规模/语言/领域等），写入 prompt 驱动 Data Agent
@@ -70,7 +71,7 @@ func (h *PipelineHandler) CreatePipeline(c *gin.Context) {
 		}
 	}
 
-	pipeline, err := h.coordinator.RunPipeline(req.DatasetID, req.TrainConfig, req.DataAgentPrompt, req.PlanID, planSummary, runSpecBytes, req.AgentFlow)
+	pipeline, err := h.coordinator.RunPipeline(req.DatasetID, req.ProjectID, req.TrainConfig, req.DataAgentPrompt, req.PlanID, planSummary, runSpecBytes, req.AgentFlow)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -97,13 +98,22 @@ func (h *PipelineHandler) GetPipelineStatus(c *gin.Context) {
 }
 
 func (h *PipelineHandler) ListPipelines(c *gin.Context) {
-	rows, err := h.db.Query(`
-		SELECT id, session_id, dataset_id, status, current_step,
+	query := `
+		SELECT id, project_id, session_id, dataset_id, status, current_step,
 			COALESCE(orchestration_state,'') AS orchestration_state,
 			COALESCE(failure_code,'') AS failure_code,
 			job_id, model_id, eval_id, error_msg, data_agent_prompt, plan_id, plan_summary, created_at, updated_at
-		FROM pipeline_instances ORDER BY created_at DESC LIMIT 100
-	`)
+		FROM pipeline_instances
+	`
+	args := make([]interface{}, 0, 1)
+	if pid := strings.TrimSpace(c.Query("project_id")); pid != "" {
+		if n, err := strconv.Atoi(pid); err == nil && n > 0 {
+			query += " WHERE project_id = $1"
+			args = append(args, n)
+		}
+	}
+	query += " ORDER BY created_at DESC LIMIT 100"
+	rows, err := h.db.Query(query, args...)
 	if err != nil {
 		// 表未创建或查询失败时统一返回 200 空列表，避免 500 导致前端反复报错（流水线历史功能可后续完善）
 		c.JSON(http.StatusOK, []interface{}{})
@@ -114,12 +124,13 @@ func (h *PipelineHandler) ListPipelines(c *gin.Context) {
 	var pipelines []map[string]interface{}
 	for rows.Next() {
 		var id, datasetID int
+		var projectID sql.NullInt64
 		var jobID, modelID, evalID sql.NullInt64
 		var sessionID, status, currentStep, orchState, failCode string
 		var errorMsg, dataAgentPrompt, planID, planSummary sql.NullString
 		var createdAt, updatedAt interface{}
 
-		if err := rows.Scan(&id, &sessionID, &datasetID, &status, &currentStep, &orchState, &failCode, &jobID, &modelID, &evalID, &errorMsg, &dataAgentPrompt, &planID, &planSummary, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&id, &projectID, &sessionID, &datasetID, &status, &currentStep, &orchState, &failCode, &jobID, &modelID, &evalID, &errorMsg, &dataAgentPrompt, &planID, &planSummary, &createdAt, &updatedAt); err != nil {
 			continue
 		}
 
@@ -153,6 +164,9 @@ func (h *PipelineHandler) ListPipelines(c *gin.Context) {
 			"plan_summary":       planSummaryVal,
 			"created_at":         createdAt,
 			"updated_at":         updatedAt,
+		}
+		if projectID.Valid {
+			p["project_id"] = projectID.Int64
 		}
 		if jobID.Valid {
 			p["job_id"] = jobID.Int64

@@ -11,6 +11,7 @@ import (
 type TrainingJob struct {
 	ID           int                    `json:"id"`
 	UserID       int                    `json:"user_id"`
+	ProjectID    *int                   `json:"project_id,omitempty"`
 	DatasetID    *int                   `json:"dataset_id"` // 可空：删除数据集后置空，任务与模型保留
 	Name         string                 `json:"name"`
 	ModelType    string                 `json:"model_type"`
@@ -41,13 +42,14 @@ func (j *TrainingJob) Create(db *sql.DB) error {
 	}
 
 	query := `
-		INSERT INTO training_jobs (user_id, dataset_id, name, model_type, hyperparams, run_spec, status, total_epochs)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO training_jobs (user_id, project_id, dataset_id, name, model_type, hyperparams, run_spec, status, total_epochs)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING id, created_at, updated_at
 	`
 	err = db.QueryRow(
 		query,
 		j.UserID,
+		datasetIDToNullInt64(j.ProjectID),
 		datasetIDToNullInt64(j.DatasetID),
 		j.Name,
 		j.ModelType,
@@ -76,14 +78,16 @@ func GetTrainingJobByID(db *sql.DB, id int) (*TrainingJob, error) {
 
 	var runSpecBytes []byte
 	query := `
-		SELECT id, user_id, dataset_id, name, model_type, hyperparams, run_spec, status, progress,
+		SELECT id, user_id, project_id, dataset_id, name, model_type, hyperparams, run_spec, status, progress,
 		       current_epoch, total_epochs, error_message, created_at, started_at,
 		       completed_at, updated_at
 		FROM training_jobs WHERE id = $1
 	`
+	var pID sql.NullInt64
 	err := db.QueryRow(query, id).Scan(
 		&job.ID,
 		&job.UserID,
+		&pID,
 		&dID,
 		&job.Name,
 		&job.ModelType,
@@ -105,6 +109,10 @@ func GetTrainingJobByID(db *sql.DB, id int) (*TrainingJob, error) {
 	if dID.Valid {
 		v := int(dID.Int64)
 		job.DatasetID = &v
+	}
+	if pID.Valid {
+		v := int(pID.Int64)
+		job.ProjectID = &v
 	}
 	if errMsg.Valid {
 		job.ErrorMessage = &errMsg.String
@@ -197,7 +205,7 @@ func DeleteTrainingJob(db *sql.DB, id int) error {
 // GetTrainingJobsByUserID returns all training jobs for a user, newest first
 func GetTrainingJobsByUserID(db *sql.DB, userID int) ([]*TrainingJob, error) {
 	query := `
-		SELECT id, user_id, dataset_id, name, model_type, hyperparams, run_spec, status, progress,
+		SELECT id, user_id, project_id, dataset_id, name, model_type, hyperparams, run_spec, status, progress,
 		       current_epoch, total_epochs, error_message, created_at, started_at,
 		       completed_at, updated_at
 		FROM training_jobs
@@ -215,11 +223,13 @@ func GetTrainingJobsByUserID(db *sql.DB, userID int) ([]*TrainingJob, error) {
 		job := &TrainingJob{}
 		var hyperparamsJSON []byte
 		var errMsg sql.NullString
+		var pID sql.NullInt64
 		var dID sql.NullInt64
 		var runSpecBytes []byte
 		err := rows.Scan(
 			&job.ID,
 			&job.UserID,
+			&pID,
 			&dID,
 			&job.Name,
 			&job.ModelType,
@@ -241,6 +251,77 @@ func GetTrainingJobsByUserID(db *sql.DB, userID int) ([]*TrainingJob, error) {
 		if dID.Valid {
 			v := int(dID.Int64)
 			job.DatasetID = &v
+		}
+		if pID.Valid {
+			v := int(pID.Int64)
+			job.ProjectID = &v
+		}
+		if errMsg.Valid {
+			job.ErrorMessage = &errMsg.String
+		}
+		if err := json.Unmarshal(hyperparamsJSON, &job.Hyperparams); err != nil {
+			return nil, err
+		}
+		if len(runSpecBytes) > 0 {
+			job.RunSpec = json.RawMessage(runSpecBytes)
+		}
+		jobs = append(jobs, job)
+	}
+	return jobs, rows.Err()
+}
+
+func GetTrainingJobsByUserProject(db *sql.DB, userID int, projectID int) ([]*TrainingJob, error) {
+	query := `
+		SELECT id, user_id, project_id, dataset_id, name, model_type, hyperparams, run_spec, status, progress,
+		       current_epoch, total_epochs, error_message, created_at, started_at,
+		       completed_at, updated_at
+		FROM training_jobs
+		WHERE user_id = $1 AND project_id = $2
+		ORDER BY created_at DESC
+	`
+	rows, err := db.Query(query, userID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var jobs []*TrainingJob
+	for rows.Next() {
+		job := &TrainingJob{}
+		var hyperparamsJSON []byte
+		var errMsg sql.NullString
+		var pID sql.NullInt64
+		var dID sql.NullInt64
+		var runSpecBytes []byte
+		err := rows.Scan(
+			&job.ID,
+			&job.UserID,
+			&pID,
+			&dID,
+			&job.Name,
+			&job.ModelType,
+			&hyperparamsJSON,
+			&runSpecBytes,
+			&job.Status,
+			&job.Progress,
+			&job.CurrentEpoch,
+			&job.TotalEpochs,
+			&errMsg,
+			&job.CreatedAt,
+			&job.StartedAt,
+			&job.CompletedAt,
+			&job.UpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		if dID.Valid {
+			v := int(dID.Int64)
+			job.DatasetID = &v
+		}
+		if pID.Valid {
+			v := int(pID.Int64)
+			job.ProjectID = &v
 		}
 		if errMsg.Valid {
 			job.ErrorMessage = &errMsg.String

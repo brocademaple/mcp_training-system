@@ -103,6 +103,7 @@ func (a *TrainingAgent) Train(jobID int) error {
 	utils.Info("TrainingAgent: Job %d status updated to running", jobID)
 
 	// 4. Prepare Python command（按 model_type / RunSpec 路由脚本）
+	// Skill+MCP 演进：此处将改为 MCP 工具调用或 Skill 编排；execution_model_type → skill / MCP 占位见 skills/SKILL_REGISTRY.yaml、internal/skillmcp/registry.go。
 	hyperparamsJSON, _ = json.Marshal(hyperparams)
 	script := "training/train_text_clf.py"
 	switch modelType {

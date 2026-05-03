@@ -1,0 +1,73 @@
+.llm-settings-form .ant-tabs-nav {
+  margin-bottom: 12px;
+}
+
+.llm-api-pill {
+  border-radius: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  min-width: 52px;
+}
+
+.llm-settings-tab-body {
+  padding-top: 4px;
+}
+
+.llm-settings-tab-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.llm-settings-tab-label-help {
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
+}
+
+/* 标题旁说明入口：不占主流程版面 */
+.llm-settings-help-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  margin: 0;
+  border: none;
+  background: transparent;
+  color: rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.llm-settings-help-trigger:hover {
+  color: #1677ff;
+}
+
+.llm-settings-help-overlay .ant-popover-inner {
+  max-width: min(400px, calc(100vw - 48px));
+}
+
+.llm-settings-help-popover {
+  font-size: 13px;
+  line-height: 1.65;
+  max-height: min(420px, 60vh);
+  overflow-y: auto;
+}
+
+.llm-settings-help-popover p {
+  margin: 0 0 8px;
+}
+
+.llm-settings-help-popover p:last-child {
+  margin-bottom: 0;
+}
+
+[data-theme='dark'] .llm-settings-help-trigger {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+[data-theme='dark'] .llm-settings-help-trigger:hover {
+  color: #69b1ff;
+}

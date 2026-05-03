@@ -45,7 +45,7 @@ func main() {
 	defer db.Close()
 	utils.Info("Connected to PostgreSQL")
 
-	// 确保 2.0 流水线表存在（等价于执行迁移 010）
+	// 绾喕绻?2.0 濞翠焦鎸夌痪鑳€冪€涙ê婀敍鍫㈢搼娴犺渹绨幍褑顢戞潻浣盒?010閿?
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS pipeline_instances (
 			id SERIAL PRIMARY KEY,
@@ -65,7 +65,7 @@ func main() {
 	} else {
 		utils.Info("pipeline_instances table ready")
 	}
-	// 增加 data_agent_prompt 列（若不存在）
+	// 婢х偛濮?data_agent_prompt 閸掓绱欓懟銉ょ瑝鐎涙ê婀敍?
 	if _, err := db.Exec(`ALTER TABLE pipeline_instances ADD COLUMN IF NOT EXISTS data_agent_prompt TEXT`); err != nil {
 		log.Printf("Warning: add data_agent_prompt column: %v", err)
 	}
@@ -87,12 +87,41 @@ func main() {
 	if _, err := db.Exec(`ALTER TABLE pipeline_instances ADD COLUMN IF NOT EXISTS run_spec JSONB`); err != nil {
 		log.Printf("Warning: add pipeline_instances.run_spec: %v", err)
 	}
-	// 013：datasets.derived_from_dataset_id（与 internal/database/migrations/013_add_dataset_derived_from.sql 一致）
+	// 013: datasets.derived_from_dataset_id — see internal/database/migrations/013_add_dataset_derived_from.sql
 	if _, err := db.Exec(`ALTER TABLE datasets ADD COLUMN IF NOT EXISTS derived_from_dataset_id INTEGER REFERENCES datasets (id) ON DELETE SET NULL`); err != nil {
 		log.Printf("Warning: add datasets.derived_from_dataset_id: %v", err)
 	}
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_datasets_derived_from ON datasets (derived_from_dataset_id) WHERE derived_from_dataset_id IS NOT NULL`); err != nil {
 		log.Printf("Warning: add idx_datasets_derived_from: %v", err)
+	}
+	if _, err := db.Exec(`ALTER TABLE datasets ADD COLUMN IF NOT EXISTS ai_analysis JSONB`); err != nil {
+		log.Printf("Warning: add datasets.ai_analysis: %v", err)
+	}
+	if _, err := db.Exec(`ALTER TABLE datasets ADD COLUMN IF NOT EXISTS agent_data_report JSONB`); err != nil {
+		log.Printf("Warning: add datasets.agent_data_report: %v", err)
+	}
+	if _, err := db.Exec(`ALTER TABLE evaluations ADD COLUMN IF NOT EXISTS agent_advice JSONB`); err != nil {
+		log.Printf("Warning: add evaluations.agent_advice: %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS projects (
+		id SERIAL PRIMARY KEY,
+		user_id INTEGER NOT NULL DEFAULT 1,
+		name VARCHAR(255) NOT NULL,
+		description TEXT,
+		session_root VARCHAR(255) NOT NULL UNIQUE,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	)`); err != nil {
+		log.Printf("Warning: ensure projects table: %v", err)
+	}
+	if _, err := db.Exec(`ALTER TABLE training_jobs ADD COLUMN IF NOT EXISTS project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL`); err != nil {
+		log.Printf("Warning: add training_jobs.project_id: %v", err)
+	}
+	if _, err := db.Exec(`ALTER TABLE evaluations ADD COLUMN IF NOT EXISTS project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL`); err != nil {
+		log.Printf("Warning: add evaluations.project_id: %v", err)
+	}
+	if _, err := db.Exec(`ALTER TABLE pipeline_instances ADD COLUMN IF NOT EXISTS project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL`); err != nil {
+		log.Printf("Warning: add pipeline_instances.project_id: %v", err)
 	}
 
 	if _, err := registry.LoadFromDir("."); err != nil {
@@ -129,6 +158,7 @@ func main() {
 		log.Fatalf("Failed to connect to Redis: %v", err)
 	}
 	utils.Info("Connected to Redis")
+	mcpStore := mcp.NewStore(redisClient)
 
 	// Initialize Python executor
 	executor := utils.NewPythonExecutor(cfg.Python.PythonPath, cfg.Python.ScriptsDir)
@@ -144,15 +174,26 @@ func main() {
 	utils.Info("MCP Coordinator initialized")
 
 	// Initialize Handlers (baseDir "." for resolving relative model paths)
-	datasetHandler := handlers.NewDatasetHandler(db, dataAgent, cfg.Storage.UploadDir)
-	trainingHandler := handlers.NewTrainingHandler(db, trainingAgent)
-	evalHandler := handlers.NewEvaluationHandler(db, evalAgent, cfg.Storage.ReportDir)
+	datasetHandler := handlers.NewDatasetHandler(db, dataAgent, cfg.Storage.UploadDir, mcpStore)
+	trainingHandler := handlers.NewTrainingHandler(db, trainingAgent, evalAgent, mcpStore)
+	evalHandler := handlers.NewEvaluationHandler(db, evalAgent, cfg.Storage.ReportDir, mcpStore)
 	modelHandler := handlers.NewModelHandler(db, ".")
 	syncHandler := handlers.NewSyncHandler(db, ".", cfg.Storage.UploadDir)
 	trainingWSHandler := handlers.NewTrainingWSHandler(redisClient)
 	pipelineHandler := handlers.NewPipelineHandler(db, coordinator)
-	agentHandler := handlers.NewAgentHandler(db, &cfg.Agent)
+	envAgentCfg := cfg.Agent
+	llmFile, errLLM := config.LoadLLMSettingsFile(cfg.LLMSettingsPath)
+	if errLLM != nil {
+		log.Printf("Warning: load LLM settings file %s: %v", cfg.LLMSettingsPath, errLLM)
+		llmFile = config.DefaultLLMSettingsFile()
+	}
+	mergedAgent := config.MergeEnvAgentWithLLMFile(envAgentCfg, llmFile)
+	agentStore := config.NewAgentStore(mergedAgent)
+	agentHandler := handlers.NewAgentHandler(db, agentStore, mcpStore)
+	settingsHandler := handlers.NewSettingsHandler(agentStore, cfg.LLMSettingsPath, envAgentCfg)
 	registryHandler := handlers.NewRegistryHandler()
+	mcpHandler := handlers.NewMCPHandler(mcpStore)
+	projectHandler := handlers.NewProjectHandler(db)
 	utils.Info("Handlers initialized")
 
 	// Setup Gin router
@@ -170,6 +211,9 @@ func main() {
 		api.GET("/datasets/:id", datasetHandler.GetDatasetDetail)
 		api.GET("/datasets/:id/preview", datasetHandler.GetDatasetPreview)
 		api.POST("/datasets/:id/analyze", datasetHandler.AnalyzeDataset)
+		api.POST("/agent/datasets/:id/analyze", datasetHandler.AnalyzeDatasetForAgent)
+		api.GET("/agent/datasets/:id/report", datasetHandler.GetDatasetAgentReport)
+		api.POST("/datasets/:id/confirm-analysis", datasetHandler.ConfirmDatasetAnalysis)
 		api.POST("/datasets/:id/retry-clean", datasetHandler.RetryCleanDataset)
 		api.POST("/datasets/:id/split", datasetHandler.SplitDataset)
 		api.PATCH("/datasets/:id", datasetHandler.UpdateDatasetName)
@@ -186,10 +230,11 @@ func main() {
 		api.POST("/training/jobs/:id/cancel", trainingHandler.CancelJob)
 		api.DELETE("/training/jobs/:id", trainingHandler.DeleteJob)
 
-		// Evaluation routes（带 /insight 子路径的需放在 /:id 前，避免被当作 id 匹配）
+		// Evaluation routes
 		api.POST("/evaluations", evalHandler.CreateEvaluation)
 		api.GET("/evaluations", evalHandler.GetEvaluations)
 		api.GET("/evaluations/:id/insight", evalHandler.GetEvaluationInsight)
+		api.GET("/agent/evaluations/:id/advice", evalHandler.GetEvaluationAdvice)
 		api.GET("/evaluations/:id", evalHandler.GetEvaluationResult)
 		api.POST("/evaluations/:id/cancel", evalHandler.CancelEvaluation)
 		api.DELETE("/evaluations/:id", evalHandler.DeleteEvaluation)
@@ -201,16 +246,31 @@ func main() {
 		api.POST("/models/recover-from-disk", modelHandler.RecoverModelsFromDisk)
 		api.GET("/models/:id/download", modelHandler.DownloadModel)
 
-		// 一键同步：从 data/uploads 与 data/models 补全数据集、模型及训练任务记录
+		// 娑撯偓闁款喖鎮撳銉窗娴?data/uploads 娑?data/models 鐞涖儱鍙忛弫鐗堝祦闂嗗棎鈧焦膩閸ㄥ寮风拋顓犵矊娴犺濮熺拋鏉跨秿
 		api.POST("/sync-from-disk", syncHandler.SyncFromDisk)
 
-		// Pipeline routes (2.0 Agent版)
+		// Pipeline routes (2.0 Agent閻?
 		api.POST("/agent/plan", agentHandler.CreatePlan)
 		api.POST("/agent/resolve-intent", agentHandler.ResolveIntent)
+		// LLM settings
+		api.GET("/agent/llm-settings", settingsHandler.GetLLMSettings)
+		api.PUT("/agent/llm-settings", settingsHandler.PutLLMSettings)
+		api.POST("/agent/llm-settings/test-qwen", settingsHandler.PostTestQwenDashScope)
+		api.POST("/agent/llm-settings/test-provider", settingsHandler.PostTestProviderConnectivity)
+		api.GET("/settings/llm", settingsHandler.GetLLMSettings)
+		api.PUT("/settings/llm", settingsHandler.PutLLMSettings)
 		api.GET("/registry", registryHandler.GetBundle)
 		api.POST("/pipelines", pipelineHandler.CreatePipeline)
 		api.GET("/pipelines", pipelineHandler.ListPipelines)
 		api.GET("/pipelines/:id", pipelineHandler.GetPipelineStatus)
+		api.GET("/mcp/session/:session_id", mcpHandler.GetSessionContext)
+		api.GET("/mcp/session/:session_id/events", mcpHandler.GetSessionEvents)
+		api.GET("/mcp/session/:session_id/events/stream", mcpHandler.StreamSessionEvents)
+		api.POST("/mcp/session/:session_id/events/user", mcpHandler.PostUserSessionEvent)
+		api.GET("/projects", projectHandler.ListProjects)
+		api.POST("/projects", projectHandler.CreateProject)
+		api.GET("/projects/:id", projectHandler.GetProject)
+		api.PATCH("/projects/:id", projectHandler.PatchProject)
 	}
 
 	// WebSocket (no /api prefix)
@@ -228,3 +288,4 @@ func main() {
 		log.Fatalf("Failed to start server: %v", err)
 	}
 }
+

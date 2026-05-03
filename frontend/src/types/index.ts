@@ -1,3 +1,39 @@
+export interface DatasetAIAnalysis {
+  domain: 'general' | 'finance' | 'medical' | 'legal' | 'ecommerce' | 'other';
+  task_type:
+    | 'text_classification'
+    | 'text_generation'
+    | 'named_entity_recognition'
+    | 'summarization'
+    | 'sentiment_analysis'
+    | 'other';
+  input_form: 'text' | 'multimodal';
+  label_column: string | null;
+  text_column: string;
+  num_classes: number | null;
+  confidence: number;
+  reasoning: string;
+  confirmed_task_type?: string;
+  confirmed_domain?: string;
+  confirmed_at?: string;
+}
+
+export interface MCPContext {
+  session_id: string;
+  project_id?: number;
+  dataset_id: number;
+  task_type: string;
+  domain: string;
+  label_column: string;
+  text_column: string;
+  num_classes: number;
+  confirmed: boolean;
+  training_job_id?: number;
+  eval_job_id?: number;
+  created_at: string;
+  updated_at: string;
+}
+
 // Dataset types (nullable fields match DB/API: may be null before processing)
 export interface Dataset {
   id: number;
@@ -18,6 +54,7 @@ export interface Dataset {
   file_size: number | null;
   status: 'uploading' | 'processing' | 'ready' | 'error';
   error_message?: string | null;
+  ai_analysis?: DatasetAIAnalysis | null;
   created_at: string;
   updated_at: string;
 }
@@ -26,6 +63,7 @@ export interface Dataset {
 export interface TrainingJob {
   id: number;
   user_id: number;
+  project_id?: number | null;
   /** 可为 null：原数据集已删除时保留任务与模型记录 */
   dataset_id?: number | null;
   name?: string;
@@ -73,6 +111,7 @@ export interface Model {
 // Evaluation types
 export interface Evaluation {
   id: number;
+  project_id?: number | null;
   model_id: number;
   /** 任务名，列表展示用 */
   name?: string;
@@ -95,6 +134,16 @@ export interface ApiResponse<T = any> {
   code: number;
   message: string;
   data?: T;
+}
+
+export interface Project {
+  id: number;
+  user_id: number;
+  name: string;
+  description?: string;
+  session_root: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export type RunCurrentState =

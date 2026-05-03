@@ -1,14 +1,30 @@
 import api from './api';
-import type { ApiResponse, Dataset } from '@/types';
+import type { ApiResponse, Dataset, DatasetAIAnalysis } from '@/types';
+
+export type UploadDatasetResponse = {
+  dataset_id: number;
+  status: string;
+  ai_analysis: DatasetAIAnalysis | null;
+  analysis_error?: string;
+  session_id?: string;
+};
 
 export const datasetService = {
-  // Upload dataset；usage 与当前 Tab 一致（training | test）
-  uploadDataset: async (file: File, name: string, type: string, usage: 'training' | 'test' = 'training'): Promise<ApiResponse> => {
+  uploadDataset: async (
+    file: File,
+    name: string,
+    type: string,
+    usage: 'training' | 'test' = 'training',
+    session_id?: string
+  ): Promise<ApiResponse<UploadDatasetResponse>> => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('name', name);
     formData.append('type', type);
     formData.append('usage', usage);
+    if (session_id) {
+      formData.append('session_id', session_id);
+    }
 
     return api.post('/datasets/upload', formData, {
       headers: {
@@ -17,18 +33,15 @@ export const datasetService = {
     });
   },
 
-  // Get datasets, optionally filtered by usage (training | test)，与「训练数据集/测试数据集」Tab 对应
   getDatasets: async (usage?: 'training' | 'test'): Promise<ApiResponse<{ total: number; datasets: Dataset[] }>> => {
     const params = usage ? { usage } : undefined;
     return api.get('/datasets', { params });
   },
 
-  // Get dataset detail
   getDatasetDetail: async (id: number): Promise<ApiResponse<Dataset>> => {
     return api.get(`/datasets/${id}`);
   },
 
-  // Get dataset data preview (first N rows) for display in table
   getDatasetPreview: async (
     id: number,
     limit?: number
@@ -37,27 +50,39 @@ export const datasetService = {
     return api.get(`/datasets/${id}/preview`, { params });
   },
 
-  // Retry clean for dataset in error state
   retryClean: async (id: number): Promise<ApiResponse<{ status: string }>> => {
     return api.post(`/datasets/${id}/retry-clean`);
   },
 
-  // Delete dataset by id
+  confirmAnalysis: async (
+    id: number,
+    payload: {
+      confirmed_task_type:
+        | 'text_classification'
+        | 'text_generation'
+        | 'named_entity_recognition'
+        | 'summarization'
+        | 'sentiment_analysis'
+        | 'other';
+      confirmed_domain: 'general' | 'finance' | 'medical' | 'legal' | 'ecommerce' | 'other';
+      session_id?: string;
+    }
+  ): Promise<ApiResponse<{ dataset_id: number; confirmed_task_type: string; confirmed_domain: string; session_id?: string }>> => {
+    return api.post(`/datasets/${id}/confirm-analysis`, payload);
+  },
+
   deleteDataset: async (id: number): Promise<ApiResponse> => {
     return api.delete(`/datasets/${id}`);
   },
 
-  // Update dataset name (rename)
   updateName: async (id: number, name: string): Promise<ApiResponse> => {
     return api.patch(`/datasets/${id}`, { name });
   },
 
-  // Bulk delete datasets by ids
   bulkDelete: async (ids: number[]): Promise<ApiResponse<{ deleted?: number }>> => {
     return api.post('/datasets/bulk-delete', { ids });
   },
 
-  // 从已清洗的训练集按比例划分出测试集，生成一条直接可用的测试集记录
   splitDataset: async (
     datasetId: number,
     trainRatio: number
@@ -72,7 +97,6 @@ export const datasetService = {
     });
   },
 
-  // Import dataset from URL；usage 与当前 Tab 一致（training | test）
   importFromUrl: async (params: {
     name: string;
     url: string;

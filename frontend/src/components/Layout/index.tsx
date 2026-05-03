@@ -14,6 +14,7 @@ import {
   RightOutlined,
   RobotOutlined,
 } from '@ant-design/icons';
+import { LlmApiSettingsTrigger } from '@/components/LlmApiSettings';
 import './index.css';
 
 const { Sider, Content } = AntLayout;
@@ -196,7 +197,14 @@ const Layout: React.FC = () => {
         </Sider>
         )}
         <Content className="layout-content">
-          <Outlet />
+          <div className="layout-content-outer">
+            <div className="layout-content-topbar">
+              <LlmApiSettingsTrigger />
+            </div>
+            <div className="layout-content-panel">
+              <Outlet />
+            </div>
+          </div>
         </Content>
       </AntLayout>
     </ConfigProvider>

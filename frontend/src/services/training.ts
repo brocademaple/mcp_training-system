@@ -5,6 +5,7 @@ export const trainingService = {
   // Create training job
   createJob: async (params: {
     name?: string;
+    project_id?: number;
     dataset_id: number;
     model_type: string;
     hyperparams: {
@@ -16,13 +17,14 @@ export const trainingService = {
     };
     /** 可选：提供时服务端据此校验并派生 model_type */
     run_spec?: RunSpec | Record<string, unknown>;
+    session_id?: string;
   }): Promise<ApiResponse> => {
     return api.post('/training/jobs', params);
   },
 
   // Get jobs list
-  getJobs: async (): Promise<ApiResponse<{ jobs: TrainingJob[] }>> => {
-    return api.get('/training/jobs');
+  getJobs: async (project_id?: number): Promise<ApiResponse<{ jobs: TrainingJob[] }>> => {
+    return api.get('/training/jobs', { params: project_id ? { project_id } : undefined });
   },
 
   // Get job status

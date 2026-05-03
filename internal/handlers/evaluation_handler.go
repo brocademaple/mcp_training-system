@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"mcp-training-system/internal/agents"
+	"mcp-training-system/internal/mcp"
 	"mcp-training-system/internal/models"
 	"mcp-training-system/internal/utils"
 )
@@ -19,20 +21,23 @@ type EvaluationHandler struct {
 	db        *sql.DB
 	evalAgent *agents.EvaluationAgent
 	reportDir string
+	mcpStore  *mcp.Store
 }
 
 // NewEvaluationHandler creates a new evaluation handler
-func NewEvaluationHandler(db *sql.DB, evalAgent *agents.EvaluationAgent, reportDir string) *EvaluationHandler {
+func NewEvaluationHandler(db *sql.DB, evalAgent *agents.EvaluationAgent, reportDir string, mcpStore *mcp.Store) *EvaluationHandler {
 	return &EvaluationHandler{
 		db:        db,
 		evalAgent: evalAgent,
 		reportDir: reportDir,
+		mcpStore:  mcpStore,
 	}
 }
 
 // CreateEvaluation creates a new evaluation
 func (h *EvaluationHandler) CreateEvaluation(c *gin.Context) {
 	var req struct {
+		ProjectID     *int   `json:"project_id"`
 		ModelID       int    `json:"model_id"`
 		Name          string `json:"name"`
 		TestDatasetID int    `json:"test_dataset_id"`
@@ -49,6 +54,7 @@ func (h *EvaluationHandler) CreateEvaluation(c *gin.Context) {
 		displayName = fmt.Sprintf("评估-模型%d-%s", req.ModelID, time.Now().Format("20060102-150405"))
 	}
 	placeholder := &models.Evaluation{
+		ProjectID: req.ProjectID,
 		ModelID:  req.ModelID,
 		Name:     displayName,
 		Accuracy: 0, Precision: 0, Recall: 0, F1Score: 0,
@@ -87,7 +93,21 @@ func (h *EvaluationHandler) CreateEvaluation(c *gin.Context) {
 // GetEvaluations returns list of all evaluations
 // GET /evaluations
 func (h *EvaluationHandler) GetEvaluations(c *gin.Context) {
-	list, err := models.GetEvaluationsAll(h.db)
+	projectID := 0
+	if pid := strings.TrimSpace(c.Query("project_id")); pid != "" {
+		if n, err := strconv.Atoi(pid); err == nil && n > 0 {
+			projectID = n
+		}
+	}
+	var (
+		list []*models.Evaluation
+		err  error
+	)
+	if projectID > 0 {
+		list, err = models.GetEvaluationsByProject(h.db, projectID)
+	} else {
+		list, err = models.GetEvaluationsAll(h.db)
+	}
 	if err != nil {
 		c.JSON(500, gin.H{"code": 500, "message": fmt.Sprintf("Failed to get evaluations: %v", err)})
 		return

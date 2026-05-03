@@ -1,0 +1,98 @@
+# Skill 编排 + MCP 工具占位注册表（与代码中的 internal/skillmcp 常量对齐）
+# 后续可将 TrainingAgent 的 Python 直连改为：Skill 选择 → MCP 调用训练工具 → 回写进度/产物
+version: 0
+
+# 当前训练路由键 training_jobs.model_type / TrainingAgent 脚本选择（权威实现见 internal/agents/training_agent.go）
+execution_model_types:
+  text_classification:
+    python_script: training/train_text_clf.py
+    skill_slot: skill.training.text_classification
+    mcp_tool_placeholder: mcp.training.run_text_classification
+  sft_finetune:
+    python_script: training/finetune.py
+    skill_slot: skill.training.sft_finetune
+    mcp_tool_placeholder: mcp.training.run_sft_finetune
+  token_classification:
+    python_script: training/finetune.py
+    skill_slot: skill.training.token_classification
+    mcp_tool_placeholder: mcp.training.run_token_classification
+  dpo_alignment:
+    python_script: training/dpo_train.py
+    skill_slot: skill.training.dpo_alignment
+    mcp_tool_placeholder: mcp.training.run_dpo_alignment
+
+# RunSpec 语义任务族（扩展见 task_registry/index.yaml、internal/models/runspec.go）
+semantic_task_families:
+  - Classification
+  - SequenceTagging
+  - Generation
+  - Extraction
+  - Rewriting
+  - MatchingRanking
+  - InfillingReasoning
+  - Alignment
+
+# 数据集确认任务类型（internal/handlers/dataset_handler.go isAllowedTaskType）
+dataset_confirmed_task_types:
+  - text_classification
+  - text_generation
+  - named_entity_recognition
+  - summarization
+  - sentiment_analysis
+  - other
+
+# MCP 会话与训练衔接占位（internal/mcp/context.go、training_handler CreateJob）
+mcp_session_skill_slots:
+  resolve_intent: skill.agent.resolve_intent
+  task_intent_formalize: skill.agent.task_intent_formalize
+  plan_pipeline: skill.agent.plan_pipeline
+  training_dispatch: skill.training.dispatch_from_context
+
+task_intent_skill:
+  skill_slot: skill.agent.task_intent_formalize
+  markdown: skills/task_intent_skill.md
+  ui_template_fields:
+    - business_goal
+    - task_type
+    - text_column
+    - label_column
+    - sample_scale
+    - success_metric
+    - constraints
+  output_schema:
+    - goal_text
+    - intent_payload
+    - task_spec
+    - dataset_expectation
+    - success_criteria
+
+# Agent 版最小可用能力（workflow + 少量真实 Agent）
+data_agent:
+  skill_slot: skill.agent.data_quality_check
+  deterministic_script: data/analyze_data.py
+  assets_template: data/assets/task_templates.json
+  output_schema:
+    - task_type
+    - confidence
+    - trainability
+    - reliability
+    - issues
+    - summary
+    - recommendations
+    - stats
+
+evaluation_agent:
+  skill_slot: skill.agent.evaluation_advice
+  expected_inputs:
+    - accuracy
+    - precision
+    - recall
+    - f1_score
+    - training_logs
+    - dataset_rows
+  output_schema:
+    - effect
+    - summary
+    - possible_issues
+    - recommendations
+    - signals

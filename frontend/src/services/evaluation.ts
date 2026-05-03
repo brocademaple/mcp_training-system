@@ -3,12 +3,13 @@ import type { ApiResponse, Evaluation } from '@/types';
 
 export const evaluationService = {
   // Get evaluations list
-  getEvaluations: async (): Promise<ApiResponse<{ evaluations: Evaluation[] }>> => {
-    return api.get('/evaluations');
+  getEvaluations: async (project_id?: number): Promise<ApiResponse<{ evaluations: Evaluation[] }>> => {
+    return api.get('/evaluations', { params: project_id ? { project_id } : undefined });
   },
 
   // Create evaluation
   createEvaluation: async (params: {
+    project_id?: number;
     model_id: number;
     name?: string;
     test_dataset_id?: number;
