@@ -260,8 +260,8 @@ const Dashboard: React.FC = () => {
     recs.push({
       id: 'agent',
       priority: 10,
-      title: '一键编排：Agent 版',
-      desc: '在 Agent 画布用自然语言描述目标，由系统自动串联数据、训练与评估步骤。',
+      title: '一键编排：Agent 版（MCP）',
+      desc: '在 Agent 画布描述目标，由 MCP 协调的多 Agent 自动策划并驱动清洗→训练→评估流水线；经典页沉淀的数据可被同一套 API 消费。',
       primary: '切换到 Agent 版',
       path: '/',
       icon: <RobotOutlined style={{ fontSize: 22, color: '#eb2f96' }} />,

@@ -1,6 +1,6 @@
 # Vibe Spec 四示例（最小数据与 RunSpec）
 
-每个子目录包含 `run_spec.yaml` 与少量 `*.jsonl` 样本。在「经典版」创建训练任务时，可将 `run_spec` 字段内容粘贴到 API 或前端「使用 RunSpec」表单；Agent 版在生成计划后会自动附带 `run_spec`。
+每个子目录包含 `run_spec.yaml` 与少量 `*.jsonl` 样本。在「经典版」（数据与任务操作面）创建训练任务时，可将 `run_spec` 字段内容粘贴到 API 或前端「使用 RunSpec」表单；Agent 版在生成计划后会自动附带 `run_spec`。
 
 | 目录 | 语义任务 | 方法 | 领域 |
 |------|-----------|------|------|

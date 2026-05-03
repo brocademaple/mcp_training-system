@@ -6,13 +6,13 @@
     <meta name="color-scheme" content="dark light" />
     <meta
       name="description"
-      content="基于 MCP 的多智能体训练编排平台：数据清洗、训练、评估一键流水线，经典工作台与 Agent 画布双入口，状态可追溯。"
+      content="基于 MCP 的多智能体训练编排：Agent 版负责训练任务策划与流水线执行；经典工作台作为数据与任务操作面，可与 Agent 经 MCP 衔接。状态落库可追溯。"
     />
     <meta property="og:type" content="website" />
     <meta property="og:title" content="MCP Training System — 多智能体一键训练" />
     <meta
       property="og:description"
-      content="数据 → 清洗 → 训练 → 评估可观测编排；Coordinator + 多 Agent；PostgreSQL / Redis 落库。"
+      content="数据 → 清洗 → 训练 → 评估可观测编排；经典侧沉淀数据，Agent 侧 MCP 策划与执行；PostgreSQL / Redis 落库。"
     />
     <meta property="og:url" content="https://brocademaple.github.io/mcp_training-system/" />
     <meta property="og:image" content="https://brocademaple.github.io/mcp_training-system/images/01-workflow.png" />
@@ -20,7 +20,7 @@
     <meta name="twitter:title" content="MCP Training System" />
     <meta
       name="twitter:description"
-      content="多智能体 MCP 编排，一键训练链路，双版本数据互通。"
+      content="MCP 协调多 Agent 自动策划训练；经典工作台为数据面并与 Agent 同源互通。"
     />
     <title>MCP Training System — 多智能体一键训练</title>
     <link rel="stylesheet" href="./style.css" />
@@ -59,7 +59,7 @@
           </div>
           <div class="brand-text">
             <div class="brand-title">MCP Training System</div>
-            <div class="brand-subtitle">多智能体编排 · 一键训练链路</div>
+            <div class="brand-subtitle">经典数据面 · Agent MCP 策划与执行</div>
           </div>
         </div>
         <nav class="topnav" aria-label="主导航">
@@ -107,8 +107,8 @@
               一键跑通数据、训练与评估
             </h1>
             <p class="hero-desc reveal" style="--reveal-delay: 0.12s">
-              以 MCP 协调多智能体，将「上传 / 清洗 → 训练 → 评估」编排为可观测流水线。状态与产物落库，经典工作台与
-              Agent 画布双入口共用同一套数据，适合演示、迭代与毕设答辩展示。
+              以 MCP 协调多智能体，在 Agent 画布侧完成训练任务策划并驱动「清洗 → 训练 → 评估」流水线。经典工作台提供数据集与任务管理的操作面，数据与 Agent 版同源，并可在架构上经
+              MCP 与 Agent 衔接。状态与产物落库，适合演示、迭代与毕设答辩展示。
             </p>
 
             <div class="hero-actions reveal" style="--reveal-delay: 0.18s">
@@ -227,7 +227,7 @@
               <circle cx="332" cy="126" r="4" fill="var(--success)" />
               <circle cx="468" cy="100" r="4" fill="var(--accent-2)" />
             </svg>
-            <figcaption class="section-figure-cap">数据与任务在经典模块与 Agent 流水线之间互通，并落库可追溯。</figcaption>
+            <figcaption class="section-figure-cap">经典侧维护的数据与任务，与 Agent 侧 MCP 编排消费同一数据层，落库可追溯。</figcaption>
           </figure>
 
           <div class="grid grid-3">
@@ -249,7 +249,7 @@
                 </svg>
               </div>
               <h3 class="card-title">训练任务管理</h3>
-              <p class="card-desc">经典工作台查看进度、日志与生命周期操作，训练结束后模型入库可评估。</p>
+              <p class="card-desc">在经典工作台查看进度、日志与生命周期操作，沉淀可供 Agent 策划引用的任务与模型状态。</p>
             </article>
             <article class="card reveal" style="--reveal-delay: 0.12s">
               <div class="card-icon card-icon-svg" aria-hidden="true">
@@ -269,7 +269,7 @@
                 </svg>
               </div>
               <h3 class="card-title">Agent 智能画布</h3>
-              <p class="card-desc">先确认目标与数据，再触发流水线；步骤可视化，贴合「产品向导」体验。</p>
+              <p class="card-desc">任务理解、数据准备与一键流水线；由 MCP 协调多 Agent 自动策划与执行，步骤可视化。</p>
             </article>
             <article class="card reveal" style="--reveal-delay: 0.06s">
               <div class="card-icon card-icon-svg" aria-hidden="true">
@@ -292,7 +292,7 @@
                 </svg>
               </div>
               <h3 class="card-title">双版本同一数据层</h3>
-              <p class="card-desc">Agent 与经典界面共享 PostgreSQL / Redis，切换视图不丢结果。</p>
+              <p class="card-desc">经典操作面与 Agent 编排共享 PostgreSQL / Redis；经典侧数据可作为 Agent 经 MCP 消费的上下文来源。</p>
             </article>
           </div>
         </div>
@@ -304,8 +304,8 @@
             <p class="section-kicker">Flow</p>
             <h2 class="section-title">产品逻辑：从数据到报告</h2>
             <p class="section-desc">
-              下面这条主链路与上方「能力」模块、下方截图编号一一对应；Agent
-              一键流水线是在同一数据层上的另一条编排路径。
+              下面这条主链路与上方「能力」模块、下方截图编号一一对应；经典工作台沉淀数据与任务，Agent
+              一键流水线在同一数据层上由 MCP 驱动编排。
             </p>
           </div>
 
@@ -434,7 +434,7 @@
             </div>
           </div>
 
-          <h3 class="flow-subtitle reveal" style="--reveal-delay: 0.06s">双入口，同一数据层</h3>
+          <h3 class="flow-subtitle reveal" style="--reveal-delay: 0.06s">经典数据面 · Agent MCP 编排</h3>
           <div class="entry-compare reveal" style="--reveal-delay: 0.08s">
             <div class="entry-col">
               <div class="entry-col-visual" aria-hidden="true">
@@ -446,8 +446,8 @@
                   <rect x="24" y="28" width="10" height="2" rx="1" fill="var(--surface-3)" />
                 </svg>
               </div>
-              <div class="entry-col-title">经典工作台</div>
-              <p class="entry-col-desc">按菜单逐步操作：数据集、训练、评估分模块管理，适合细粒度控制与排错。</p>
+              <div class="entry-col-title">经典工作台（数据与操作面）</div>
+              <p class="entry-col-desc">按菜单维护数据集与训练/评估任务，状态写入同一数据库；可作为 Agent 侧经 MCP 衔接的数据来源（外部 MCP Server 可后续接入）。</p>
             </div>
             <div class="entry-col">
               <div class="entry-col-visual" aria-hidden="true">
@@ -460,8 +460,8 @@
                   <path d="M24 14v6M28 28l6 4M20 28l-6 4" stroke="var(--accent-2)" stroke-width="1.3" stroke-linecap="round" />
                 </svg>
               </div>
-              <div class="entry-col-title">Agent 画布</div>
-              <p class="entry-col-desc">向导式步骤与一键流水线，强调「少点击跑通闭环」，与经典版读写同一批表。</p>
+              <div class="entry-col-title">Agent 画布（MCP 策划与执行）</div>
+              <p class="entry-col-desc">向导式步骤与一键流水线，由 Coordinator 经 MCP 消息编排多 Agent，自动串联清洗、训练与评估；读写与经典版同一批表。</p>
             </div>
           </div>
           <p class="flow-footnote reveal" style="--reveal-delay: 0.1s">

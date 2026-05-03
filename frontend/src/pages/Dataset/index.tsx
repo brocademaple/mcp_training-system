@@ -801,7 +801,7 @@ const DatasetManagement: React.FC<DatasetManagementProps> = ({
             showIcon
             style={{ marginBottom: 12 }}
             message="当前为 Agent 工作区视图"
-            description="数据与经典版菜单中的「数据集管理」实时同步，并非另一套数据。此处不离开画布即可上传、导入与维护；需要全屏多页体验时可切换到经典版。"
+            description="与经典版「数据集管理」共用同一数据源：经典侧维护的上传与清洗结果即为 Agent 策划时的数据基础。此处可在画布内完成上传与维护；需要全屏分模块操作时可切换到经典版。"
           />
         )}
         <Tabs

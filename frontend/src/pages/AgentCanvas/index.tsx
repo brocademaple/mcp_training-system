@@ -730,7 +730,7 @@ const AgentCanvas: React.FC = () => {
                 </Button>
               </Space>
               <Typography.Text type="secondary">
-                Agent 版用于任务理解、数据诊断、变量生成和评估解释；经典版用于稳定直连训练流程与快速复现实验。
+                Agent 版：在 MCP 协调下完成意图理解、数据诊断、流水线策划与执行，并生成评估解释。经典版：维护数据集与训练/评估任务的操作面，数据与 Agent 版同源；后续可通过 MCP 服务将经典侧沉淀的数据暴露给 Agent 使用（接入方式可自行设计）。
               </Typography.Text>
             </Space>
           </Card>

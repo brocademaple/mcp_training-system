@@ -1,6 +1,6 @@
 # MCP Training System
 
-> 基于 MCP 的多模型协同训练平台：支持经典版「逐步管理」，也支持 Agent 版「一键流水线（清洗→训练→评估）」。
+> 基于 MCP 的多模型协同训练平台：**Agent 版**以 MCP 协调多 Agent，侧重**训练任务的自动策划与流水线执行**；**经典版**提供数据集、训练与评估的页面/API **操作面**，并与 Agent 侧共用同一套数据——在架构上可作为 **经 MCP 与 Agent 版衔接的数据源**（外部 MCP Server 形态可后续自定义）。
 
 ## 在线演示（GitHub Pages）
 
@@ -10,10 +10,10 @@
 
 ## 产品亮点
 
-- **Agent 版一键流水线**：Coordinator 自动编排 Data Agent / Training Agent / Evaluation Agent，并落库 `pipeline_instances` 以便追溯。
-- **经典版工作台**：仪表盘/数据集/训练/评估互通，适合逐步操作与可控排错。
+- **Agent 版（MCP 策划与编排）**：Coordinator 通过 MCP 风格消息编排 Data / Training / Evaluation Agent，自动串联「清洗→训练→评估」，并落库 `pipeline_instances` 以便追溯。
+- **经典版（数据与操作面）**：仪表盘/数据集/训练/评估分模块管理，适合人工维护数据、直连训练与排错；数据与任务状态可被 Agent 侧消费，设计上预留 **经 MCP 对接 Agent 版** 的叙述空间。
 - **训练与评估闭环**：训练任务进度、日志、评估指标、报告预览/下载贯穿全流程。
-- **双版本数据互通**：同一套 PostgreSQL / Redis，Agent 与经典版生成的结果可互相查看。
+- **同一数据层**：同一套 PostgreSQL / Redis，经典版写入的数据集与任务对 Agent 版可见（反之亦然）。
 - **可扩展的模型训练**：支持分类头训练与 SFT/LoRA/QLoRA/DPO 等（`model_type` 与 **RunSpec** 双轨兼容）。
 - **三层解耦（语义任务 / 训练方法 / 领域）**：注册表见仓库根目录 `task_registry/`、`method_registry/`、`domain_registry/`；API `GET /api/v1/registry` 供前端加载；训练任务可写 `run_spec` JSON（见 `examples/`）。
 - **Agent 意图识别（规则引擎 + 通义可选）**：一句话描述经 `intent_registry/intent_patterns.yaml` 匹配默认任务类型与领域，也可在页面内配置 DashScope 模型 API。
@@ -23,8 +23,8 @@
 ```mermaid
 flowchart TB
   User[User]
-  Classic[经典版 UI]
-  AgentUI[Agent 画布]
+  Classic[经典版 · 数据与操作面]
+  AgentUI[Agent 版 · MCP 策划与编排]
   API[Gin API]
   Reg[Registry YAML]
   Orch[Coordinator FSM]
@@ -71,8 +71,10 @@ flowchart TB
 
 ## 文档索引
 
+- **Agent / MCP 架构说明（双版本定位、独立 MCP 规划思路、训练前分工、进程内 MCP 消息）**：**[docs/AGENT_AND_MCP_GUIDE.md](docs/AGENT_AND_MCP_GUIDE.md)**  
 - **Data Agent / Agent API 说明**：**[docs/DATA_AGENT_API.md](docs/DATA_AGENT_API.md)**  
 - **部署与迁移说明**：**[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**  
+- **开发与文档索引**：**[docs/SPEC_CODING.md](docs/SPEC_CODING.md)**  
 - 说明：`docs/LEARNING.md` 为**本地学习笔记**（默认不入库）；你可自行创建并维护。
 
 ## 快速开始（推荐：本机运行，训练使用本机 GPU）

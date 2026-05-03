@@ -180,6 +180,11 @@ const Layout: React.FC = () => {
                   checkedChildren="Agent"
                   unCheckedChildren="经典"
                   className="sider-version-switch"
+                  title={
+                    versionMode === 'classic'
+                      ? '经典版：数据与任务操作面，可与 Agent 版经 MCP 衔接'
+                      : 'Agent 版：MCP 协调下的训练策划与流水线执行'
+                  }
                 />
                 <div className="sider-version-hint">
                   {versionMode === 'classic' ? '切换到 Agent 版' : '切换到经典版'}
